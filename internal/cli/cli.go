@@ -20,6 +20,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	cmd, rest := args[1], args[2:]
 
 	switch cmd {
+	case "status":
+		return cmdStatus(stdout, stderr)
 	case "init":
 		return cmdInit(rest, stdout, stderr)
 	case "hooks":
@@ -51,6 +53,7 @@ func cmdHelp(w io.Writer) int {
 	fmt.Fprint(w, `warden — configurable git commit/push gate
 
 Usage:
+  warden status                               show gate state, armed hooks, policy
   warden init [--hooks=pre-commit,pre-push]   initialize gate, install hooks
   warden hooks enable|disable <hook>          change hook selection
   warden run <pre-commit|pre-push>            run the gate (invoked by hooks)
