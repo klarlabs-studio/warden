@@ -23,20 +23,22 @@ func (w *fakeWorktree) DiffSince() (string, error) { return w.diffSince, nil }
 func (w *fakeWorktree) Remove() error              { w.removed = true; return nil }
 
 type fakeGit struct {
-	root        string
-	branch      string
-	head        string
-	pushed      bool
-	notesPushed bool
-	wroteNote   bool
-	ffErr       error
-	wt          *fakeWorktree
+	root         string
+	branch       string
+	branchErr    error
+	head         string
+	pushed       bool
+	notesPushed  bool
+	wroteNote    bool
+	ffErr        error
+	mergeBaseErr error
+	wt           *fakeWorktree
 }
 
 func (g *fakeGit) Root() string                     { return g.root }
-func (g *fakeGit) CurrentBranch() (string, error)   { return g.branch, nil }
+func (g *fakeGit) CurrentBranch() (string, error)   { return g.branch, g.branchErr }
 func (g *fakeGit) HeadSHA() (string, error)         { return g.head, nil }
-func (g *fakeGit) MergeBase(string) (string, error) { return "base", nil }
+func (g *fakeGit) MergeBase(string) (string, error) { return "base", g.mergeBaseErr }
 func (g *fakeGit) DiffStats(string) (domain.DiffStats, error) {
 	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2}, nil
 }
@@ -59,9 +61,13 @@ type fakeKernel struct {
 	outcomes map[domain.StepName]domain.StepStatus
 	push     PushFunc
 	approved bool
+	execErr  error
 }
 
 func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutcome, error) {
+	if k.execErr != nil && step != domain.StepPush {
+		return StepOutcome{}, k.execErr
+	}
 	if step == domain.StepPush {
 		return StepOutcome{NeedsApproval: true, SessionID: "s1"}, nil
 	}
@@ -103,9 +109,12 @@ func (a fakeApprover) Approve(context.Context, ApprovalRequest) (Decision, error
 
 // fakeConfigs is an in-memory ConfigRepository, so the runner test depends on
 // no filesystem or YAML parser.
-type fakeConfigs struct{ cfg domain.Config }
+type fakeConfigs struct {
+	cfg domain.Config
+	err error
+}
 
-func (f fakeConfigs) Load() (domain.Config, error) { return f.cfg, nil }
+func (f fakeConfigs) Load() (domain.Config, error) { return f.cfg, f.err }
 
 // --- helpers ----------------------------------------------------------------
 
@@ -204,6 +213,79 @@ func TestRunner_BranchMovedAborts(t *testing.T) {
 	}
 	if git.pushed {
 		t.Error("push must not happen when the branch moved")
+	}
+}
+
+func TestRunner_ErrorPaths(t *testing.T) {
+	base := func() (*fakeGit, *fakeKernel) {
+		return &fakeGit{root: t.TempDir(), branch: "main", head: "sha1",
+				wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}},
+			&fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	}
+
+	t.Run("config load error", func(t *testing.T) {
+		g, k := base()
+		r := newRunner(t, g, k, fakeApprover{}, prePushCfg())
+		r.Configs = fakeConfigs{err: context.Canceled}
+		if _, err := r.Run(context.Background(), domain.PrePush); err == nil {
+			t.Error("expected config load error to propagate")
+		}
+	})
+
+	t.Run("current branch error", func(t *testing.T) {
+		g, k := base()
+		g.branchErr = context.Canceled
+		r := newRunner(t, g, k, fakeApprover{}, prePushCfg())
+		if _, err := r.Run(context.Background(), domain.PrePush); err == nil {
+			t.Error("expected branch error to propagate")
+		}
+	})
+
+	t.Run("unsupported hook", func(t *testing.T) {
+		g, k := base()
+		r := newRunner(t, g, k, fakeApprover{}, prePushCfg())
+		if _, err := r.Run(context.Background(), domain.Hook("commit-msg")); err == nil {
+			t.Error("expected unsupported hook error")
+		}
+	})
+
+	t.Run("kernel execute error", func(t *testing.T) {
+		g, k := base()
+		k.execErr = context.Canceled
+		r := newRunner(t, g, k, fakeApprover{}, prePushCfg())
+		if _, err := r.Run(context.Background(), domain.PrePush); err == nil {
+			t.Error("expected kernel execute error to propagate")
+		}
+	})
+
+	t.Run("merge-base error falls back to empty base", func(t *testing.T) {
+		g, k := base()
+		g.mergeBaseErr = context.Canceled // no upstream; must not fail the run
+		r := newRunner(t, g, k, fakeApprover{approve: true}, prePushCfg())
+		res, err := r.Run(context.Background(), domain.PrePush)
+		if err != nil {
+			t.Fatalf("merge-base error should be tolerated, got %v", err)
+		}
+		if res.Outcome != domain.OutcomePassed {
+			t.Errorf("outcome = %s, want passed", res.Outcome)
+		}
+	})
+}
+
+func TestRunner_DefaultNowAndID(t *testing.T) {
+	// With Now/NewID unset the runner falls back to wall clock + timestamp id.
+	g := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	k := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := &Runner{
+		Git: g, Configs: fakeConfigs{cfg: prePushCfg()}, Kernels: &fakeFactory{kernel: k},
+		Approver: fakeApprover{approve: true}, Settings: Settings{Version: "t", Remote: "origin"},
+	}
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Record == nil || res.Record.RunID == "" || res.Record.Timestamp == "" {
+		t.Error("default NewID/Now must produce a non-empty run id and timestamp")
 	}
 }
 

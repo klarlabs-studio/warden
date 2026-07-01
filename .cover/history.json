@@ -1,0 +1,52 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-07-01T22:54:05.719312+02:00",
+      "overall": 85.5,
+      "domains": {
+        "application": {
+          "name": "application",
+          "percent": 83.5,
+          "min": 80,
+          "status": "PASS"
+        },
+        "cli": {
+          "name": "cli",
+          "percent": 86.3,
+          "min": 80,
+          "status": "PASS"
+        },
+        "domain": {
+          "name": "domain",
+          "percent": 97.6,
+          "min": 80,
+          "status": "PASS"
+        },
+        "infrastructure": {
+          "name": "infrastructure",
+          "percent": 81.5,
+          "min": 80,
+          "status": "PASS"
+        },
+        "mcp": {
+          "name": "mcp",
+          "percent": 80.8,
+          "min": 80,
+          "status": "PASS"
+        },
+        "policy": {
+          "name": "policy",
+          "percent": 93.3,
+          "min": 80,
+          "status": "PASS"
+        },
+        "service": {
+          "name": "service",
+          "percent": 81.3,
+          "min": 80,
+          "status": "PASS"
+        }
+      }
+    }
+  ]
+}
