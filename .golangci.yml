@@ -1,0 +1,42 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - misspell
+    - gocritic
+    - unconvert
+    - unused
+  settings:
+    misspell:
+      locale: US
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        # Warden passes domain value objects (ResolvedPolicy, RunRecord,
+        # StepResult, …) by value on purpose: they are immutable value objects,
+        # and pointer-izing them to save a copy on a rarely-called hook path
+        # would reintroduce the shared-mutation risk the value semantics exist
+        # to prevent. Keep the DDD design; drop this performance micro-opt.
+        - hugeParam
+  exclusions:
+    rules:
+      # Test files exercise error paths and fixtures that trip style checks
+      # without improving the code under test.
+      - path: _test\.go
+        linters:
+          - gocritic
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "entries": [
+    {
+      "fingerprint": "3b14558fd4565ed0b9938dc89160f033df2767dd4a60d2aa5daf65394811ca3b",
+      "rule_id": "DATA-001",
+      "file_path": "e2e/e2e_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "206fc68191d1bc61792651d9b9f3f0ec0c5f33bcad2fc9286095e9c2e2a138a0",
+      "rule_id": "DATA-001",
+      "file_path": "internal/cli/cli_extra_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "48c6a90bfbf18496ca7ff1cef45f6d5dcc0e111081316d6b1409acd7717a2cf0",
+      "rule_id": "DATA-001",
+      "file_path": "internal/cli/cli_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "9171fa28ac4aecc6bab84551c4cd6d67279879bc31b2d1f382a1b4198617fb3e",
+      "rule_id": "DATA-001",
+      "file_path": "internal/infrastructure/git/git_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "d410374806ceb287f15fe2c25a3df7a32c4d3ec6bb0f89bd88699706e73f3c2d",
+      "rule_id": "DATA-001",
+      "file_path": "internal/infrastructure/steps/rebase_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "44a2aeb0acb25e73990de8a0f83f1756b3ef745237ce9fe41599091ccd573296",
+      "rule_id": "DATA-001",
+      "file_path": "internal/service/service_test.go",
+      "severity": "medium",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "8c9a05e7d0c8a05b61d4c18aefce8e2dc91a85c3456246a1c92bea30dbb416d8",
+      "rule_id": "IAC-309",
+      "file_path": ".github/workflows/ci.yml",
+      "severity": "low",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "2301150688926a9041b5e86a4836dc3b8ad110fe60b7d3c0b6d6b80c5293669b",
+      "rule_id": "SEC-659",
+      "file_path": "internal/cli/cli_extra_test.go",
+      "severity": "high",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "e896b893ce03f49b0a28bc1e9e311eebf36e944b2d9bf522eff3bf9c66ea5ea1",
+      "rule_id": "SEC-697",
+      "file_path": "internal/policy/resolve_test.go",
+      "severity": "high",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    },
+    {
+      "fingerprint": "639ab77bc603367a07e1bb261f3da1c1fab4d6ec089a665f04dc26e68e5077e4",
+      "rule_id": "SEC-697",
+      "file_path": "internal/policy/resolve_test.go",
+      "severity": "high",
+      "created_at": "2026-07-01T21:25:34.99869Z"
+    }
+  ]
+}

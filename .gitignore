@@ -2,3 +2,7 @@
 /dist/
 *.out
 *.test
+
+# nox scan output (baseline is committed; raw findings are not)
+/findings.json
+/results.sarif
