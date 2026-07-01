@@ -9,6 +9,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/config"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/hooks"
 	"go.klarlabs.de/warden/internal/infrastructure/kernel"
@@ -22,6 +23,7 @@ const DefaultRemote = "origin"
 // Service is the wired facade. Construct it once per command with New.
 type Service struct {
 	repo    *git.Repo
+	configs *config.Repository
 	runner  *application.Runner
 	version string
 	remote  string
@@ -35,21 +37,22 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 	if err != nil {
 		return nil, err
 	}
-	gitPort := git.NewAdapter(repo)
+	configs := config.NewRepository(repo.Dir)
 	runner := &application.Runner{
-		Git:      gitPort,
+		Git:      git.NewAdapter(repo),
+		Configs:  configs,
 		Kernels:  kernel.NewFactory(steps.Default()),
 		Approver: approver,
-		Config:   application.Config{Version: version, Remote: DefaultRemote},
+		Settings: application.Settings{Version: version, Remote: DefaultRemote},
 	}
-	return &Service{repo: repo, runner: runner, version: version, remote: DefaultRemote}, nil
+	return &Service{repo: repo, configs: configs, runner: runner, version: version, remote: DefaultRemote}, nil
 }
 
 // Repo exposes the underlying repository for git-native surfaces (doctor).
 func (s *Service) Repo() *git.Repo { return s.repo }
 
 // Config loads the repo's parsed .warden.yaml.
-func (s *Service) Config() (domain.Config, error) { return policy.Load(s.repo.Dir) }
+func (s *Service) Config() (domain.Config, error) { return s.configs.Load() }
 
 // Explain resolves the effective policy for a hypothetical invocation, using
 // real diff stats when the invocation matches the current worktree and a
@@ -143,7 +146,7 @@ func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
 	case domain.PrePush:
 		cfg.Hooks.PrePush = enabled
 	}
-	return policy.Save(s.repo.Dir, cfg)
+	return s.configs.Save(cfg)
 }
 
 // InstalledHooks reports which hooks currently have a managed shim.
@@ -193,5 +196,5 @@ func (s *Service) syncHookSelection(cfg domain.Config, selected []domain.Hook) e
 			cfg.Hooks.PrePush = true
 		}
 	}
-	return policy.Save(s.repo.Dir, cfg)
+	return s.configs.Save(cfg)
 }

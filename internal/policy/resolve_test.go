@@ -6,50 +6,51 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
-// specConfig is the example .warden.yaml from spec §5.1.
-const specConfig = `
-agent: auto
-hooks:
-  pre_commit: true
-  pre_push: true
-commands:
-  lint: "golangci-lint run ./..."
-  test: "go test -race ./..."
-steps:
-  pre_commit: [lint]
-  pre_push: [intent, rebase, review, test, document, lint]
-risk:
-  diff_lines_high: 400
-  files_touched_high: 15
-rules:
-  - match:
-      branch: main
-    then:
-      auto_fix: { review: 0, test: 1 }
-      require_approval: true
-  - match:
-      paths: ["security/**", "auth/**"]
-    then:
-      steps: { pre_push: { insert_after: lint, add: [security-scan] } }
-      agent: { review: codex }
-  - match:
-      risk: high
-    then:
-      require_approval: true
-      agent: { review: claude }
-  - match:
-      paths: ["docs/**"]
-    then:
-      steps: { pre_push: { skip: [test] } }
-`
+func boolp(b bool) *bool { return &b }
+
+// specConfig builds the domain Config equivalent to the example .warden.yaml
+// from spec §5.1, as a domain literal so this domain-service test depends only
+// on the domain model — never on the YAML/infrastructure adapter.
+func specConfig() domain.Config {
+	return domain.Config{
+		Agent: "auto",
+		Hooks: domain.HookConfig{PreCommit: true, PrePush: true},
+		Commands: map[string]string{
+			"lint": "golangci-lint run ./...",
+			"test": "go test -race ./...",
+		},
+		Steps: map[string][]domain.StepName{
+			"pre_commit": {"lint"},
+			"pre_push":   {"intent", "rebase", "review", "test", "document", "lint"},
+		},
+		Risk: domain.RiskConfig{DiffLinesHigh: 400, FilesTouchedHigh: 15},
+		Rules: []domain.Rule{
+			{
+				Match: domain.Match{Branch: "main"},
+				Then:  domain.Then{AutoFix: map[domain.StepName]int{"review": 0, "test": 1}, RequireApproval: boolp(true)},
+			},
+			{
+				Match: domain.Match{Paths: []string{"security/**", "auth/**"}},
+				Then: domain.Then{
+					Steps: map[string]domain.StepEdit{"pre_push": {InsertAfter: "lint", Add: []domain.StepName{"security-scan"}}},
+					Agent: map[domain.StepName]string{"review": "codex"},
+				},
+			},
+			{
+				Match: domain.Match{Risk: domain.RiskHigh},
+				Then:  domain.Then{RequireApproval: boolp(true), Agent: map[domain.StepName]string{"review": "claude"}},
+			},
+			{
+				Match: domain.Match{Paths: []string{"docs/**"}},
+				Then:  domain.Then{Steps: map[string]domain.StepEdit{"pre_push": {Skip: []domain.StepName{"test"}}}},
+			},
+		},
+	}
+}
 
 func mustParse(t *testing.T) domain.Config {
 	t.Helper()
-	cfg, err := Parse([]byte(specConfig))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	return cfg
+	return specConfig()
 }
 
 func TestResolve_BaselineNoRules(t *testing.T) {
@@ -153,13 +154,6 @@ func TestResolve_SkipWinsOverAdd(t *testing.T) {
 		if s == "extra" {
 			t.Fatalf("skip should beat add; steps=%v", got.Steps)
 		}
-	}
-}
-
-func TestResolve_UnknownFieldRejected(t *testing.T) {
-	_, err := Parse([]byte("bogus_field: true\n"))
-	if err == nil {
-		t.Fatal("expected error on unknown field")
 	}
 }
 

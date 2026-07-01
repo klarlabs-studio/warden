@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -103,18 +101,22 @@ func (a fakeApprover) Approve(context.Context, ApprovalRequest) (Decision, error
 	return Decision{Approved: a.approve, Principal: "test"}, nil
 }
 
+// fakeConfigs is an in-memory ConfigRepository, so the runner test depends on
+// no filesystem or YAML parser.
+type fakeConfigs struct{ cfg domain.Config }
+
+func (f fakeConfigs) Load() (domain.Config, error) { return f.cfg, nil }
+
 // --- helpers ----------------------------------------------------------------
 
-func newRunner(t *testing.T, git *fakeGit, kernel *fakeKernel, approver Approver, config string) *Runner {
+func newRunner(t *testing.T, git *fakeGit, kernel *fakeKernel, approver Approver, cfg domain.Config) *Runner {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(git.root, ".warden.yaml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	return &Runner{
 		Git:      git,
+		Configs:  fakeConfigs{cfg: cfg},
 		Kernels:  &fakeFactory{kernel: kernel},
 		Approver: approver,
-		Config:   Config{Version: "test", Remote: "origin"},
+		Settings: Settings{Version: "test", Remote: "origin"},
 		Now:      func() time.Time { return time.Unix(0, 0).UTC() },
 		NewID:    func() string { return "run_test" },
 	}
@@ -122,21 +124,36 @@ func newRunner(t *testing.T, git *fakeGit, kernel *fakeKernel, approver Approver
 
 // --- tests ------------------------------------------------------------------
 
-const prePushCfg = `
-hooks: { pre_push: true }
-steps: { pre_push: [test, lint] }
-`
+// prePushCfg is the baseline domain Config: pre-push runs test then lint.
+func prePushCfg() domain.Config {
+	return domain.Config{
+		Hooks: domain.HookConfig{PrePush: true},
+		Steps: map[string][]domain.StepName{"pre_push": {"test", "lint"}},
+	}
+}
+
+// approvalCfg adds a rule that forces the approval gate on branch main.
+func approvalCfg() domain.Config {
+	cfg := prePushCfg()
+	cfg.Rules = []domain.Rule{{
+		Match: domain.Match{Branch: "main"},
+		Then:  domain.Then{RequireApproval: boolPtr(true)},
+	}}
+	return cfg
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg)
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
 
 	res, err := r.Run(context.Background(), domain.PrePush)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Outcome != OutcomePassed {
+	if res.Outcome != domain.OutcomePassed {
 		t.Fatalf("outcome = %s, want passed", res.Outcome)
 	}
 	if !git.pushed {
@@ -156,13 +173,13 @@ func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
 func TestRunner_FailingStepBlocksPush(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{domain.StepLint: domain.StepFail}}
-	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg)
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
 
 	res, err := r.Run(context.Background(), domain.PrePush)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Outcome != OutcomeFailed {
+	if res.Outcome != domain.OutcomeFailed {
 		t.Fatalf("outcome = %s, want failed", res.Outcome)
 	}
 	if git.pushed {
@@ -176,15 +193,13 @@ func TestRunner_FailingStepBlocksPush(t *testing.T) {
 func TestRunner_BranchMovedAborts(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", ffErr: ErrBranchMoved, wt: &fakeWorktree{dir: "/wt", headSHA: "sha2"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-	// Require approval so the gate is a human decision that then hits the moved branch.
-	cfg := prePushCfg + "rules:\n  - match: { branch: main }\n    then: { require_approval: true }\n"
-	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, approvalCfg())
 
 	res, err := r.Run(context.Background(), domain.PrePush)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Outcome != OutcomeAborted {
+	if res.Outcome != domain.OutcomeAborted {
 		t.Fatalf("outcome = %s, want aborted", res.Outcome)
 	}
 	if git.pushed {
@@ -195,14 +210,13 @@ func TestRunner_BranchMovedAborts(t *testing.T) {
 func TestRunner_RejectedGateDoesNotPush(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-	cfg := prePushCfg + "rules:\n  - match: { branch: main }\n    then: { require_approval: true }\n"
-	r := newRunner(t, git, kernel, fakeApprover{approve: false}, cfg)
+	r := newRunner(t, git, kernel, fakeApprover{approve: false}, approvalCfg())
 
 	res, err := r.Run(context.Background(), domain.PrePush)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Outcome != OutcomeRejected {
+	if res.Outcome != domain.OutcomeRejected {
 		t.Fatalf("outcome = %s, want rejected", res.Outcome)
 	}
 	if git.pushed {

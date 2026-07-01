@@ -47,7 +47,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a
 // pass so the commit proceeds; a failure exits non-zero to abort the commit.
 func runPreCommitExit(svc interface{ ApplyFixPatch(string) error }, res application.RunResult, stdout, stderr io.Writer) int {
-	if res.Outcome != application.OutcomePassed {
+	if res.Outcome != domain.OutcomePassed {
 		fmt.Fprintf(stderr, "warden: %s\n", res.Message)
 		return 1
 	}

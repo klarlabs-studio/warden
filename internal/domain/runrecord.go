@@ -23,3 +23,25 @@ type RunRecord struct {
 	EvidenceChainRoot string              `json:"evidence_chain_root"`
 	Evidence          []EvidenceEntry     `json:"evidence"`
 }
+
+// VerifyChain checks the record's evidence links: the recorded root must equal
+// the first entry's hash and every entry's PreviousHash must equal the prior
+// entry's hash. This detects reordering, truncation, or a rewritten root
+// post-push. Full payload recomputation is intentionally out of scope — the
+// note stores link hashes, not step payloads, to stay small (§9 tradeoff).
+// This is domain logic: what makes a provenance chain intact is a property of
+// the record itself, independent of how it was fetched.
+func (r RunRecord) VerifyChain() bool {
+	if len(r.Evidence) == 0 {
+		return r.EvidenceChainRoot == ""
+	}
+	if r.EvidenceChainRoot != r.Evidence[0].Hash {
+		return false
+	}
+	for i := 1; i < len(r.Evidence); i++ {
+		if r.Evidence[i].PreviousHash != r.Evidence[i-1].Hash {
+			return false
+		}
+	}
+	return true
+}

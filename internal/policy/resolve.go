@@ -1,5 +1,8 @@
-// Package policy resolves a parsed .warden.yaml Config into a ResolvedPolicy
-// for a concrete hook invocation, applying rule matching and stacking (§5.2).
+// Package policy is Warden's rule-resolution domain service. It resolves a
+// domain Config into a ResolvedPolicy for a concrete hook invocation, applying
+// rule matching and stacking (§5.2). It is a pure domain service: it depends
+// only on the domain model and the standard library — no I/O, no infrastructure
+// — so config loading and persistence live in infrastructure/config instead.
 package policy
 
 import (

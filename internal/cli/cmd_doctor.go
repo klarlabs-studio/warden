@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"go.klarlabs.de/warden/internal/service"
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // cmdDoctor handles `warden doctor`, auditing which commits since adoption carry
@@ -36,7 +36,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func printDoctor(w io.Writer, r service.DoctorReport) {
+func printDoctor(w io.Writer, r domain.AuditReport) {
 	fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, short(r.Adoption))
 	for _, c := range r.Commits {
 		if c.HasNote {

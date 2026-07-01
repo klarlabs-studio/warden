@@ -6,6 +6,13 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
+// ConfigRepository loads the domain Config for the repository under gate.
+// Infrastructure adapts the on-disk .warden.yaml to it, so the application
+// layer never touches the filesystem or the YAML representation directly.
+type ConfigRepository interface {
+	Load() (domain.Config, error)
+}
+
 // Git is the repository port the Runner drives. Infrastructure adapts the git
 // CLI to it; the Runner never shells out itself. All mutation happens in a
 // Worktree, never the user's live checkout (§4.2/§4.3).
