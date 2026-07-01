@@ -1,0 +1,28 @@
+agent: auto
+hooks:
+    pre_commit: true
+    pre_push: false
+commands:
+    lint: test -z "$(gofmt -l .)" && go vet ./...
+    test: go test ./...
+agent_commands: {}
+steps:
+    pre_commit:
+        - lint
+    pre_push:
+        - rebase
+        - test
+        - lint
+risk:
+    diff_lines_high: 400
+    files_touched_high: 15
+rules:
+    - match:
+        branch: main
+        paths: []
+        risk: high
+      then:
+        auto_fix: {}
+        require_approval: true
+        agent: {}
+        steps: {}
