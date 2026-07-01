@@ -15,12 +15,14 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
-// AgentStep runs a coding-agent binary (claude, codex, …) to perform a
-// reasoning step (intent, review, document) over the worktree. The agent
-// subprocess is flaky by nature — network, rate limits — so it runs behind a
+// AgentStep runs a coding-agent (claude, codex, …) to perform a reasoning step
+// (intent, review, document) over the worktree. It runs the shell command the
+// repo configured for the resolved agent (agent_commands.<name>), expanding
+// {prompt}/{step}/{repo} — Warden never guesses an agent CLI contract. The
+// subprocess is flaky by nature (network, rate limits), so it runs behind a
 // fortify retry + circuit-breaker chain (§4.4 resilience). When no agent is
-// resolved or present on PATH the step is an advisory pass, so a repo can run
-// the deterministic steps (lint/test) without an agent configured.
+// resolved, or no command is configured for it, the step is an advisory pass —
+// a repo can run the deterministic steps (lint/test) without any agent.
 type AgentStep struct {
 	name   domain.StepName
 	prompt string
@@ -34,16 +36,16 @@ func NewAgentStep(name domain.StepName, prompt string) AgentStep {
 func (s AgentStep) Name() domain.StepName { return s.name }
 
 func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
-	bin := resolveAgentBinary(sc.Agent)
-	if bin == "" {
+	command := expandTemplate(sc.AgentCommand, s.prompt, s.name, sc.WorktreeDir)
+	if sc.Agent == "" || strings.TrimSpace(command) == "" {
 		return domain.StepResult{
 			Step:    s.name,
 			Status:  domain.StepPass,
-			Summary: string(s.name) + ": no agent available, skipped",
+			Summary: string(s.name) + ": no agent command configured, skipped",
 		}, nil
 	}
 
-	out, err := s.invoke(ctx, bin, sc)
+	out, err := s.invoke(ctx, command, sc.WorktreeDir)
 	if err != nil {
 		// A genuinely failed agent run (after retries) is reported as a finding
 		// rather than an operational error, so the pipeline decides the outcome.
@@ -52,7 +54,7 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 			Status: domain.StepFail,
 			Findings: []domain.Finding{{
 				Severity: domain.SeverityMedium,
-				Message:  string(s.name) + " agent failed: " + strings.TrimSpace(err.Error()),
+				Message:  string(s.name) + " agent (" + sc.Agent + ") failed: " + strings.TrimSpace(err.Error()),
 			}},
 			Summary: string(s.name) + " failed",
 		}, nil
@@ -60,14 +62,14 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	return domain.StepResult{
 		Step:    s.name,
 		Status:  domain.StepPass,
-		Summary: string(s.name) + " (" + bin + ") passed: " + firstLine(out),
+		Summary: string(s.name) + " (" + sc.Agent + ") passed: " + firstLine(out),
 	}, nil
 }
 
-// invoke runs the agent through a resilience chain: bounded retries with
+// invoke runs the agent command through a resilience chain: bounded retries with
 // exponential backoff, tripping a circuit breaker on repeated failure so a
 // wedged agent fails fast instead of stalling every step.
-func (s AgentStep) invoke(ctx context.Context, bin string, sc application.StepContext) (string, error) {
+func (s AgentStep) invoke(ctx context.Context, command, workdir string) (string, error) {
 	cb := circuitbreaker.New[string](circuitbreaker.Config{
 		MaxRequests: 1,
 		Timeout:     30 * time.Second,
@@ -85,30 +87,34 @@ func (s AgentStep) invoke(ctx context.Context, bin string, sc application.StepCo
 	chain := middleware.New[string]().WithCircuitBreaker(cb).WithRetry(r)
 
 	return chain.Execute(ctx, func(ctx context.Context) (string, error) {
-		// Convention: the agent binary receives the step id and instruction as
-		// args and the worktree as its cwd; a zero exit means the step passed.
-		cmd := exec.CommandContext(ctx, bin, "warden-step", string(s.name), s.prompt)
-		cmd.Dir = sc.WorktreeDir
+		// Run through the shell so the configured command may use the agent's
+		// own flags and pipes; a zero exit means the step passed.
+		cmd := exec.CommandContext(ctx, "sh", "-c", command)
+		cmd.Dir = workdir
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	})
 }
 
-// resolveAgentBinary maps a resolved agent selection to an executable on PATH.
-// Only an explicitly configured agent name runs: "auto" (or empty) yields "" so
-// the step is an advisory skip. Auto-probing PATH for a coding-agent binary and
-// invoking it would be unsafe — the binary's real CLI contract is unknown, so a
-// bare-name match could run something with arguments it never understood. A
-// repo opts into agent steps by naming the agent (and the warden-step
-// convention it honors) in policy.
-func resolveAgentBinary(agent string) string {
-	if agent == "" || agent == "auto" {
+// expandTemplate substitutes {prompt}, {step}, and {repo} placeholders in an
+// agent command template. The prompt is single-quote-escaped so an instruction
+// containing shell metacharacters can't break out of the command.
+func expandTemplate(tmpl, prompt string, step domain.StepName, repo string) string {
+	if tmpl == "" {
 		return ""
 	}
-	if p, err := exec.LookPath(agent); err == nil {
-		return p
-	}
-	return ""
+	replacer := strings.NewReplacer(
+		"{prompt}", shellQuote(prompt),
+		"{step}", string(step),
+		"{repo}", shellQuote(repo),
+	)
+	return replacer.Replace(tmpl)
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes, so
+// it is safe to interpolate into an `sh -c` command.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func firstLine(s string) string {

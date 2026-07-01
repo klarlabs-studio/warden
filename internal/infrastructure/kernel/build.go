@@ -57,6 +57,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		}
 		stepSC := sc
 		stepSC.Agent = policy.AgentFor(name)
+		stepSC.AgentCommand = policy.AgentCommands[stepSC.Agent]
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
 
 		def, err := newStepAction(name)

@@ -18,8 +18,11 @@ type StepContext struct {
 	WorktreeDir string
 	Branch      string
 	Diff        domain.DiffStats
-	// Agent is the resolved coding-agent binary for this step ("" = default).
+	// Agent is the resolved coding-agent name for this step ("" = none).
 	Agent string
+	// AgentCommand is the resolved shell command template for Agent, or "" when
+	// no command is configured (the step then advisory-skips).
+	AgentCommand string
 	// AutoFixBudget bounds how many times an auto-fixing step may retry its
 	// fix within a single run (§5.4, resolved from auto_fix.<step>).
 	AutoFixBudget int

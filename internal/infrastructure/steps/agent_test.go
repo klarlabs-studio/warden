@@ -2,8 +2,6 @@ package steps
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -12,141 +10,95 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
-func TestResolveAgentBinary(t *testing.T) {
-	t.Run("empty is an advisory skip", func(t *testing.T) {
-		if got := resolveAgentBinary(""); got != "" {
-			t.Errorf("resolveAgentBinary(\"\") = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("auto is an advisory skip", func(t *testing.T) {
-		if got := resolveAgentBinary("auto"); got != "" {
-			t.Errorf("resolveAgentBinary(\"auto\") = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("explicit name not on PATH yields empty", func(t *testing.T) {
-		if got := resolveAgentBinary("warden-nonexistent-agent-xyz"); got != "" {
-			t.Errorf("resolveAgentBinary(missing) = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("explicit name on PATH resolves to an absolute path", func(t *testing.T) {
-		// Create a real executable in a temp dir and put it on PATH so the
-		// resolution exercises the LookPath success branch without depending on
-		// any particular system binary being present.
-		bin := writeExecutable(t)
-		dir := filepath.Dir(bin)
-		name := filepath.Base(bin)
-		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-		got := resolveAgentBinary(name)
-		if got == "" {
-			t.Fatalf("resolveAgentBinary(%q) = \"\", want a resolved path", name)
-		}
-		if !filepath.IsAbs(got) {
-			t.Errorf("resolveAgentBinary(%q) = %q, want an absolute path", name, got)
-		}
-	})
+func TestExpandTemplate(t *testing.T) {
+	if got := expandTemplate("", "p", domain.StepReview, "/r"); got != "" {
+		t.Errorf("empty template should stay empty, got %q", got)
+	}
+	got := expandTemplate("claude -p {prompt} --step {step} --cwd {repo}", "hi", domain.StepReview, "/wt")
+	// {step} is not quoted; {prompt}/{repo} are single-quoted.
+	if !strings.Contains(got, "--step review") {
+		t.Errorf("{step} not substituted: %q", got)
+	}
+	if !strings.Contains(got, "'hi'") || !strings.Contains(got, "'/wt'") {
+		t.Errorf("{prompt}/{repo} not quoted-substituted: %q", got)
+	}
 }
 
-// writeExecutable writes a tiny executable script to a temp dir and returns its
-// path. On Windows exec.LookPath needs a .bat/.exe extension, so skip there —
-// the resolution branch is identical across platforms.
-func writeExecutable(t *testing.T) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("temp executable script assumes a POSIX shell")
+func TestShellQuote(t *testing.T) {
+	// A prompt with a single quote must not break out of the quoting.
+	q := shellQuote("it's a test")
+	if q != `'it'\''s a test'` {
+		t.Errorf("shellQuote escaping wrong: %s", q)
 	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "warden-fake-agent")
-	script := "#!/bin/sh\necho ok\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
-func TestAgentStepRunNoAgent(t *testing.T) {
+func TestAgentStep_NoCommandSkips(t *testing.T) {
 	ctx := context.Background()
-	step := NewAgentStep(domain.StepReview, "review this change")
+	step := NewAgentStep(domain.StepReview, "review this")
 
-	for _, agent := range []string{"", "auto"} {
-		res, err := step.Run(ctx, application.StepContext{WorktreeDir: t.TempDir(), Agent: agent})
+	cases := []application.StepContext{
+		{WorktreeDir: t.TempDir()},                                    // no agent
+		{WorktreeDir: t.TempDir(), Agent: "claude"},                   // agent but no command
+		{WorktreeDir: t.TempDir(), Agent: "", AgentCommand: "echo x"}, // command but no agent
+	}
+	for i, sc := range cases {
+		res, err := step.Run(ctx, sc)
 		if err != nil {
-			t.Fatalf("Run(agent=%q): %v", agent, err)
+			t.Fatalf("case %d: %v", i, err)
 		}
-		if res.Status != domain.StepPass {
-			t.Errorf("Run(agent=%q) status = %s, want pass", agent, res.Status)
+		if res.Status != domain.StepPass || !strings.Contains(res.Summary, "skipped") {
+			t.Errorf("case %d: expected advisory skip, got %+v", i, res)
 		}
-		if res.Step != domain.StepReview {
-			t.Errorf("Run(agent=%q) step = %s, want review", agent, res.Step)
-		}
-		if !strings.Contains(res.Summary, "skipped") {
-			t.Errorf("Run(agent=%q) summary = %q, want it to mention skipped", agent, res.Summary)
+		if len(res.Findings) != 0 {
+			t.Errorf("case %d: skipped step should have no findings", i)
 		}
 	}
 }
 
-func TestAgentStepRunUnavailableAgentSkips(t *testing.T) {
-	// An explicitly named agent that isn't installed resolves to "" and so is an
-	// advisory pass — the pipeline still runs the deterministic steps.
-	ctx := context.Background()
-	step := NewAgentStep(domain.StepIntent, "summarize intent")
-
-	res, err := step.Run(ctx, application.StepContext{
-		WorktreeDir: t.TempDir(),
-		Agent:       "warden-nonexistent-agent-xyz",
+func TestAgentStep_ConfiguredCommandPasses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("command assumes a POSIX shell")
+	}
+	step := NewAgentStep(domain.StepIntent, "summarize")
+	res, err := step.Run(context.Background(), application.StepContext{
+		WorktreeDir:  t.TempDir(),
+		Agent:        "faux",
+		AgentCommand: "echo reviewed {prompt}",
 	})
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatal(err)
 	}
 	if res.Status != domain.StepPass {
 		t.Errorf("status = %s, want pass", res.Status)
 	}
-	if len(res.Findings) != 0 {
-		t.Errorf("findings = %+v, want none for a skipped step", res.Findings)
+	if !strings.Contains(res.Summary, "faux") || !strings.Contains(res.Summary, "reviewed") {
+		t.Errorf("summary should carry agent + output: %q", res.Summary)
 	}
 }
 
-func TestAgentStepRunAgentFails(t *testing.T) {
-	// A resolvable agent binary that always exits non-zero drives the resilience
-	// chain (retry + circuit breaker) to exhaustion, so the step reports a
-	// finding rather than an operational error. This is a fake binary, not a real
-	// coding agent.
+func TestAgentStep_FailingCommandReportsFinding(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fake agent script assumes a POSIX shell")
+		t.Skip("command assumes a POSIX shell")
 	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "warden-failing-agent")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho boom >&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	step := NewAgentStep(domain.StepReview, "review this change")
+	step := NewAgentStep(domain.StepReview, "review")
 	res, err := step.Run(context.Background(), application.StepContext{
-		WorktreeDir: t.TempDir(),
-		Agent:       "warden-failing-agent",
+		WorktreeDir:  t.TempDir(),
+		Agent:        "faux",
+		AgentCommand: "echo boom >&2; exit 1",
 	})
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatal(err)
 	}
 	if res.Status != domain.StepFail {
 		t.Errorf("status = %s, want fail", res.Status)
 	}
-	if len(res.Findings) != 1 {
-		t.Fatalf("findings = %+v, want exactly one", res.Findings)
-	}
-	if res.Findings[0].Severity != domain.SeverityMedium {
-		t.Errorf("severity = %s, want medium", res.Findings[0].Severity)
+	if len(res.Findings) != 1 || res.Findings[0].Severity != domain.SeverityMedium {
+		t.Errorf("expected one medium finding, got %+v", res.Findings)
 	}
 }
 
 func TestFirstLine(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
+	cases := []struct{ in, want string }{
 		{"", ""},
 		{"single line", "single line"},
 		{"first\nsecond\nthird", "first"},
@@ -161,8 +113,7 @@ func TestFirstLine(t *testing.T) {
 }
 
 func TestAgentStepName(t *testing.T) {
-	step := NewAgentStep(domain.StepDocument, "check docs")
-	if step.Name() != domain.StepDocument {
-		t.Errorf("Name() = %s, want document", step.Name())
+	if NewAgentStep(domain.StepDocument, "x").Name() != domain.StepDocument {
+		t.Error("Name mismatch")
 	}
 }

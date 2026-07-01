@@ -71,6 +71,7 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 
 	resolved := policy.Resolve(cfg, policy.Input{Hook: hook, Branch: branch, Paths: diff.Paths, Risk: risk})
 	resolved.Commands = cfg.Commands
+	resolved.AgentCommands = cfg.AgentCommands
 
 	switch hook {
 	case domain.PreCommit:

@@ -12,6 +12,14 @@ type Config struct {
 	// Commands maps a built-in shell-backed step to the command it runs.
 	Commands map[string]string `yaml:"commands"`
 
+	// AgentCommands maps an agent name (as selected by `agent` or a rule's
+	// per-step agent override) to the shell command that invokes it. The
+	// template may reference {prompt}, {step}, and {repo}; e.g.
+	//   agent_commands: { claude: "claude -p {prompt}", codex: "codex exec {prompt}" }
+	// An agent step with no matching command is an advisory skip — Warden never
+	// guesses a coding-agent CLI contract.
+	AgentCommands map[string]string `yaml:"agent_commands"`
+
 	// Steps lists the step subset per hook. Keys are "pre_commit"/"pre_push".
 	Steps map[string][]StepName `yaml:"steps"`
 

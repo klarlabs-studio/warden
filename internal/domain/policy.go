@@ -16,6 +16,8 @@ type ResolvedPolicy struct {
 	RequireApproval bool
 	// Commands maps a shell-backed step to its command line.
 	Commands map[string]string
+	// AgentCommands maps an agent name to its invocation command template.
+	AgentCommands map[string]string
 	// Risk is the classification that drove rule matching.
 	Risk Risk
 	// MatchedRules names the rules that contributed, in declaration order,
