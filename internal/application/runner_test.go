@@ -1,0 +1,211 @@
+package application
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"go.klarlabs.de/warden/internal/domain"
+)
+
+// --- fakes ------------------------------------------------------------------
+
+type fakeWorktree struct {
+	dir       string
+	headSHA   string
+	removed   bool
+	diffSince string
+}
+
+func (w *fakeWorktree) Dir() string                { return w.dir }
+func (w *fakeWorktree) HeadSHA() (string, error)   { return w.headSHA, nil }
+func (w *fakeWorktree) DiffSince() (string, error) { return w.diffSince, nil }
+func (w *fakeWorktree) Remove() error              { w.removed = true; return nil }
+
+type fakeGit struct {
+	root        string
+	branch      string
+	head        string
+	pushed      bool
+	notesPushed bool
+	wroteNote   bool
+	ffErr       error
+	wt          *fakeWorktree
+}
+
+func (g *fakeGit) Root() string                     { return g.root }
+func (g *fakeGit) CurrentBranch() (string, error)   { return g.branch, nil }
+func (g *fakeGit) HeadSHA() (string, error)         { return g.head, nil }
+func (g *fakeGit) MergeBase(string) (string, error) { return "base", nil }
+func (g *fakeGit) DiffStats(string) (domain.DiffStats, error) {
+	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2}, nil
+}
+func (g *fakeGit) StagedDiffStats() (domain.DiffStats, error) { return domain.DiffStats{}, nil }
+func (g *fakeGit) SeedWorktreeFromHead() (Worktree, error)    { return g.wt, nil }
+func (g *fakeGit) SeedWorktreeFromBranch(string) (Worktree, error) {
+	return g.wt, nil
+}
+func (g *fakeGit) FastForwardTo(_, _, _ string) error { return g.ffErr }
+func (g *fakeGit) Push(string, string) error          { g.pushed = true; return nil }
+func (g *fakeGit) WriteNote(string, domain.RunRecord) error {
+	g.wroteNote = true
+	return nil
+}
+func (g *fakeGit) PushNotes(string) error { g.notesPushed = true; return nil }
+
+// fakeKernel scripts step outcomes and invokes the push closure on approval,
+// mirroring how the real axi-backed kernel resolves the write-external gate.
+type fakeKernel struct {
+	outcomes map[domain.StepName]domain.StepStatus
+	push     PushFunc
+	approved bool
+}
+
+func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutcome, error) {
+	if step == domain.StepPush {
+		return StepOutcome{NeedsApproval: true, SessionID: "s1"}, nil
+	}
+	status := k.outcomes[step]
+	if status == "" {
+		status = domain.StepPass
+	}
+	return StepOutcome{Result: domain.StepResult{Step: step, Status: status}}, nil
+}
+
+func (k *fakeKernel) Approve(ctx context.Context, _, _, _ string) (StepOutcome, error) {
+	k.approved = true
+	if _, err := k.push(ctx); err != nil {
+		return StepOutcome{}, err
+	}
+	return StepOutcome{Result: domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}}, nil
+}
+
+func (k *fakeKernel) Reject(context.Context, string, string, string) (StepOutcome, error) {
+	return StepOutcome{}, nil
+}
+
+func (k *fakeKernel) Finalize() (string, []domain.EvidenceEntry, error) {
+	return "root", []domain.EvidenceEntry{{Kind: "x", Hash: "root"}}, nil
+}
+
+type fakeFactory struct{ kernel *fakeKernel }
+
+func (f *fakeFactory) New(_ domain.ResolvedPolicy, _ StepContext, _ *[]domain.Finding, push PushFunc) (Kernel, error) {
+	f.kernel.push = push
+	return f.kernel, nil
+}
+
+type fakeApprover struct{ approve bool }
+
+func (a fakeApprover) Approve(context.Context, ApprovalRequest) (Decision, error) {
+	return Decision{Approved: a.approve, Principal: "test"}, nil
+}
+
+// --- helpers ----------------------------------------------------------------
+
+func newRunner(t *testing.T, git *fakeGit, kernel *fakeKernel, approver Approver, config string) *Runner {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(git.root, ".warden.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return &Runner{
+		Git:      git,
+		Kernels:  &fakeFactory{kernel: kernel},
+		Approver: approver,
+		Config:   Config{Version: "test", Remote: "origin"},
+		Now:      func() time.Time { return time.Unix(0, 0).UTC() },
+		NewID:    func() string { return "run_test" },
+	}
+}
+
+// --- tests ------------------------------------------------------------------
+
+const prePushCfg = `
+hooks: { pre_push: true }
+steps: { pre_push: [test, lint] }
+`
+
+func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if !git.pushed {
+		t.Error("expected push to origin")
+	}
+	if !git.wroteNote || !git.notesPushed {
+		t.Error("expected provenance note written and pushed")
+	}
+	if res.Record == nil || res.Record.EvidenceChainRoot != "root" {
+		t.Error("expected a run record with the evidence chain root")
+	}
+	if !git.wt.removed {
+		t.Error("worktree must be torn down")
+	}
+}
+
+func TestRunner_FailingStepBlocksPush(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{domain.StepLint: domain.StepFail}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeFailed {
+		t.Fatalf("outcome = %s, want failed", res.Outcome)
+	}
+	if git.pushed {
+		t.Error("a failing step must block the push")
+	}
+	if kernel.approved {
+		t.Error("push gate must not be reached when a step fails")
+	}
+}
+
+func TestRunner_BranchMovedAborts(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", ffErr: ErrBranchMoved, wt: &fakeWorktree{dir: "/wt", headSHA: "sha2"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	// Require approval so the gate is a human decision that then hits the moved branch.
+	cfg := prePushCfg + "rules:\n  - match: { branch: main }\n    then: { require_approval: true }\n"
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeAborted {
+		t.Fatalf("outcome = %s, want aborted", res.Outcome)
+	}
+	if git.pushed {
+		t.Error("push must not happen when the branch moved")
+	}
+}
+
+func TestRunner_RejectedGateDoesNotPush(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg + "rules:\n  - match: { branch: main }\n    then: { require_approval: true }\n"
+	r := newRunner(t, git, kernel, fakeApprover{approve: false}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeRejected {
+		t.Fatalf("outcome = %s, want rejected", res.Outcome)
+	}
+	if git.pushed {
+		t.Error("a declined gate must not push")
+	}
+}
