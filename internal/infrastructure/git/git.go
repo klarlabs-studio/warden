@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -49,10 +50,48 @@ func Open(path string) (*Repo, error) {
 // gitCmd builds a git command rooted at dir. It centralizes construction so
 // callers that need to stream stdin (e.g. git apply) share the same setup as
 // run.
+// hookEnvVars are the per-invocation git environment variables git sets for a
+// hook process. Warden runs its own git subcommands (worktree add, diff, push)
+// from inside those hooks; if they inherit these, git operates against the
+// hook's temp index/dir instead of the repo — e.g. `git worktree add` fails
+// with "index file open failed". Scrubbing them makes Warden's git behave as if
+// run fresh at the terminal, which is the whole point of shelling out to git.
+var hookEnvVars = []string{
+	"GIT_INDEX_FILE",
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_PREFIX",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_COMMON_DIR",
+	"GIT_INDEX_VERSION",
+}
+
 func gitCmd(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = scrubHookEnv(os.Environ())
 	return cmd
+}
+
+// scrubHookEnv removes the git hook environment variables so a subcommand
+// resolves the repository from cmd.Dir, not from an inherited GIT_DIR.
+func scrubHookEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !isHookEnvVar(kv) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func isHookEnvVar(kv string) bool {
+	for _, k := range hookEnvVars {
+		if strings.HasPrefix(kv, k+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // run executes git with args in r.Dir and returns trimmed stdout. On failure it
