@@ -110,7 +110,7 @@ func NewServer(f Facade, version string) *mcp.Server {
 	return srv
 }
 
-// Serve starts the server on stdio and blocks until ctx is cancelled.
+// Serve starts the server on stdio and blocks until ctx is canceled.
 func Serve(ctx context.Context, f Facade, version string) error {
 	return mcp.ServeStdio(ctx, NewServer(f, version))
 }
@@ -136,7 +136,7 @@ func handleStepsList(f Facade) (StepsListOutput, error) {
 }
 
 // handleRunTrigger parses the hook and runs the pipeline, propagating context so
-// the run honours cancellation from the MCP client.
+// the run honors cancellation from the MCP client.
 func handleRunTrigger(ctx context.Context, f Facade, in RunTriggerInput) (RunSummary, error) {
 	hook, err := domain.ParseHook(in.Hook)
 	if err != nil {

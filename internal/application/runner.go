@@ -67,7 +67,7 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
-	risk := domain.RiskConfig(cfg.Risk).Thresholds().Classify(diff)
+	risk := cfg.Risk.Thresholds().Classify(diff)
 
 	resolved := policy.Resolve(cfg, policy.Input{Hook: hook, Branch: branch, Paths: diff.Paths, Risk: risk})
 	resolved.Commands = cfg.Commands

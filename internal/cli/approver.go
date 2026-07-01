@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/mattn/go-isatty"
-	"os"
 
 	"go.klarlabs.de/warden/internal/application"
 )

@@ -12,7 +12,7 @@ import (
 // synchronous (the run completes inside the hook, there is no daemon to attach
 // to), so the bare command instead reports the gate's current state: which
 // hooks are armed, the resolved default policy, and the adoption point. This is
-// the honest analogue given the architecture — a status view, not a live attach.
+// the honest analog given the architecture — a status view, not a live attach.
 func cmdStatus(stdout, stderr io.Writer) int {
 	svc, err := newService(autoApprover{})
 	if err != nil {

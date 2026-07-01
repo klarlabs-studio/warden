@@ -164,13 +164,14 @@ func insertAfter(steps []domain.StepName, step, after domain.StepName) []domain.
 		return append(steps, step)
 	}
 	for i, s := range steps {
-		if s == after {
-			out := make([]domain.StepName, 0, len(steps)+1)
-			out = append(out, steps[:i+1]...)
-			out = append(out, step)
-			out = append(out, steps[i+1:]...)
-			return out
+		if s != after {
+			continue
 		}
+		out := make([]domain.StepName, 0, len(steps)+1)
+		out = append(out, steps[:i+1]...)
+		out = append(out, step)
+		out = append(out, steps[i+1:]...)
+		return out
 	}
 	return append(steps, step)
 }

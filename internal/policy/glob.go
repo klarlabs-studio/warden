@@ -76,7 +76,7 @@ func matchSegments(pat, name []string) bool {
 // segmentGlob matches a single path segment with "*" and "?" wildcards that do
 // not cross "/". Recursive backtracking on "*".
 func segmentGlob(p, t string) bool {
-	for len(p) > 0 {
+	for p != "" {
 		switch p[0] {
 		case '*':
 			// Collapse consecutive "*".
@@ -93,16 +93,16 @@ func segmentGlob(p, t string) bool {
 			}
 			return false
 		case '?':
-			if len(t) == 0 {
+			if t == "" {
 				return false
 			}
 			p, t = p[1:], t[1:]
 		default:
-			if len(t) == 0 || t[0] != p[0] {
+			if t == "" || t[0] != p[0] {
 				return false
 			}
 			p, t = p[1:], t[1:]
 		}
 	}
-	return len(t) == 0
+	return t == ""
 }

@@ -68,7 +68,7 @@ func (s *Service) Explain(hook domain.Hook, branch string, paths []string) (doma
 		}
 	}
 	diff := domain.DiffStats{Paths: paths}
-	risk := domain.RiskConfig(cfg.Risk).Thresholds().Classify(diff)
+	risk := cfg.Risk.Thresholds().Classify(diff)
 	resolved := policy.Resolve(cfg, policy.Input{Hook: hook, Branch: branch, Paths: paths, Risk: risk})
 	resolved.Commands = cfg.Commands
 	return resolved, nil
@@ -170,7 +170,6 @@ func (s *Service) writeStarterConfig(selected []domain.Hook) error {
 		// Still sync the hook selection so it reflects what was installed.
 		return s.syncHookSelection(existing, selected)
 	}
-	defaults := domain.DefaultRiskThresholds()
 	cfg := domain.Config{
 		Agent:    "auto",
 		Commands: map[string]string{"lint": "", "test": ""},
@@ -178,10 +177,7 @@ func (s *Service) writeStarterConfig(selected []domain.Hook) error {
 			domain.PreCommit.ConfigKey(): domain.DefaultSteps(domain.PreCommit),
 			domain.PrePush.ConfigKey():   domain.DefaultSteps(domain.PrePush),
 		},
-		Risk: domain.RiskConfig{
-			DiffLinesHigh:    defaults.DiffLinesHigh,
-			FilesTouchedHigh: defaults.FilesTouchedHigh,
-		},
+		Risk: domain.RiskConfig(domain.DefaultRiskThresholds()),
 	}
 	return s.syncHookSelection(cfg, selected)
 }

@@ -159,24 +159,24 @@ func (r *Repo) StagedPaths() (domain.DiffStats, error) {
 	return domain.DiffStats{FilesTouched: len(paths), Paths: paths}, nil
 }
 
-// parseNumstat turns `git diff --numstat` output into DiffStats. Binary files
-// report "-" for both columns; they count toward files touched but not lines.
+// parseNumstat turns `git diff --numstat` output into DiffStats. Each line is
+// tab-separated as "added<TAB>deleted<TAB>path", so splitting on tabs preserves
+// spaces in the path and takes the path column directly — no fragile index math
+// that could slice on a not-found substring. Binary files report "-" for both
+// columns; they count toward files touched but not lines.
 func parseNumstat(out string) domain.DiffStats {
 	var stats domain.DiffStats
 	for _, line := range splitLines(out) {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		cols := strings.SplitN(line, "\t", 3)
+		if len(cols) < 3 {
 			continue
 		}
 		stats.FilesTouched++
-		// The path is everything after the two count columns, preserving
-		// spaces in filenames.
-		path := strings.TrimSpace(line[strings.Index(line, fields[2]):])
-		stats.Paths = append(stats.Paths, path)
-		if added, err := strconv.Atoi(fields[0]); err == nil {
+		stats.Paths = append(stats.Paths, strings.TrimSpace(cols[2]))
+		if added, err := strconv.Atoi(cols[0]); err == nil {
 			stats.LinesChanged += added
 		}
-		if deleted, err := strconv.Atoi(fields[1]); err == nil {
+		if deleted, err := strconv.Atoi(cols[1]); err == nil {
 			stats.LinesChanged += deleted
 		}
 	}
