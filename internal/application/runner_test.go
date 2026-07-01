@@ -207,6 +207,55 @@ func TestRunner_BranchMovedAborts(t *testing.T) {
 	}
 }
 
+func preCommitCfg() domain.Config {
+	return domain.Config{
+		Hooks: domain.HookConfig{PreCommit: true},
+		Steps: map[string][]domain.StepName{"pre_commit": {"lint"}},
+	}
+}
+
+func TestRunner_PreCommitPassCapturesFixPatch(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1",
+		wt: &fakeWorktree{dir: "/wt", headSHA: "sha1", diffSince: "PATCH"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, preCommitCfg())
+
+	res, err := r.Run(context.Background(), domain.PreCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if res.FixPatch != "PATCH" {
+		t.Errorf("fix patch = %q, want PATCH", res.FixPatch)
+	}
+	if git.pushed {
+		t.Error("pre-commit must never push")
+	}
+	if !git.wt.removed {
+		t.Error("worktree must be torn down")
+	}
+}
+
+func TestRunner_PreCommitFailReportsNoPatch(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1",
+		wt: &fakeWorktree{dir: "/wt", headSHA: "sha1", diffSince: "PATCH"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{domain.StepLint: domain.StepFail}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, preCommitCfg())
+
+	res, err := r.Run(context.Background(), domain.PreCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomeFailed {
+		t.Fatalf("outcome = %s, want failed", res.Outcome)
+	}
+	if res.FixPatch != "" {
+		t.Error("a failed pre-commit must not offer a fix patch")
+	}
+}
+
 func TestRunner_RejectedGateDoesNotPush(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}

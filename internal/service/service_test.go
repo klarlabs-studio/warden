@@ -148,3 +148,71 @@ func TestService_DoctorRequiresAdoption(t *testing.T) {
 		t.Error("doctor without adoption should error")
 	}
 }
+
+func TestService_StepsListReflectsConfig(t *testing.T) {
+	dir := initRepo(t)
+	svc, _ := New(dir, "test", autoApprover{})
+	if err := svc.configs.Save(domain.Config{
+		Steps: map[string][]domain.StepName{
+			"pre_commit": {"lint"},
+			"pre_push":   {"review", "test", "custom-scan"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pre, push, err := svc.StepsList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pre) != 1 || pre[0] != domain.StepLint {
+		t.Errorf("pre-commit steps = %v", pre)
+	}
+	if len(push) != 3 || push[2] != "custom-scan" {
+		t.Errorf("pre-push steps = %v", push)
+	}
+}
+
+func TestService_StepsListFallsBackToDefaults(t *testing.T) {
+	dir := initRepo(t)
+	svc, _ := New(dir, "test", autoApprover{})
+	pre, push, err := svc.StepsList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pre) != 1 || len(push) != 6 {
+		t.Errorf("defaults expected, got pre=%v push=%v", pre, push)
+	}
+}
+
+func TestService_ApplyFixPatchEmptyIsNoOp(t *testing.T) {
+	dir := initRepo(t)
+	svc, _ := New(dir, "test", autoApprover{})
+	if err := svc.ApplyFixPatch(""); err != nil {
+		t.Errorf("empty patch should be a no-op, got %v", err)
+	}
+}
+
+func TestService_DoctorFlagsUnverifiedCommit(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Init(domain.AllHooks); err != nil {
+		t.Fatal(err)
+	}
+	// A commit made after adoption with no note is unverified.
+	cmd := exec.Command("git", "commit", "--allow-empty", "--no-verify", "-m", "post-adoption")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v: %s", err, out)
+	}
+	report, err := svc.Doctor("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, unverified := report.Counts()
+	if unverified != 1 {
+		t.Errorf("expected 1 unverified commit, got %d (%d commits)", unverified, len(report.Commits))
+	}
+}
