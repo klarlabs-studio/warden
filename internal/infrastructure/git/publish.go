@@ -46,7 +46,7 @@ func (r *Repo) ApplyPatch(patch string) error {
 	if !strings.HasSuffix(patch, "\n") {
 		patch += "\n"
 	}
-	cmd := gitCmd(r.Dir, "apply")
+	cmd := gitCmd(r.Dir, "apply", "--binary")
 	cmd.Stdin = strings.NewReader(patch)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

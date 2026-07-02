@@ -21,7 +21,9 @@ type Worktree struct {
 func (r *Repo) CreateWorktreeFromHead() (*Worktree, error) {
 	// Capture the staged diff (raw — a patch must be byte-exact) before creating
 	// the worktree so a failure to stage leaves no orphan directory behind.
-	stagedDiff, err := runRawIn(r.Dir, "diff", "--cached")
+	// --binary emits full index lines + base85 hunks so a staged binary file
+	// (an image, a built asset) round-trips through the apply below.
+	stagedDiff, err := runRawIn(r.Dir, "diff", "--cached", "--binary")
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func (w *Worktree) applyAndStage(diff string) error {
 	if !strings.HasSuffix(diff, "\n") {
 		diff += "\n"
 	}
-	cmd := gitCmd(w.Dir, "apply", "--index", "--whitespace=nowarn", "-")
+	cmd := gitCmd(w.Dir, "apply", "--index", "--binary", "--whitespace=nowarn", "-")
 	cmd.Stdin = strings.NewReader(diff)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git apply (seed worktree): %w: %s", err, string(out))
@@ -93,8 +95,9 @@ func (w *Worktree) HeadSHA() (string, error) {
 // pre-commit hook can re-apply just the fixes to the developer's live tree
 // without re-touching what they had already staged (§4.2).
 func (w *Worktree) DiffSince() (string, error) {
-	// Raw — the returned patch is re-applied to the live tree byte-for-byte.
-	return runRawIn(w.Dir, "diff")
+	// Raw — the returned patch is re-applied to the live tree byte-for-byte;
+	// --binary so an auto-fix that touches a binary file re-applies cleanly.
+	return runRawIn(w.Dir, "diff", "--binary")
 }
 
 // block removal.
