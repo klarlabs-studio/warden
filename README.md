@@ -127,6 +127,7 @@ steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
 parallel: true   # default — run independent checks concurrently (see below)
+timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 rules:
@@ -180,6 +181,7 @@ and the approval gate answered inline.
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
+| `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |

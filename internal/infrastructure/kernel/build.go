@@ -70,6 +70,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		stepSC.Agent = policy.AgentFor(name)
 		stepSC.AgentCommand = domain.ResolveAgentCommand(policy.AgentCommands, stepSC.Agent)
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
+		stepSC.Timeout = policy.TimeoutFor(name)
 		// Bind the run's step-tagged output sink into this step's OnOutput, so a
 		// step streams live output without knowing its own name plumbing.
 		if sc.Stream != nil {

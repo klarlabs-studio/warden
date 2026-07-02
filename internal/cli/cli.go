@@ -44,6 +44,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdVerify(rest, stdout, stderr)
 	case "key":
 		return cmdKey(rest, stdout, stderr)
+	case "why":
+		return cmdWhy(rest, stdout, stderr)
 	case "axi":
 		return cmdAxi(rest, stdout, stderr)
 	case "mcp":
@@ -75,6 +77,7 @@ Usage:
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
   warden verify [--commit c] [--key fp] [--quiet]  exit 0 if the commit is warden-validated (CI skip)
   warden key show                             print this machine's provenance signing key
+  warden why [commit]                         explain what the gate did for a commit (from its note)
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio
   warden version

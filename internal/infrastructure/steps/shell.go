@@ -48,14 +48,25 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	cmd.Env = stepEnv(sc)
 	out, err := runCaptured(cmd, sc)
 	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		summary := string(s.name) + " failed"
+		// A cancelled context means the per-step timeout fired: say so plainly,
+		// since the command's own output rarely explains a kill.
+		if ctx.Err() == context.DeadlineExceeded {
+			msg = string(s.name) + " timed out after " + sc.Timeout.String()
+			if out := strings.TrimSpace(string(out)); out != "" {
+				msg += "\n" + out
+			}
+			summary = string(s.name) + " timed out"
+		}
 		return domain.StepResult{
 			Step:   s.name,
 			Status: domain.StepFail,
 			Findings: []domain.Finding{{
 				Severity: domain.SeverityHigh,
-				Message:  strings.TrimSpace(string(out)),
+				Message:  msg,
 			}},
-			Summary: string(s.name) + " failed",
+			Summary: summary,
 		}, nil
 	}
 	return domain.StepResult{

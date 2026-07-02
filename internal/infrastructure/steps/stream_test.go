@@ -3,7 +3,9 @@ package steps
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
@@ -80,5 +82,25 @@ func TestShellStep_NoOutputSink_StillRuns(t *testing.T) {
 	}
 	if res.Status != domain.StepPass {
 		t.Errorf("status = %s, want pass", res.Status)
+	}
+}
+
+func TestShellStep_TimeoutReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	sc := application.StepContext{
+		WorktreeDir: t.TempDir(),
+		Commands:    map[string]string{"test": "sleep 5"},
+		Timeout:     50 * time.Millisecond, // used only for the message string
+	}
+	res, err := NewShellStep(domain.StepTest, "test").Run(ctx, sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.StepFail {
+		t.Fatalf("status = %s, want fail on timeout", res.Status)
+	}
+	if len(res.Findings) != 1 || !strings.Contains(res.Findings[0].Message, "timed out") {
+		t.Errorf("expected a timeout finding, got %+v", res.Findings)
 	}
 }

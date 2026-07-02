@@ -12,6 +12,11 @@ type Config struct {
 	// Commands maps a built-in shell-backed step to the command it runs.
 	Commands map[string]string `yaml:"commands"`
 
+	// Timeouts maps a step to a max duration (e.g. "5m", "30s"). A step that
+	// exceeds it is killed and fails, so a wedged test or agent can't hang the
+	// gate. Unset or unparseable = no timeout.
+	Timeouts map[string]string `yaml:"timeouts"`
+
 	// AgentCommands maps an agent name (as selected by `agent` or a rule's
 	// per-step agent override) to the shell command that invokes it. The
 	// template may reference {prompt}, {step}, and {repo}; e.g.

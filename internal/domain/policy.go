@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // ResolvedPolicy is the effective configuration for one hook invocation, after
 // all matching rules have been stacked (§5.2). It is what the kernel layer
 // translates into axi-go Action registrations and budgets (§5.4), and what
@@ -27,6 +29,16 @@ type ResolvedPolicy struct {
 	// When true, consecutive steps that don't write to the worktree run at once,
 	// so the gate is as slow as the slowest check, not their sum (§4.4).
 	Parallel bool
+	// Timeouts maps a step to its max run duration; zero means no limit.
+	Timeouts map[StepName]time.Duration
+}
+
+// TimeoutFor returns the configured timeout for a step, or 0 (no limit).
+func (p ResolvedPolicy) TimeoutFor(s StepName) time.Duration {
+	if p.Timeouts == nil {
+		return 0
+	}
+	return p.Timeouts[s]
 }
 
 // Batches groups the resolved steps into an ordered execution schedule. A batch

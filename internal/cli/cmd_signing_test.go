@@ -97,3 +97,54 @@ func TestPrintVerify_SignatureBranches(t *testing.T) {
 		})
 	}
 }
+
+func TestWhy_NoNote(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	gitRepo(t)
+
+	// A commit with no warden note explains itself as un-gated, exit 1.
+	code, out, _ := run("why")
+	if code != 1 {
+		t.Errorf("why on an un-gated commit should exit 1, got %d", code)
+	}
+	if !strings.Contains(out, "no warden note") {
+		t.Errorf("expected the no-note explanation, got %q", out)
+	}
+}
+
+func TestWhy_WithNote(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	dir := gitRepo(t)
+
+	// Write a provenance note on HEAD via a service, then explain it.
+	svc, err := service.New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := domain.RunRecord{
+		RunID:             "run_why",
+		WardenVersion:     "9.9.9",
+		StepsRun:          []domain.StepName{"test", "lint"},
+		Agent:             map[domain.StepName]string{"test": "claude"},
+		MatchedRules:      []string{"main"},
+		EvidenceChainRoot: "h0",
+		Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
+	}
+	if err := svc.Repo().WriteNote(head, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out, errb := run("why")
+	if code != 0 {
+		t.Fatalf("why with a note: code=%d err=%q", code, errb)
+	}
+	for _, want := range []string{"run_why", "9.9.9", "test(agent=claude)", "lint", "main", "chain intact", "unsigned"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("why output missing %q:\n%s", want, out)
+		}
+	}
+}

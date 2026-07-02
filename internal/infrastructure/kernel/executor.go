@@ -50,6 +50,14 @@ func (e stepExecutor) Execute(ctx context.Context, _ any, _ axidomain.Capability
 		e.priorsMu.Unlock()
 	}
 
+	// A per-step timeout cancels the step's context so a wedged command/agent
+	// can't hang the whole gate.
+	if sc.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, sc.Timeout)
+		defer cancel()
+	}
+
 	res, err := e.step.Run(ctx, sc)
 	if err != nil {
 		return axidomain.ExecutionResult{}, nil, fmt.Errorf("step %s: %w", e.step.Name(), err)

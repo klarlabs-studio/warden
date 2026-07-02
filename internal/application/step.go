@@ -6,6 +6,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
@@ -26,6 +27,9 @@ type StepContext struct {
 	// AutoFixBudget bounds how many times an auto-fixing step may retry its
 	// fix within a single run (§5.4, resolved from auto_fix.<step>).
 	AutoFixBudget int
+	// Timeout is the step's max run duration; zero means no limit. A step that
+	// exceeds it has its context cancelled and fails.
+	Timeout time.Duration
 	// Commands maps shell-backed steps (lint, test) to their command line.
 	Commands map[string]string
 	// PriorFindings carries findings from earlier steps, so a step can react

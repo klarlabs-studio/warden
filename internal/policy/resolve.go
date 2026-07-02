@@ -8,9 +8,26 @@ package policy
 import (
 	"maps"
 	"sort"
+	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
+
+// parseTimeouts converts the config's step→duration-string map into parsed
+// durations, silently dropping any unparseable entry (a bad value means no
+// limit rather than a hard config error, matching the rest of resolution).
+func parseTimeouts(raw map[string]string) map[domain.StepName]time.Duration {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[domain.StepName]time.Duration, len(raw))
+	for step, s := range raw {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			out[domain.StepName(step)] = d
+		}
+	}
+	return out
+}
 
 // Input carries everything a resolution needs about the invocation under
 // evaluation.
@@ -45,6 +62,7 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		Risk:     in.Risk,
 		// Concurrent step execution is on unless explicitly disabled.
 		Parallel: cfg.Parallel == nil || *cfg.Parallel,
+		Timeouts: parseTimeouts(cfg.Timeouts),
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)

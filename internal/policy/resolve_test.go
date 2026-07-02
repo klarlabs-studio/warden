@@ -2,6 +2,7 @@ package policy
 
 import (
 	"testing"
+	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
@@ -166,5 +167,23 @@ func assertSteps(t *testing.T, got, want []domain.StepName) {
 		if got[i] != want[i] {
 			t.Fatalf("steps = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestResolve_ParsesTimeouts(t *testing.T) {
+	cfg := domain.Config{
+		Steps:    map[string][]domain.StepName{"pre_push": {"test", "lint"}},
+		Timeouts: map[string]string{"test": "5m", "lint": "bogus", "review": "0s"},
+	}
+	res := Resolve(cfg, Input{Hook: domain.PrePush})
+	if got := res.TimeoutFor("test"); got != 5*time.Minute {
+		t.Errorf("test timeout = %s, want 5m", got)
+	}
+	// Unparseable and non-positive values are dropped (no limit).
+	if got := res.TimeoutFor("lint"); got != 0 {
+		t.Errorf("bogus timeout must be dropped, got %s", got)
+	}
+	if got := res.TimeoutFor("review"); got != 0 {
+		t.Errorf("zero timeout must be dropped, got %s", got)
 	}
 }
