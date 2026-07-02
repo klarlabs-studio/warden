@@ -10,6 +10,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/attach"
 	"go.klarlabs.de/warden/internal/infrastructure/notify"
 	"go.klarlabs.de/warden/internal/tui"
 )
@@ -40,10 +41,21 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// A non-interactive pre-push still publishes to the attach socket, so another
+	// terminal can watch it with `warden attach`.
+	var server *attach.Server
+	if hook == domain.PrePush {
+		if server = startAttach(svc); server != nil {
+			svc.SetObserver(server)
+			defer server.Close()
+		}
+	}
+
 	res, err := svc.Run(context.Background(), hook)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	server.PublishDone(res) // nil-safe; broadcasts the outcome to any watcher
 	printFindings(stdout, res.Findings)
 
 	switch hook {
@@ -52,6 +64,16 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	default:
 		return runPrePushExit(res, stdout)
 	}
+}
+
+// startAttach opens the per-repo attach socket for a run, or returns nil when it
+// can't (attach is best-effort and never fails a run).
+func startAttach(svc interface{ GitDir() (string, error) }) *attach.Server {
+	gitDir, err := svc.GitDir()
+	if err != nil {
+		return nil
+	}
+	return attach.NewServer(gitDir)
 }
 
 // isInteractive reports whether both stdin and stdout are a terminal, so the
@@ -71,10 +93,15 @@ func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	res, err := tui.Run(svc, br, hook, resolved.Steps)
+	// Publish to the attach socket alongside the local TUI, so the run can also
+	// be watched from another terminal.
+	server := startAttach(svc)
+	defer server.Close()
+	res, err := tui.Run(svc, br, hook, resolved.Steps, server)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	server.PublishDone(res)
 	maybeNotify(svc, res)
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.

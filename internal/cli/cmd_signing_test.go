@@ -234,3 +234,11 @@ func TestWatch_NoCommandsExits1(t *testing.T) {
 		t.Errorf("watch with no commands: code=%d err=%q", code, errb)
 	}
 }
+
+func TestAttach_NoLiveRun(t *testing.T) {
+	gitRepo(t)
+	code, _, errb := run("attach")
+	if code != 1 || !strings.Contains(errb, "no live run") {
+		t.Errorf("attach with no run: code=%d err=%q", code, errb)
+	}
+}

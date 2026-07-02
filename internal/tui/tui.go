@@ -75,9 +75,10 @@ type Runner interface {
 // Run drives an interactive gate run under a live TUI and returns the outcome.
 // approverInto wires the bridge as the run's approver: the caller builds the
 // service with it. steps is the resolved step order used to seed the display.
-func Run(svc Runner, br application.Approver, hook domain.Hook, steps []domain.StepName, opts ...tea.ProgramOption) (application.RunResult, error) {
+func Run(svc Runner, br application.Approver, hook domain.Hook, steps []domain.StepName, extra application.Observer, opts ...tea.ProgramOption) (application.RunResult, error) {
 	b := br.(*bridge)
-	svc.SetObserver(b)
+	// Fan step events to the TUI and any extra observer (e.g. the attach socket).
+	svc.SetObserver(application.MultiObserver{b, extra})
 
 	m := newModel(hook, steps, b.events)
 	go func() {

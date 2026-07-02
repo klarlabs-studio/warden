@@ -181,6 +181,19 @@ type StepEvent struct {
 	Line   string
 }
 
+// MultiObserver fans step events to several observers (e.g. the local TUI plus
+// the attach socket). Nil elements are skipped.
+type MultiObserver []Observer
+
+// OnStep forwards to each non-nil observer.
+func (m MultiObserver) OnStep(e StepEvent) {
+	for _, o := range m {
+		if o != nil {
+			o.OnStep(e)
+		}
+	}
+}
+
 // Observer receives step lifecycle events during a run. It is optional; a nil
 // Observer means no progress reporting (the non-interactive path). During a
 // parallel batch, OnStep may be called concurrently from several goroutines, so

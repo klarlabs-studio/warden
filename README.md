@@ -202,6 +202,8 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
+| `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
+| `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |

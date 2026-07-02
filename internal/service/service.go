@@ -112,6 +112,10 @@ func (s *Service) CIStatus(ctx context.Context, branch string) (domain.CIStatus,
 // Repo exposes the underlying repository for git-native surfaces (doctor).
 func (s *Service) Repo() *git.Repo { return s.repo }
 
+// GitDir returns the repository's git directory, where per-run state (the attach
+// socket, the step cache) lives.
+func (s *Service) GitDir() (string, error) { return s.repo.GitDir() }
+
 // Config loads the repo's parsed .warden.yaml.
 func (s *Service) Config() (domain.Config, error) { return s.configs.Load() }
 
