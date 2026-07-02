@@ -41,8 +41,13 @@ func (r *Repo) ApplyPatch(patch string) error {
 	if strings.TrimSpace(patch) == "" {
 		return nil
 	}
+	// The patch is captured raw and already ends with a newline; only append one
+	// if a caller passed a trimmed patch, never double it.
+	if !strings.HasSuffix(patch, "\n") {
+		patch += "\n"
+	}
 	cmd := gitCmd(r.Dir, "apply")
-	cmd.Stdin = strings.NewReader(patch + "\n")
+	cmd.Stdin = strings.NewReader(patch)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

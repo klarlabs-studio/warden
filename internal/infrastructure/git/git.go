@@ -101,9 +101,18 @@ func (r *Repo) run(args ...string) (string, error) {
 	return runIn(r.Dir, args...)
 }
 
-// runIn executes git with args in dir. It backs both Repo.run and worktree
-// operations that must target a worktree directory rather than the repo root.
+// runIn executes git with args in dir and returns trimmed stdout. It backs both
+// Repo.run and worktree operations that must target a worktree directory rather
+// than the repo root.
 func runIn(dir string, args ...string) (string, error) {
+	out, err := runRawIn(dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+// runRawIn is runIn without trimming. Diffs and patches must be applied
+// byte-for-byte — trimming can strip a hunk's trailing blank context lines,
+// corrupting the patch's line counts — so diff/patch capture uses this.
+func runRawIn(dir string, args ...string) (string, error) {
 	cmd := gitCmd(dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -111,7 +120,7 @@ func runIn(dir string, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // ResolveSHA resolves a ref (branch, tag, HEAD, short sha) to a full commit SHA.

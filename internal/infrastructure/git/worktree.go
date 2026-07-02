@@ -19,9 +19,9 @@ type Worktree struct {
 // produce. Seeding the index from a staged diff lets steps see the pending
 // change without touching the real working tree (§4.2).
 func (r *Repo) CreateWorktreeFromHead() (*Worktree, error) {
-	// Capture the staged diff before creating the worktree so a failure to
-	// stage leaves no orphan directory behind.
-	stagedDiff, err := r.run("diff", "--cached")
+	// Capture the staged diff (raw — a patch must be byte-exact) before creating
+	// the worktree so a failure to stage leaves no orphan directory behind.
+	stagedDiff, err := runRawIn(r.Dir, "diff", "--cached")
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,8 @@ func (w *Worktree) HeadSHA() (string, error) {
 // pre-commit hook can re-apply just the fixes to the developer's live tree
 // without re-touching what they had already staged (§4.2).
 func (w *Worktree) DiffSince() (string, error) {
-	return runIn(w.Dir, "diff")
+	// Raw — the returned patch is re-applied to the live tree byte-for-byte.
+	return runRawIn(w.Dir, "diff")
 }
 
 // block removal.
