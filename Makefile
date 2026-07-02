@@ -3,7 +3,7 @@
 
 .PHONY: ci fmt fmt-check vet lint gocritic sec vuln test cover e2e build install clean
 
-ci: fmt-check vet lint gocritic sec vuln test e2e ## Run the full pipeline in order
+ci: fmt-check vet lint gocritic sec vuln test cover e2e ## Run the full pipeline in order
 
 fmt: ## Format the tree
 	gofmt -w .
