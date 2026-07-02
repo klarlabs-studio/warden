@@ -1,6 +1,6 @@
 {
   "name": "@klarlabs-studio/warden",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance. Wraps the warden binary so `npx @klarlabs-studio/warden` works with no Go toolchain.",
   "bin": {
     "warden": "bin/warden.cjs"
@@ -10,12 +10,12 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@klarlabs-studio/warden-linux-x64": "0.7.0",
-    "@klarlabs-studio/warden-linux-arm64": "0.7.0",
-    "@klarlabs-studio/warden-darwin-x64": "0.7.0",
-    "@klarlabs-studio/warden-darwin-arm64": "0.7.0",
-    "@klarlabs-studio/warden-win32-x64": "0.7.0",
-    "@klarlabs-studio/warden-win32-arm64": "0.7.0"
+    "@klarlabs-studio/warden-linux-x64": "0.7.1",
+    "@klarlabs-studio/warden-linux-arm64": "0.7.1",
+    "@klarlabs-studio/warden-darwin-x64": "0.7.1",
+    "@klarlabs-studio/warden-darwin-arm64": "0.7.1",
+    "@klarlabs-studio/warden-win32-x64": "0.7.1",
+    "@klarlabs-studio/warden-win32-arm64": "0.7.1"
   },
   "keywords": [
     "git",

@@ -4,6 +4,16 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-07-03
+
+### Fixed
+
+- **Staged binary files no longer fail the pre-commit gate.** Worktree seeding
+  captured and applied the staged diff without `--binary`, so committing an
+  image or other binary asset failed with "cannot apply binary patch … without
+  full index line". The staged-diff and auto-fix diffs now round-trip binaries
+  (`git diff --binary` / `git apply --binary`).
+
 ## [0.7.0] — 2026-07-02
 
 ### Added
@@ -33,5 +43,6 @@ All notable changes to warden are documented here. The format follows
   config-driven custom steps and agents, interactive TUI, `warden import`,
   and multi-channel install (go / npx / brew / curl).
 
+[0.7.1]: https://github.com/klarlabs-studio/warden/releases/tag/v0.7.1
 [0.7.0]: https://github.com/klarlabs-studio/warden/releases/tag/v0.7.0
 [0.6.0]: https://github.com/klarlabs-studio/warden/releases/tag/v0.6.0
