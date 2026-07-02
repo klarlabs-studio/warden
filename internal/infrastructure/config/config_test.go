@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -48,6 +50,62 @@ func TestRepository_LoadMissingIsZero(t *testing.T) {
 	}
 	if len(cfg.Rules) != 0 || cfg.Agent != "" {
 		t.Errorf("missing config should be zero, got %+v", cfg)
+	}
+}
+
+func TestRepository_SetHooksPreservesComments(t *testing.T) {
+	dir := t.TempDir()
+	const original = `# Warden policy — keep this comment
+agent: auto
+hooks:
+  pre_commit: true
+  pre_push: false
+commands:
+  lint: "golangci-lint run ./..." # quality gate
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+
+	// Comments survive.
+	if !strings.Contains(got, "keep this comment") || !strings.Contains(got, "quality gate") {
+		t.Errorf("SetHooks stripped comments:\n%s", got)
+	}
+	// The toggled value took effect and the rest is intact.
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Hooks.PrePush || !cfg.Hooks.PreCommit {
+		t.Errorf("hooks not updated: %+v", cfg.Hooks)
+	}
+	if cfg.Commands["lint"] != "golangci-lint run ./..." {
+		t.Errorf("SetHooks disturbed commands: %q", cfg.Commands["lint"])
+	}
+}
+
+func TestRepository_SetHooksCreatesWhenAbsent(t *testing.T) {
+	repo := NewRepository(t.TempDir())
+	if err := repo.SetHooks(domain.HookConfig{PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Hooks.PrePush {
+		t.Errorf("SetHooks on missing file should create it, got %+v", cfg.Hooks)
 	}
 }
 

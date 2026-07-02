@@ -146,7 +146,9 @@ func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
 	case domain.PrePush:
 		cfg.Hooks.PrePush = enabled
 	}
-	return s.configs.Save(cfg)
+	// Update only the hooks selection in place so the user's config comments
+	// and formatting survive the toggle.
+	return s.configs.SetHooks(cfg.Hooks)
 }
 
 // InstalledHooks reports which hooks currently have a managed shim.
@@ -158,20 +160,24 @@ func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
 	return hooks.Installed(gitDir), nil
 }
 
-// writeStarterConfig writes a minimal .warden.yaml only when none exists, so a
-// second init never clobbers a tuned policy.
+// writeStarterConfig writes a minimal .warden.yaml only when none exists. On an
+// existing (user-authored) config it never rewrites the file — it updates just
+// the hooks selection in place, preserving comments and formatting.
 func (s *Service) writeStarterConfig(selected []domain.Hook) error {
 	existing, err := s.Config()
 	if err != nil {
 		return err
 	}
-	// A config with any rules or commands is considered user-authored.
+	hookCfg := hookConfigFrom(selected)
+
+	// A config with any rules or commands is considered user-authored: leave it
+	// untouched except for the hooks selection.
 	if len(existing.Rules) > 0 || len(existing.Commands) > 0 {
-		// Still sync the hook selection so it reflects what was installed.
-		return s.syncHookSelection(existing, selected)
+		return s.configs.SetHooks(hookCfg)
 	}
 	cfg := domain.Config{
 		Agent:    "auto",
+		Hooks:    hookCfg,
 		Commands: map[string]string{"lint": "", "test": ""},
 		Steps: map[string][]domain.StepName{
 			domain.PreCommit.ConfigKey(): domain.DefaultSteps(domain.PreCommit),
@@ -179,18 +185,19 @@ func (s *Service) writeStarterConfig(selected []domain.Hook) error {
 		},
 		Risk: domain.RiskConfig(domain.DefaultRiskThresholds()),
 	}
-	return s.syncHookSelection(cfg, selected)
+	return s.configs.Save(cfg)
 }
 
-func (s *Service) syncHookSelection(cfg domain.Config, selected []domain.Hook) error {
-	cfg.Hooks = domain.HookConfig{}
-	for _, h := range selected {
-		switch h {
+// hookConfigFrom turns a hook selection list into a HookConfig.
+func hookConfigFrom(selected []domain.Hook) domain.HookConfig {
+	var h domain.HookConfig
+	for _, hook := range selected {
+		switch hook {
 		case domain.PreCommit:
-			cfg.Hooks.PreCommit = true
+			h.PreCommit = true
 		case domain.PrePush:
-			cfg.Hooks.PrePush = true
+			h.PrePush = true
 		}
 	}
-	return s.configs.Save(cfg)
+	return h
 }

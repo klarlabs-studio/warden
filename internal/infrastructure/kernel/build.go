@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"go.klarlabs.de/axi"
 	axidomain "go.klarlabs.de/axi/domain"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/steps"
 )
 
 // actionRef is the executor binding ref for a step action.
@@ -51,11 +53,15 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	execs := map[axidomain.ActionExecutorRef]axidomain.ActionExecutor{}
 
 	for _, name := range policy.Steps {
-		step, err := resolveStep(reg, name)
+		step, err := resolveStep(reg, name, policy.Commands)
 		if err != nil {
 			return nil, err
 		}
 		stepSC := sc
+		// Commands are sourced from the resolved policy so a config-command
+		// custom step (and the built-in shell steps) always see them, regardless
+		// of what the caller seeded into sc.
+		stepSC.Commands = policy.Commands
 		stepSC.Agent = policy.AgentFor(name)
 		stepSC.AgentCommand = policy.AgentCommands[stepSC.Agent]
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
@@ -93,18 +99,30 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	return k, nil
 }
 
-// resolveStep finds a step's implementation: a registered built-in, or a
-// subprocess adapter for a custom step resolved by convention on PATH.
-func resolveStep(reg application.Registry, name domain.StepName) (application.Step, error) {
+// resolveStep finds a step's implementation, in order of preference:
+//  1. a registered built-in step;
+//  2. a config-defined command step — a custom step whose name has a
+//     commands.<name> entry runs that shell command, no code required;
+//  3. a subprocess step — a warden-step-<name> binary on PATH speaking the
+//     stepsdk wire protocol, for steps that need structured findings/approval.
+//
+// The command path (2) is the easy default: a repo adds a custom check by
+// naming a command, not by writing and installing a Go binary. The subprocess
+// path (3) stays as the advanced escape hatch.
+func resolveStep(reg application.Registry, name domain.StepName, commands map[string]string) (application.Step, error) {
 	if step, ok := reg[name]; ok {
 		return step, nil
 	}
 	if name.IsBuiltin() {
 		return nil, fmt.Errorf("built-in step %q has no registered implementation", name)
 	}
+	if cmd, ok := commands[string(name)]; ok && strings.TrimSpace(cmd) != "" {
+		return steps.NewShellStep(name, string(name)), nil
+	}
 	bin, err := exec.LookPath(customStepBinary(name))
 	if err != nil {
-		return nil, fmt.Errorf("custom step %q: binary %s not found on PATH: %w", name, customStepBinary(name), err)
+		return nil, fmt.Errorf("custom step %q: define commands.%s in .warden.yaml, or install a %s binary on PATH: %w",
+			name, name, customStepBinary(name), err)
 	}
 	return NewSubprocessStep(name, bin), nil
 }

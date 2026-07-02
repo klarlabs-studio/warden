@@ -8,11 +8,14 @@ commands:
   lint: "golangci-lint run ./..."
   # Mirror CI unit + e2e stages.
   test: "go test -race ./... && go test -tags e2e ./e2e/"
+  # A config-defined custom step: any step name with a command here runs it —
+  # no code, no installed binary. nox applies the committed .nox/baseline.json,
+  # so only unwaived high/critical findings fail the gate.
+  security-scan: "nox scan . -severity-threshold high"
 steps:
   # pre-commit stays fast: quality gate only.
   pre_commit: [lint]
-  # pre-push mirrors CI order: quality -> security (nox custom step) -> tests.
-  # security-scan is a custom subprocess step (warden-step-security-scan on PATH).
+  # pre-push mirrors CI order: quality -> security -> tests.
   pre_push: [rebase, lint, security-scan, test]
 risk:
   diff_lines_high: 400

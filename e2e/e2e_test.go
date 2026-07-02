@@ -120,6 +120,33 @@ func TestE2E_PreCommitGate(t *testing.T) {
 	}
 }
 
+func TestE2E_ConfigCommandCustomStep(t *testing.T) {
+	h := newHarness(t)
+	h.write("a.txt", "hello\n")
+	h.git("add", "a.txt")
+	h.git("commit", "--no-verify", "-m", "init")
+
+	// A custom step "extra-check" defined purely by a command — no binary.
+	cfg := `
+hooks: { pre_commit: true }
+commands: { lint: "true", extra-check: "echo custom-failure >&2; exit 1" }
+steps: { pre_commit: [lint, extra-check] }
+rules: []
+`
+	h.write(".warden.yaml", cfg)
+	h.warden("init")
+	h.write("a.txt", "changed\n")
+	h.git("add", "a.txt")
+
+	out, code := h.warden("run", "pre-commit")
+	if code == 0 {
+		t.Fatalf("config-command custom step should fail the gate, got exit 0: %s", out)
+	}
+	if !strings.Contains(out, "extra-check") {
+		t.Errorf("expected the custom step name in the failure, got: %s", out)
+	}
+}
+
 func TestE2E_PrePushPushesWithProvenance(t *testing.T) {
 	// Bare remote + work repo.
 	remote := t.TempDir()

@@ -88,8 +88,26 @@ gate.
 
 ## Custom steps
 
-A custom step is any external program that speaks the JSON wire protocol over
-stdin/stdout. Use the `stepsdk` package to write one in ~10 lines:
+Two ways, easy first.
+
+### 1. A command (no code)
+
+Give a step a name and a command. Any step name with a `commands.<name>` entry
+runs that command in the worktree; a non-zero exit fails the gate. This is the
+common case — a custom check is just a command you already run.
+
+```yaml
+commands:
+  security-scan: "nox scan . -severity-threshold high"
+steps:
+  pre_push: [rebase, lint, security-scan, test]
+```
+
+### 2. A subprocess step (structured findings)
+
+When a step needs to return per-file findings, request approval, or react to
+earlier steps' findings, write a small program that speaks the JSON wire
+protocol over stdin/stdout using the `stepsdk` package:
 
 ```go
 package main
@@ -98,15 +116,15 @@ import "go.klarlabs.de/warden/stepsdk"
 
 func main() {
 	stepsdk.Run(func(in stepsdk.Input) stepsdk.Output {
-		// inspect in.RepoPath (the worktree), in.DiffSummary, ...
+		// inspect in.RepoPath (the worktree), in.DiffSummary, in.PriorFindings...
 		return stepsdk.Pass()
 	})
 }
 ```
 
-Build it as `warden-step-<name>` on `PATH` and reference `<name>` in a rule's
-`steps.pre_push.add`. Custom steps always run as isolated subprocesses — no
-repo-authored code is loaded into the daemon.
+Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
+list. Either way, custom steps run as isolated subprocesses — no repo-authored
+code is loaded into the daemon.
 
 ## Bypass provenance (`warden doctor`)
 

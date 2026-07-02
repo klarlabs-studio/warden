@@ -119,10 +119,36 @@ func TestKernel_PushFuncErrorSurfacesAsError(t *testing.T) {
 }
 
 func TestKernel_CustomStepMissingBinaryErrorsAtBuild(t *testing.T) {
-	// A custom (non-built-in) step with no binary on PATH must fail fast at
-	// build, not silently skip the gate.
+	// A custom (non-built-in) step with no command and no binary on PATH must
+	// fail fast at build, not silently skip the gate.
 	_, err := newFactory().New(policyFor("no-such-custom-step"), application.StepContext{}, new([]domain.Finding), nil)
 	if err == nil {
 		t.Error("expected build to fail for an unresolvable custom step")
+	}
+}
+
+func TestKernel_ConfigCommandCustomStep(t *testing.T) {
+	// A custom step named in config with a commands.<name> entry runs that
+	// shell command — no registered step, no installed binary.
+	run := func(t *testing.T, command string) domain.StepResult {
+		t.Helper()
+		p := policyFor("custom-check")
+		p.Commands = map[string]string{"custom-check": command}
+		k, err := newFactory().New(p, application.StepContext{WorktreeDir: t.TempDir()}, new([]domain.Finding), nil)
+		if err != nil {
+			t.Fatalf("build with config-command step: %v", err)
+		}
+		out, err := k.Execute(context.Background(), "custom-check")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Result
+	}
+
+	if got := run(t, "true"); got.Status != domain.StepPass {
+		t.Errorf("passing command: status = %s, want pass", got.Status)
+	}
+	if got := run(t, "echo boom >&2; exit 1"); got.Status != domain.StepFail {
+		t.Errorf("failing command: status = %s, want fail", got.Status)
 	}
 }
