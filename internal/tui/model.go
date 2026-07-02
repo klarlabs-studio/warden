@@ -33,8 +33,21 @@ const (
 )
 
 type stepView struct {
-	name   domain.StepName
-	status stepStatus
+	name     domain.StepName
+	status   stepStatus
+	started  time.Time
+	finished time.Time
+}
+
+// elapsed returns how long the step has run (live if still running).
+func (s stepView) elapsed(now time.Time) time.Duration {
+	if s.started.IsZero() {
+		return 0
+	}
+	if s.status == stepRunning {
+		return now.Sub(s.started)
+	}
+	return s.finished.Sub(s.started)
 }
 
 type phase int
@@ -57,10 +70,12 @@ type model struct {
 	approval application.ApprovalRequest
 	resp     chan application.Decision
 
-	// frame advances every tick to animate the spinner; runStart is the frame
-	// the current step began running, for its elapsed time.
-	frame    int
-	runStart int
+	// frame advances every tick to animate the spinner; now is refreshed each
+	// tick so elapsed counters tick up. start/end bound the whole run.
+	frame int
+	now   time.Time
+	start time.Time
+	end   time.Time
 
 	result application.RunResult
 	runErr error
@@ -71,7 +86,8 @@ func newModel(hook domain.Hook, steps []domain.StepName, events chan tea.Msg) mo
 	for i, s := range steps {
 		views[i] = stepView{name: s, status: stepPending}
 	}
-	return model{events: events, hook: hook, steps: views, phase: phaseRunning}
+	now := time.Now()
+	return model{events: events, hook: hook, steps: views, phase: phaseRunning, now: now, start: now}
 }
 
 func (m model) Init() tea.Cmd { return tea.Batch(m.listen(), tick()) }
@@ -98,11 +114,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.res
 		m.runErr = msg.err
 		m.phase = phaseDone
+		m.end = time.Now()
 		return m, tea.Quit
 
 	case tickMsg:
 		m.frame++
-		return m, tick() // keep animating until the run completes (Quit stops it)
+		m.now = time.Now() // refresh so the running step's counter ticks up
+		return m, tick()   // keep animating until the run completes (Quit stops it)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -117,9 +135,10 @@ func (m *model) applyStep(e application.StepEvent) {
 		}
 		if e.Phase == application.StepStarted {
 			m.steps[i].status = stepRunning
-			m.runStart = m.frame
+			m.steps[i].started = time.Now()
 			return
 		}
+		m.steps[i].finished = time.Now()
 		if e.Result.Status == domain.StepFail {
 			m.steps[i].status = stepFail
 		} else {
@@ -156,12 +175,16 @@ func (m model) View() string {
 
 	var running domain.StepName
 	for _, s := range m.steps {
-		line := "  " + m.stepGlyph(s.status) + " " + string(s.name)
+		var line string
 		if s.status == stepRunning {
 			running = s.name
-			elapsed := float64(m.frame-m.runStart) * tickInterval.Seconds()
 			line = styRun.Render("  "+spinnerFrames[m.frame%len(spinnerFrames)]+" "+string(s.name)) +
-				styMuted.Render(fmt.Sprintf("  %.1fs", elapsed))
+				styMuted.Render("  "+fmtDur(s.elapsed(m.now)))
+		} else {
+			line = "  " + m.stepGlyph(s.status) + " " + string(s.name)
+			if !s.finished.IsZero() { // completed → show how long it took
+				line += styMuted.Render("  " + fmtDur(s.elapsed(m.now)))
+			}
 		}
 		b.WriteString(line + "\n")
 	}
@@ -178,6 +201,7 @@ func (m model) View() string {
 		b.WriteString("\n" + styRun.Render(fmt.Sprintf("approval required (risk=%s) — approve? [y/N]", m.approval.Risk)) + "\n")
 	case phaseDone:
 		b.WriteString("\n" + renderOutcome(m.result) + "\n")
+		b.WriteString(styMuted.Render("total "+fmtDur(m.end.Sub(m.start))) + "\n")
 	default:
 		hint := "working…"
 		if running != "" {
@@ -186,6 +210,18 @@ func (m model) View() string {
 		b.WriteString("\n" + styMuted.Render(spinnerFrames[m.frame%len(spinnerFrames)]+" "+hint+"   (ctrl+c to abort)") + "\n")
 	}
 	return b.String()
+}
+
+// fmtDur formats a duration as a compact elapsed time: seconds under a minute
+// (e.g. "1.4s"), else minutes+seconds ("1m03s").
+func fmtDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 // stepGlyph renders a non-running step's status marker. The running step is
