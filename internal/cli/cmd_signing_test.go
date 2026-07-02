@@ -173,3 +173,20 @@ func TestMaybeNotify_RespectsConfigAndVerdict(t *testing.T) {
 }
 
 var errSentinel = fmt.Errorf("boom")
+
+func TestRecipes(t *testing.T) {
+	// List shows every recipe name.
+	code, out, _ := run("recipes")
+	if code != 0 || !strings.Contains(out, "gitleaks") || !strings.Contains(out, "coverage-delta") {
+		t.Errorf("recipes list wrong: code=%d out=%q", code, out)
+	}
+	// A named recipe prints its snippet.
+	code, out, _ = run("recipes", "gitleaks")
+	if code != 0 || !strings.Contains(out, "gitleaks detect") || !strings.Contains(out, "commands:") {
+		t.Errorf("recipe snippet wrong: code=%d out=%q", code, out)
+	}
+	// Unknown recipe errors.
+	if code, _, errb := run("recipes", "nope"); code != 1 || !strings.Contains(errb, "no recipe") {
+		t.Errorf("unknown recipe: code=%d err=%q", code, errb)
+	}
+}

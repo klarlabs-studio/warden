@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
@@ -28,10 +29,20 @@ type Repository struct {
 // NewRepository binds a config Repository to a repository root directory.
 func NewRepository(root string) *Repository { return &Repository{root: root} }
 
-// Load reads and parses .warden.yaml. A missing file is not an error: it yields
-// a zero Config so callers fall back to documented defaults.
+// Load reads and parses .warden.yaml, resolving any `extends:` chain. A missing
+// file is not an error: it yields a zero Config so callers fall back to
+// documented defaults.
 func (r *Repository) Load() (domain.Config, error) {
-	path := filepath.Join(r.root, FileName)
+	return loadFrom(filepath.Join(r.root, FileName), nil)
+}
+
+// maxExtends bounds the extends chain so a misconfiguration can't loop forever.
+const maxExtends = 10
+
+// loadFrom parses the config at path and, if it extends a base, loads that base
+// and overlays this config on top. seen carries the chain so far to detect
+// cycles and cap depth.
+func loadFrom(path string, seen []string) (domain.Config, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return domain.Config{}, nil
@@ -39,7 +50,33 @@ func (r *Repository) Load() (domain.Config, error) {
 	if err != nil {
 		return domain.Config{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	return Parse(data)
+	cfg, err := Parse(data)
+	if err != nil {
+		return domain.Config{}, err
+	}
+	if cfg.Extends == "" {
+		return cfg, nil
+	}
+
+	if len(seen) >= maxExtends {
+		return domain.Config{}, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, path)
+	}
+	basePath := cfg.Extends
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(filepath.Dir(path), basePath)
+	}
+	basePath = filepath.Clean(basePath)
+	chain := make([]string, 0, len(seen)+1)
+	chain = append(chain, seen...)
+	chain = append(chain, filepath.Clean(path))
+	if slices.Contains(chain, basePath) {
+		return domain.Config{}, fmt.Errorf("extends cycle: %s already in the chain", basePath)
+	}
+	base, err := loadFrom(basePath, chain)
+	if err != nil {
+		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
+	}
+	return cfg.OverlayOnto(base), nil
 }
 
 // Save serializes cfg to .warden.yaml.

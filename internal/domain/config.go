@@ -4,6 +4,12 @@ package domain
 // YAML surface exactly. Zero values are meaningful: an omitted section falls
 // back to the documented defaults during policy resolution, not here.
 type Config struct {
+	// Extends names a base config to inherit from (a path relative to this
+	// config, or absolute). The base is loaded first and this config overlays it,
+	// so an org can share one .warden.yaml across repos and each repo overrides
+	// only what it needs.
+	Extends string `yaml:"extends"`
+
 	// Agent is the default coding-agent selection ("auto" or a binary name).
 	Agent string `yaml:"agent"`
 

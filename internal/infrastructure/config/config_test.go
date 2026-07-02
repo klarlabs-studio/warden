@@ -127,3 +127,49 @@ func TestRepository_SaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("round trip = %+v, want agent=codex prePush=true", got)
 	}
 }
+
+func TestRepository_LoadResolvesExtends(t *testing.T) {
+	dir := t.TempDir()
+	// Base config one level up from the repo.
+	base := filepath.Join(dir, "base.yaml")
+	if err := os.WriteFile(base, []byte("agent: claude\ncommands:\n  lint: \"golangci-lint run\"\n  test: \"go test ./...\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	child := "extends: ../base.yaml\ncommands:\n  test: \"go test -race ./...\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, FileName), []byte(child), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := NewRepository(repoDir).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agent != "claude" {
+		t.Errorf("agent not inherited from base: %q", cfg.Agent)
+	}
+	if cfg.Commands["lint"] != "golangci-lint run" {
+		t.Errorf("base command not inherited: %q", cfg.Commands["lint"])
+	}
+	if cfg.Commands["test"] != "go test -race ./..." {
+		t.Errorf("child override lost: %q", cfg.Commands["test"])
+	}
+}
+
+func TestRepository_ExtendsCycleErrors(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, FileName)
+	b := filepath.Join(dir, "b.yaml")
+	if err := os.WriteFile(a, []byte("extends: b.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("extends: .warden.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRepository(dir).Load(); err == nil {
+		t.Error("an extends cycle must error")
+	}
+}

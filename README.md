@@ -111,6 +111,7 @@ gate.
 ## Configuration (`.warden.yaml`)
 
 ```yaml
+extends: ../.warden.base.yaml   # optional — inherit an org base config; this file overrides it
 agent: auto
 hooks: { pre_commit: true, pre_push: true }
 commands:
@@ -194,6 +195,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
+| `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |
