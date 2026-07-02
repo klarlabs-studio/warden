@@ -128,6 +128,7 @@ steps:
   pre_push: [intent, rebase, review, test, document, lint]
 parallel: true   # default — run independent checks concurrently (see below)
 risk: { diff_lines_high: 400, files_touched_high: 15 }
+pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 rules:
   - match: { branch: main }
     then: { require_approval: true, auto_fix: { test: 1 } }

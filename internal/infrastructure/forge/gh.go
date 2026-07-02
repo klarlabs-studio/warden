@@ -67,6 +67,28 @@ func (g *GH) EnsurePR(ctx context.Context, branch, base string) (domain.PRInfo, 
 // Checks returns the CI status for branch's PR by reading `gh pr checks`'s
 // machine-readable JSON. A non-zero exit (failing/pending checks) is expected,
 // so the JSON is parsed regardless of exit code.
+// Comment posts a sticky gate-result comment on branch's PR. It first tries to
+// edit the current user's last comment (so repeated pushes update one comment
+// instead of stacking); if there is none to edit, it posts a fresh one. Body is
+// passed on stdin so multi-line markdown and shell metacharacters are safe.
+func (g *GH) Comment(ctx context.Context, branch, body string) error {
+	if _, err := g.runStdin(ctx, body, "pr", "comment", branch, "--edit-last", "--body-file", "-"); err == nil {
+		return nil
+	}
+	_, err := g.runStdin(ctx, body, "pr", "comment", branch, "--body-file", "-")
+	return err
+}
+
+// runStdin runs gh with stdin piped from in, for commands that read a body file
+// from "-".
+func (g *GH) runStdin(ctx context.Context, in string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = g.dir
+	cmd.Stdin = strings.NewReader(in)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 func (g *GH) Checks(ctx context.Context, branch string) (domain.CIStatus, error) {
 	out, _ := g.run(ctx, "pr", "checks", branch, "--json", "state")
 	var rows []struct {

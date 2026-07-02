@@ -7,6 +7,15 @@ type PRConfig struct {
 	Enabled bool `yaml:"enabled"`
 	// Base is the branch a PR targets; empty means the forge's default branch.
 	Base string `yaml:"base"`
+	// Comment toggles posting a gate-result summary comment on the PR after a
+	// passing push. Unset (nil) defaults to enabled when PRs are enabled.
+	Comment *bool `yaml:"comment"`
+}
+
+// CommentEnabled reports whether to post the gate-result PR comment: on by
+// default whenever PR creation is enabled, unless explicitly disabled.
+func (c PRConfig) CommentEnabled() bool {
+	return c.Enabled && (c.Comment == nil || *c.Comment)
 }
 
 // PRInfo identifies a pull request the forge opened or found.

@@ -95,6 +95,10 @@ type Forge interface {
 	// EnsurePR opens a PR for branch onto base if none is open, else returns
 	// the existing one. base "" means the forge's default branch. Idempotent.
 	EnsurePR(ctx context.Context, branch, base string) (domain.PRInfo, error)
+	// Comment posts (or updates) the warden gate-result comment on branch's PR.
+	// It is sticky: repeated passing pushes update one comment rather than
+	// stacking new ones.
+	Comment(ctx context.Context, branch, body string) error
 	// Checks returns the CI status for branch's pull request.
 	Checks(ctx context.Context, branch string) (domain.CIStatus, error)
 }

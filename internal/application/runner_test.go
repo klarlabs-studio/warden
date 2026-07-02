@@ -127,18 +127,25 @@ func (a fakeApprover) Approve(context.Context, ApprovalRequest) (Decision, error
 	return Decision{Approved: a.approve, Principal: "test"}, nil
 }
 
-// fakeForge records EnsurePR calls and returns a scripted PR.
+// fakeForge records EnsurePR/Comment calls and returns a scripted PR.
 type fakeForge struct {
-	available bool
-	called    bool
-	pr        domain.PRInfo
-	err       error
+	available    bool
+	called       bool
+	pr           domain.PRInfo
+	err          error
+	commentBody  string
+	commentCount int
 }
 
 func (f *fakeForge) Available() bool { return f.available }
 func (f *fakeForge) EnsurePR(context.Context, string, string) (domain.PRInfo, error) {
 	f.called = true
 	return f.pr, f.err
+}
+func (f *fakeForge) Comment(_ context.Context, _, body string) error {
+	f.commentCount++
+	f.commentBody = body
+	return nil
 }
 func (f *fakeForge) Checks(context.Context, string) (domain.CIStatus, error) {
 	return domain.CIStatus{}, nil
@@ -389,6 +396,34 @@ func TestRunner_OpensPRWhenEnabled(t *testing.T) {
 	}
 	if !strings.Contains(res.Message, "https://forge/pr/1") {
 		t.Errorf("message should mention the PR: %q", res.Message)
+	}
+	// A gate-result comment is posted by default when PRs are enabled.
+	if forge.commentCount != 1 {
+		t.Errorf("expected one PR comment, got %d", forge.commentCount)
+	}
+	if !strings.Contains(forge.commentBody, commentMarker) || !strings.Contains(forge.commentBody, "Warden gate passed") {
+		t.Errorf("comment body missing marker/heading:\n%s", forge.commentBody)
+	}
+}
+
+func TestRunner_SkipsPRCommentWhenDisabled(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true, pr: domain.PRInfo{URL: "https://forge/pr/2"}}
+
+	cfg := prePushCfg()
+	cfg.PR = domain.PRConfig{Enabled: true, Comment: boolPtr(false)}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if !forge.called {
+		t.Error("PR should still be ensured")
+	}
+	if forge.commentCount != 0 {
+		t.Errorf("comment disabled but posted %d times", forge.commentCount)
 	}
 }
 

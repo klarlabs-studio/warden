@@ -210,6 +210,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			if pr.URL != "" {
 				res.Message += "; PR " + pr.URL
 			}
+			// Post the gate summary on the PR — best-effort, like PR creation: a
+			// comment failure never unwinds a push that already succeeded.
+			if prCfg.CommentEnabled() {
+				_ = r.Forge.Comment(ctx, branch, prComment(res, branch))
+			}
 		}
 	}
 	return res, nil

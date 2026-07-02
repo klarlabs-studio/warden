@@ -222,6 +222,30 @@
       "severity": "high",
       "reason": "False-positive \"split API key\" on a test assertion string in stream_test.go (no real secret).",
       "created_at": "2026-07-02T19:20:26.535032Z"
+    },
+    {
+      "fingerprint": "bc8d51248f7156d8a1a5e352a5320e49d273c948c2c398b5ff7d6ff5ad601200",
+      "rule_id": "SEC-161",
+      "file_path": "internal/application/comment_test.go",
+      "severity": "medium",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "created_at": "2026-07-02T19:26:35.649907Z"
+    },
+    {
+      "fingerprint": "bad6051c69921dcdd8f2610c37c94257d0d88491bdd3f9d4dc2f7cce3e62e12f",
+      "rule_id": "SEC-162",
+      "file_path": "internal/application/comment_test.go",
+      "severity": "medium",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "created_at": "2026-07-02T19:26:35.649907Z"
+    },
+    {
+      "fingerprint": "bfe2883db09e0dcf32b8be6adcfcb6385a10ceff29a1df98ae8d4770b33edb06",
+      "rule_id": "SEC-163",
+      "file_path": "internal/application/comment_test.go",
+      "severity": "medium",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "created_at": "2026-07-02T19:26:35.649907Z"
     }
   ]
 }
