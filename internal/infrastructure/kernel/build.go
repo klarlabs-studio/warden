@@ -63,7 +63,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		// of what the caller seeded into sc.
 		stepSC.Commands = policy.Commands
 		stepSC.Agent = policy.AgentFor(name)
-		stepSC.AgentCommand = policy.AgentCommands[stepSC.Agent]
+		stepSC.AgentCommand = domain.ResolveAgentCommand(policy.AgentCommands, stepSC.Agent)
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
 
 		def, err := newStepAction(name)

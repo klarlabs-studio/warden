@@ -48,11 +48,12 @@ commands:
   lint: "golangci-lint run ./..."
   test: "go test -race ./..."
 # Agent steps (intent/review/document) run the command configured for the
-# resolved agent, expanding {prompt}/{step}/{repo}. No command → advisory skip;
-# Warden never guesses an agent's CLI.
+# resolved agent, expanding {prompt}/{step}/{repo}. claude and codex work out of
+# the box via bundled presets — you only need agent_commands to override those
+# or add another agent. No command (and no preset) → advisory skip; Warden never
+# guesses an agent's CLI.
 agent_commands:
-  claude: "claude -p {prompt}"
-  codex: "codex exec {prompt}"
+  opencode: "opencode run {prompt}"   # example: any other agent
 steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
