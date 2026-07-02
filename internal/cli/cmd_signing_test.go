@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -188,5 +189,48 @@ func TestRecipes(t *testing.T) {
 	// Unknown recipe errors.
 	if code, _, errb := run("recipes", "nope"); code != 1 || !strings.Contains(errb, "no recipe") {
 		t.Errorf("unknown recipe: code=%d err=%q", code, errb)
+	}
+}
+
+func TestWatchCommands(t *testing.T) {
+	cfg := domain.Config{
+		Steps:    map[string][]domain.StepName{"pre_commit": {"lint", "review", "test"}},
+		Commands: map[string]string{"lint": "golangci-lint run", "test": "go test ./..."},
+	}
+	got := watchCommands(cfg)
+	// review has no command → skipped; lint + test resolve.
+	if len(got) != 2 {
+		t.Fatalf("expected 2 watch commands, got %d: %+v", len(got), got)
+	}
+	if got[0].step != "lint" || got[0].command != "golangci-lint run" {
+		t.Errorf("first watch command wrong: %+v", got[0])
+	}
+	if got[1].step != "test" {
+		t.Errorf("second watch command wrong: %+v", got[1])
+	}
+}
+
+func TestRunWatchChecks_PassAndFail(t *testing.T) {
+	var b strings.Builder
+	runWatchChecks(context.Background(), &b, t.TempDir(), []namedCommand{
+		{step: "ok", command: "true"},
+		{step: "bad", command: "echo boom >&2; false"},
+	})
+	out := b.String()
+	if !strings.Contains(out, "✓ ok") || !strings.Contains(out, "✗ bad") {
+		t.Errorf("watch check output wrong:\n%s", out)
+	}
+	if !strings.Contains(out, "boom") {
+		t.Errorf("a failing check must print its output:\n%s", out)
+	}
+}
+
+func TestWatch_NoCommandsExits1(t *testing.T) {
+	dir := gitRepo(t)
+	// A config with a pre_commit step but no command → nothing to watch, exit 1.
+	writeConfig(t, dir, "steps: { pre_commit: [lint] }\n")
+	code, _, errb := run("watch")
+	if code != 1 || !strings.Contains(errb, "no pre-commit commands") {
+		t.Errorf("watch with no commands: code=%d err=%q", code, errb)
 	}
 }
