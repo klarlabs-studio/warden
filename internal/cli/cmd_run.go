@@ -10,6 +10,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/notify"
 	"go.klarlabs.de/warden/internal/tui"
 )
 
@@ -70,12 +71,32 @@ func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if _, err := tui.Run(svc, br, hook, resolved.Steps); err != nil {
+	res, err := tui.Run(svc, br, hook, resolved.Steps)
+	if err != nil {
 		return fail(stderr, err)
 	}
+	maybeNotify(svc, res)
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.
 	return 1
+}
+
+// maybeNotify fires a desktop notification with the run's verdict unless the
+// repo disabled it, so a developer who tabbed away during a long pre-push
+// learns the outcome.
+func maybeNotify(svc interface{ Config() (domain.Config, error) }, res application.RunResult) {
+	cfg, err := svc.Config()
+	if err != nil {
+		return
+	}
+	if cfg.Notify != nil && !*cfg.Notify {
+		return
+	}
+	title := "warden: passed"
+	if res.Outcome != domain.OutcomePassed {
+		title = "warden: " + string(res.Outcome)
+	}
+	notify.Send(title, res.Message)
 }
 
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a

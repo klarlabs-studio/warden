@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
+	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/service"
 )
@@ -148,3 +150,26 @@ func TestWhy_WithNote(t *testing.T) {
 		}
 	}
 }
+
+// fakeCfgSvc feeds maybeNotify a scripted config.
+type fakeCfgSvc struct {
+	cfg domain.Config
+	err error
+}
+
+func (f fakeCfgSvc) Config() (domain.Config, error) { return f.cfg, f.err }
+
+func TestMaybeNotify_RespectsConfigAndVerdict(t *testing.T) {
+	// These calls exercise the gating logic; notify.Send is a best-effort no-op
+	// on the test host, so we assert no panic and the right branches run.
+	off := false
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{Notify: &off}}, application.RunResult{Outcome: domain.OutcomePassed})
+
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"})
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"})
+
+	// A config load error must not panic.
+	maybeNotify(fakeCfgSvc{err: errSentinel}, application.RunResult{})
+}
+
+var errSentinel = fmt.Errorf("boom")

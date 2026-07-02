@@ -33,6 +33,10 @@ type Config struct {
 	// classic one-step-at-a-time pipeline.
 	Parallel *bool `yaml:"parallel"`
 
+	// Notify toggles a desktop notification when an interactive pre-push run
+	// finishes. Unset (nil) defaults to enabled; set `notify: false` to silence.
+	Notify *bool `yaml:"notify"`
+
 	Risk RiskConfig `yaml:"risk"`
 
 	// PR configures optional pull-request creation after a passing push.

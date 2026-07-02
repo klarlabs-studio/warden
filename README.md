@@ -128,6 +128,7 @@ steps:
   pre_push: [intent, rebase, review, test, document, lint]
 parallel: true   # default — run independent checks concurrently (see below)
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
+notify: true     # default — desktop notification when an interactive pre-push finishes
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 rules:
