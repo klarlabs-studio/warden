@@ -19,6 +19,16 @@ type EvidenceEntry struct {
 	Timestamp    int64  `json:"timestamp,omitempty"`
 }
 
+// DependencyManifest is one dependency lockfile captured in the SBOM: its
+// ecosystem (inferred from the filename), repo-relative path, and a SHA-256
+// digest of its contents, so a validated commit carries a signed fingerprint of
+// its dependency sets.
+type DependencyManifest struct {
+	Ecosystem string `json:"ecosystem"`
+	Path      string `json:"path"`
+	Digest    string `json:"digest"`
+}
+
 // RunRecord is the payload written to refs/notes/warden for each validated
 // commit (§9). It is the tamper-evident provenance a shared branch relies on.
 type RunRecord struct {
@@ -30,6 +40,11 @@ type RunRecord struct {
 	MatchedRules      []string            `json:"matched_rules"`
 	EvidenceChainRoot string              `json:"evidence_chain_root"`
 	Evidence          []EvidenceEntry     `json:"evidence"`
+	// Dependencies is the SBOM: the dependency lockfiles present at validation,
+	// each content-digested. Being part of the record, it is covered by the
+	// evidence chain and the signature — a signed statement of exactly which
+	// dependency sets were in the tree warden gated (§9).
+	Dependencies []DependencyManifest `json:"dependencies,omitempty"`
 	// PublicKey is the base64 ed25519 public key of the signer (§9). It is
 	// covered by Signature, so it cannot be swapped without re-signing.
 	PublicKey string `json:"public_key,omitempty"`

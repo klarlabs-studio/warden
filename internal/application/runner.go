@@ -50,7 +50,10 @@ type Runner struct {
 	Observer Observer
 	// Signer is optional: when set, a passing pre-push run's provenance note is
 	// signed. A nil Signer (or a signing failure) leaves the note unsigned.
-	Signer   Signer
+	Signer Signer
+	// SBOM is optional: when set, a passing pre-push run records its dependency
+	// lockfile digests in the provenance note.
+	SBOM     SBOM
 	Settings Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -189,6 +192,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	record, err := r.buildRecord(kernel, run)
 	if err != nil {
 		return RunResult{}, err
+	}
+	// Attach the SBOM before signing so the dependency digests are covered by the
+	// signature. Best-effort: a collector that finds nothing leaves it empty.
+	if r.SBOM != nil {
+		record.Dependencies = r.SBOM.Collect(sc.WorktreeDir)
 	}
 	r.sign(record)
 	if finalSHA, err := r.Git.HeadSHA(); err == nil {

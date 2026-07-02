@@ -60,6 +60,12 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "evidence:      %d records, chain %s\n", len(rec.Evidence), chainState(res.Validated))
 	fmt.Fprintf(stdout, "signature:     %s\n", whySignature(res))
+	if len(rec.Dependencies) > 0 {
+		fmt.Fprintf(stdout, "sbom:          %d lockfile(s)\n", len(rec.Dependencies))
+		for _, m := range rec.Dependencies {
+			fmt.Fprintf(stdout, "  %-9s %s  %s\n", m.Ecosystem, m.Path, m.Digest)
+		}
+	}
 	return 0
 }
 

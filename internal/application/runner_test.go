@@ -524,3 +524,27 @@ func TestRunner_RejectedGateDoesNotPush(t *testing.T) {
 		t.Error("a declined gate must not push")
 	}
 }
+
+// fakeSBOM returns a scripted manifest.
+type fakeSBOM struct{ manifests []domain.DependencyManifest }
+
+func (f fakeSBOM) Collect(string) []domain.DependencyManifest { return f.manifests }
+
+func TestRunner_PrePushAttachesSignedSBOM(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	r.Signer = newFakeSigner(t)
+	r.SBOM = fakeSBOM{manifests: []domain.DependencyManifest{{Ecosystem: "go", Path: "go.sum", Digest: "sha256:abc"}}}
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if len(git.note.Dependencies) != 1 || git.note.Dependencies[0].Path != "go.sum" {
+		t.Fatalf("expected the SBOM in the note, got %+v", git.note.Dependencies)
+	}
+	// The SBOM is part of the record, so it is covered by the signature.
+	if !git.note.VerifySignature() {
+		t.Error("signature must cover the attached SBOM")
+	}
+}

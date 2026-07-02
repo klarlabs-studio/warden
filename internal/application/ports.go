@@ -134,6 +134,13 @@ type StepCache interface {
 	Record(key string)
 }
 
+// SBOM collects the dependency lockfiles present in a validated worktree, so a
+// run record can carry a signed fingerprint of its dependency sets. It is
+// optional: a nil SBOM leaves records without a dependency manifest.
+type SBOM interface {
+	Collect(dir string) []domain.DependencyManifest
+}
+
 // Signer produces detached ed25519 signatures over provenance payloads. It is
 // optional: a nil Signer leaves run records unsigned, and a signing failure
 // never fails a run — the note is still written, just without a signature (§9).

@@ -108,6 +108,12 @@ trust** ran here" — pass `key:` to the bundled `warden-verify` action. Notes
 stay verifiable (chain + signature) without pinning; `--key` just adds the trust
 gate.
 
+Each note also carries a small **SBOM**: a SHA-256 digest of every dependency
+lockfile present at validation (`go.sum`, `package-lock.json`, `Cargo.lock`, …).
+Because it's part of the signed, hash-chained record, a validated commit ships a
+tamper-evident, signed fingerprint of exactly which dependency sets it had —
+shown by `warden why`.
+
 ## Configuration (`.warden.yaml`)
 
 ```yaml
