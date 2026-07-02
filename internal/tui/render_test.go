@@ -24,8 +24,8 @@ func TestRenderStages(t *testing.T) {
 		return out
 	}
 
-	// 1) Initial — everything pending, "running…" footer.
-	if f := frame("initial"); !strings.Contains(f, "rebase") || !strings.Contains(f, "running") {
+	// 1) Initial — everything pending, animated footer.
+	if f := frame("initial"); !strings.Contains(f, "rebase") || !strings.Contains(f, "ctrl+c") {
 		t.Errorf("initial frame missing steps/footer:\n%s", f)
 	}
 

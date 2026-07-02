@@ -3,12 +3,25 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 )
+
+// spinnerFrames animate the running step; tickInterval drives the redraw.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const tickInterval = 100 * time.Millisecond
+
+// tickMsg drives the spinner/elapsed animation.
+type tickMsg struct{}
+
+func tick() tea.Cmd {
+	return tea.Tick(tickInterval, func(time.Time) tea.Msg { return tickMsg{} })
+}
 
 type stepStatus int
 
@@ -44,6 +57,11 @@ type model struct {
 	approval application.ApprovalRequest
 	resp     chan application.Decision
 
+	// frame advances every tick to animate the spinner; runStart is the frame
+	// the current step began running, for its elapsed time.
+	frame    int
+	runStart int
+
 	result application.RunResult
 	runErr error
 }
@@ -56,7 +74,7 @@ func newModel(hook domain.Hook, steps []domain.StepName, events chan tea.Msg) mo
 	return model{events: events, hook: hook, steps: views, phase: phaseRunning}
 }
 
-func (m model) Init() tea.Cmd { return m.listen() }
+func (m model) Init() tea.Cmd { return tea.Batch(m.listen(), tick()) }
 
 // listen blocks on the events channel and delivers the next message, so the
 // synchronous runner's events drive the async UI.
@@ -82,6 +100,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = phaseDone
 		return m, tea.Quit
 
+	case tickMsg:
+		m.frame++
+		return m, tick() // keep animating until the run completes (Quit stops it)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -95,6 +117,7 @@ func (m *model) applyStep(e application.StepEvent) {
 		}
 		if e.Phase == application.StepStarted {
 			m.steps[i].status = stepRunning
+			m.runStart = m.frame
 			return
 		}
 		if e.Result.Status == domain.StepFail {
@@ -131,8 +154,16 @@ func (m model) View() string {
 	var b strings.Builder
 	b.WriteString(styHeading.Render("warden "+string(m.hook)) + "\n\n")
 
+	var running domain.StepName
 	for _, s := range m.steps {
-		b.WriteString("  " + glyph(s.status) + " " + string(s.name) + "\n")
+		line := "  " + m.stepGlyph(s.status) + " " + string(s.name)
+		if s.status == stepRunning {
+			running = s.name
+			elapsed := float64(m.frame-m.runStart) * tickInterval.Seconds()
+			line = styRun.Render("  "+spinnerFrames[m.frame%len(spinnerFrames)]+" "+string(s.name)) +
+				styMuted.Render(fmt.Sprintf("  %.1fs", elapsed))
+		}
+		b.WriteString(line + "\n")
 	}
 
 	if len(m.findings) > 0 {
@@ -148,15 +179,21 @@ func (m model) View() string {
 	case phaseDone:
 		b.WriteString("\n" + renderOutcome(m.result) + "\n")
 	default:
-		b.WriteString("\n" + styMuted.Render("running… (ctrl+c to abort)") + "\n")
+		hint := "working…"
+		if running != "" {
+			hint = string(running) + "…"
+		}
+		b.WriteString("\n" + styMuted.Render(spinnerFrames[m.frame%len(spinnerFrames)]+" "+hint+"   (ctrl+c to abort)") + "\n")
 	}
 	return b.String()
 }
 
-func glyph(s stepStatus) string {
+// stepGlyph renders a non-running step's status marker. The running step is
+// drawn with the animated spinner in View.
+func (m model) stepGlyph(s stepStatus) string {
 	switch s {
 	case stepRunning:
-		return styRun.Render("◐")
+		return styRun.Render(spinnerFrames[m.frame%len(spinnerFrames)])
 	case stepPass:
 		return styPass.Render("✓")
 	case stepFail:

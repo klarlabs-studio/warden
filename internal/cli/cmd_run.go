@@ -70,11 +70,12 @@ func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	res, err := tui.Run(svc, br, hook, resolved.Steps)
-	if err != nil {
+	if _, err := tui.Run(svc, br, hook, resolved.Steps); err != nil {
 		return fail(stderr, err)
 	}
-	return runPrePushExit(res, stdout)
+	// The TUI already rendered the outcome as its final frame — don't reprint
+	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.
+	return 1
 }
 
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a
