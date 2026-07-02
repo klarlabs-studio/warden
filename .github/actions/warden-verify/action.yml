@@ -1,0 +1,43 @@
+name: "Warden Verify"
+description: >-
+  Provenance-skip: report whether a commit was already validated by the warden
+  gate (an intact refs/notes/warden record), so CI can trust it and skip
+  re-running the checks warden already ran.
+
+inputs:
+  commit:
+    description: "Commit to verify"
+    required: false
+    default: ${{ github.sha }}
+  remote:
+    description: "Remote holding refs/notes/warden"
+    required: false
+    default: origin
+
+outputs:
+  validated:
+    description: "true when the commit carries an intact warden validation note"
+    value: ${{ steps.check.outputs.validated }}
+
+runs:
+  using: composite
+  steps:
+    # warden is a Go install; the caller must have run actions/setup-go first.
+    - name: Install warden
+      shell: bash
+      run: go install go.klarlabs.de/warden@latest
+
+    - name: Fetch warden notes
+      shell: bash
+      run: git fetch "${{ inputs.remote }}" 'refs/notes/warden:refs/notes/warden' || true
+
+    - id: check
+      shell: bash
+      run: |
+        if warden verify --commit "${{ inputs.commit }}" --quiet; then
+          echo "validated=true" >> "$GITHUB_OUTPUT"
+          echo "warden: ${{ inputs.commit }} already validated — CI can skip its checks."
+        else
+          echo "validated=false" >> "$GITHUB_OUTPUT"
+          echo "warden: ${{ inputs.commit }} not validated — CI should run its checks."
+        fi

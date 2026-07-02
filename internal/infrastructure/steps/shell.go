@@ -4,7 +4,9 @@ package steps
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/application"
@@ -43,6 +45,7 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	// matching how a developer would run them.
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = sc.WorktreeDir
+	cmd.Env = stepEnv(sc)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return domain.StepResult{
@@ -60,4 +63,20 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		Status:  domain.StepPass,
 		Summary: string(s.name) + " passed",
 	}, nil
+}
+
+// stepEnv augments the process environment with WARDEN_* variables so a command
+// can scope itself to what changed — the primitive for incremental checks. For
+// example: `go test $(echo "$WARDEN_CHANGED_FILES" | ...)`. The full change set
+// (not just a per-step subset) is exposed; scoping is the command's choice.
+func stepEnv(sc application.StepContext) []string {
+	env := os.Environ()
+	env = append(env,
+		"WARDEN_HOOK="+sc.Hook.ConfigKey(),
+		"WARDEN_BRANCH="+sc.Branch,
+		"WARDEN_CHANGED_FILES="+strings.Join(sc.Diff.Paths, "\n"),
+		"WARDEN_FILES_TOUCHED="+strconv.Itoa(sc.Diff.FilesTouched),
+		"WARDEN_LINES_CHANGED="+strconv.Itoa(sc.Diff.LinesChanged),
+	)
+	return env
 }

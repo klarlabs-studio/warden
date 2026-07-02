@@ -33,6 +33,26 @@ func TestShellStep(t *testing.T) {
 		}
 	})
 
+	t.Run("exposes WARDEN_ env for incremental commands", func(t *testing.T) {
+		sc := application.StepContext{
+			WorktreeDir: t.TempDir(),
+			Branch:      "feature/x",
+			Diff:        domain.DiffStats{Paths: []string{"a.go", "b.go"}, FilesTouched: 2, LinesChanged: 9},
+			Commands: map[string]string{"lint": `
+				test "$WARDEN_BRANCH" = "feature/x" || exit 1
+				test "$WARDEN_FILES_TOUCHED" = "2" || exit 1
+				echo "$WARDEN_CHANGED_FILES" | grep -q a.go || exit 1
+			`},
+		}
+		res, err := step.Run(ctx, sc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != domain.StepPass {
+			t.Errorf("WARDEN_ env not available to command: %+v", res)
+		}
+	})
+
 	t.Run("non-zero exit fails with output finding", func(t *testing.T) {
 		sc := application.StepContext{WorktreeDir: t.TempDir(), Commands: map[string]string{"lint": "echo boom >&2; exit 1"}}
 		res, err := step.Run(ctx, sc)

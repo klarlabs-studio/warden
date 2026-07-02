@@ -6,11 +6,43 @@ Warden runs a policy-driven pipeline (lint, test, review, …) in a **disposable
 
 Built on [`axi-go`](https://go.klarlabs.de/axi) (execution kernel — typed actions, effect-gated approval, tamper-evident evidence chain), [`fortify`](https://go.klarlabs.de/fortify) (resilience), [`statekit`](https://go.klarlabs.de/statekit) (policy visualization), and [`mcp-go`](https://go.klarlabs.de/mcp) (MCP surface).
 
+## Why not just a Makefile / CI?
+
+`make ci` runs your checks — but in your **dirty working tree** ("passes locally,
+fails CI"), and only when you **remember** to run it, leaving **no trace**.
+Warden does what a Makefile can't:
+
+- **Runs clean.** Every check runs in a disposable worktree seeded from the
+  commit, so passing in warden means passing in CI — reproducibly.
+- **Can't be forgotten.** Native `git` hooks fire automatically; no discipline
+  required, no changed muscle memory.
+- **Leaves proof.** Each gated commit gets a hash-chained validation note that
+  travels with the repo — so **CI can trust it and skip re-running the checks**,
+  cutting minutes and cost ([provenance-skip](docs/ci-provenance-skip.md)).
+- **Scales with risk.** Rules match on branch / path / diff size, so heavy
+  checks and human approval apply only where they matter.
+
+It complements your checks rather than replacing them: point warden at the
+commands you already run (`warden import` reads them from your Makefile, npm
+scripts, lefthook, or CI).
+
 ## Install
 
 ```bash
 go install go.klarlabs.de/warden@latest
+# or: brew install klarlabs-studio/tap/warden
 ```
+
+## Adopt an existing repo in one command
+
+```bash
+cd your-repo
+warden import --write   # reads your Makefile / package.json / lefthook / CI into .warden.yaml
+warden init             # installs hooks + records the adoption point
+```
+
+`warden init` alone also works — it auto-detects the language (Go, Rust, JS/TS,
+Python) and pre-fills sensible lint/test commands.
 
 ## Quick start
 
@@ -83,7 +115,12 @@ gate.
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
+| `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / lefthook / CI |
+| `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
+| `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
+| `warden verify [--commit c] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
+| `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |
 

@@ -114,6 +114,14 @@ func runIn(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// ResolveSHA resolves a ref (branch, tag, HEAD, short sha) to a full commit SHA.
+func (r *Repo) ResolveSHA(ref string) (string, error) {
+	if ref == "" {
+		ref = "HEAD"
+	}
+	return r.run("rev-parse", ref)
+}
+
 // CurrentBranch returns the checked-out branch name (or "HEAD" when detached).
 func (r *Repo) CurrentBranch() (string, error) {
 	return r.run("rev-parse", "--abbrev-ref", "HEAD")

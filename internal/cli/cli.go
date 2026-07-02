@@ -24,6 +24,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(stdout, stderr)
 	case "init":
 		return cmdInit(rest, stdout, stderr)
+	case "import":
+		return cmdImport(rest, stdout, stderr)
+	case "audit":
+		return cmdAudit(rest, stdout, stderr)
 	case "hooks":
 		return cmdHooks(rest, stdout, stderr)
 	case "run":
@@ -36,6 +40,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdDoctor(rest, stdout, stderr)
 	case "ci":
 		return cmdCI(rest, stdout, stderr)
+	case "verify":
+		return cmdVerify(rest, stdout, stderr)
 	case "axi":
 		return cmdAxi(rest, stdout, stderr)
 	case "mcp":
@@ -57,12 +63,15 @@ func cmdHelp(w io.Writer) int {
 Usage:
   warden status                               show gate state, armed hooks, policy
   warden init [--hooks=pre-commit,pre-push]   initialize gate, install hooks
+  warden import [--write]                     generate .warden.yaml from existing CI/Makefile/scripts
+  warden audit [--branch b] [--format json|md] export a commit-provenance report
   warden hooks enable|disable <hook>          change hook selection
   warden run <pre-commit|pre-push>            run the gate (invoked by hooks)
   warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]
   warden steps list                           list built-in + custom steps
   warden doctor [--branch b]                  audit provenance since adoption
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
+  warden verify [--commit c] [--quiet]        exit 0 if the commit is warden-validated (CI skip)
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio
   warden version
