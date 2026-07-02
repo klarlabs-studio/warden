@@ -39,7 +39,7 @@ npx @klarlabs/warden init
 curl -fsSL https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.sh | sh
 
 # Homebrew
-brew install klarlabs-studio/tap/warden
+brew install felixgeelhaar/tap/warden
 
 # Go devs
 go install go.klarlabs.de/warden@latest   # or: go run go.klarlabs.de/warden@latest init

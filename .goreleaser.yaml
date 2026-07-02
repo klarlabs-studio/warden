@@ -42,7 +42,7 @@ release:
 
 homebrew_casks:
   - repository:
-      owner: klarlabs-studio
+      owner: felixgeelhaar
       name: homebrew-tap
       # The default GITHUB_TOKEN is scoped to this repo only and cannot push to
       # the separate tap repo (403); use the dedicated tap PAT.
