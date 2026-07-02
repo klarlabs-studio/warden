@@ -1,9 +1,9 @@
 # Warden — local CI. `make ci` mirrors the GitHub pipeline order:
 # quality (fmt, vet, lint, gocritic) -> security (nox) -> tests -> e2e.
 
-.PHONY: ci fmt fmt-check vet lint gocritic sec test cover e2e build install clean
+.PHONY: ci fmt fmt-check vet lint gocritic sec vuln test cover e2e build install clean
 
-ci: fmt-check vet lint gocritic sec test e2e ## Run the full pipeline in order
+ci: fmt-check vet lint gocritic sec vuln test e2e ## Run the full pipeline in order
 
 fmt: ## Format the tree
 	gofmt -w .
@@ -25,6 +25,9 @@ gocritic: ## Standalone gocritic (diagnostic/style/performance)
 
 sec: ## nox security scan (findings baselined in .nox/baseline.json)
 	nox scan .
+
+vuln: ## govulncheck — reachable Go stdlib + dependency vulnerabilities
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 test: ## Unit tests with race + coverage
 	go test ./... -race -cover

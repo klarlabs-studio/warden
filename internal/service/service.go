@@ -100,6 +100,11 @@ func (s *Service) Run(ctx context.Context, hook domain.Hook) (application.RunRes
 	return s.runner.Run(ctx, hook)
 }
 
+// SetObserver attaches a step-progress observer for the next run (used by the
+// interactive TUI). Runs are sequential, so setting it on the shared runner is
+// safe.
+func (s *Service) SetObserver(o application.Observer) { s.runner.Observer = o }
+
 // StepsList returns the configured (or default) step subset for each hook.
 func (s *Service) StepsList() (preCommit, prePush []domain.StepName, err error) {
 	cfg, err := s.Config()

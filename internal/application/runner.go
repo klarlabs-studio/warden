@@ -44,7 +44,10 @@ type Runner struct {
 	Approver Approver
 	// Forge is optional: when set and enabled in config, a passing push opens a
 	// pull request. A nil Forge disables PR creation entirely.
-	Forge    Forge
+	Forge Forge
+	// Observer is optional: when set it receives step lifecycle events for a
+	// live UI. Nil means no progress reporting.
+	Observer Observer
 	Settings Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -218,6 +221,7 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 		return nil, err
 	}
 	for _, step := range resolved.Steps {
+		r.notify(StepEvent{Step: step, Phase: StepStarted})
 		out, err := kernel.Execute(ctx, step)
 		if err != nil {
 			return nil, fmt.Errorf("step %s: %w", step, err)
@@ -225,11 +229,19 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 		if err := run.RecordStep(out.Result); err != nil {
 			return nil, err
 		}
+		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
 		if run.IsTerminal() {
 			break
 		}
 	}
 	return kernel, nil
+}
+
+// notify forwards a step event to the Observer when one is set.
+func (r *Runner) notify(e StepEvent) {
+	if r.Observer != nil {
+		r.Observer.OnStep(e)
+	}
 }
 
 // resolvePushGate drives the write-external push action through its approval

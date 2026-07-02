@@ -6,8 +6,11 @@ import (
 	"io"
 	"os"
 
+	"github.com/mattn/go-isatty"
+
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/tui"
 )
 
 // cmdRun handles `warden run <hook>`, the entry point the installed hook shims
@@ -23,6 +26,12 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	hook, err := domain.ParseHook(args[0])
 	if err != nil {
 		return fail(stderr, err)
+	}
+
+	// A pre-push run on a real terminal gets the live TUI; the fast pre-commit
+	// path and non-interactive streams (CI, agents) print inline (§4.4).
+	if hook == domain.PrePush && isInteractive() {
+		return runWithTUI(hook, stdout, stderr)
 	}
 
 	svc, err := newService(newTerminalApprover(os.Stdin, stdout))
@@ -42,6 +51,30 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	default:
 		return runPrePushExit(res, stdout)
 	}
+}
+
+// isInteractive reports whether both stdin and stdout are a terminal, so the
+// TUI has something to attach to.
+func isInteractive() bool {
+	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+}
+
+// runWithTUI drives a pre-push run under the live TUI.
+func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
+	br := tui.NewApprover()
+	svc, err := newService(br)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	resolved, err := svc.Explain(hook, "", nil)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	res, err := tui.Run(svc, br, hook, resolved.Steps)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return runPrePushExit(res, stdout)
 }
 
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a

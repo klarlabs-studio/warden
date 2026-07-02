@@ -115,3 +115,27 @@ type Decision struct {
 type Approver interface {
 	Approve(ctx context.Context, req ApprovalRequest) (Decision, error)
 }
+
+// StepPhase marks a point in a step's lifecycle for progress reporting.
+type StepPhase string
+
+const (
+	StepStarted  StepPhase = "started"
+	StepFinished StepPhase = "finished"
+)
+
+// StepEvent is emitted as the pipeline advances so a live UI can render
+// progress. Result is meaningful only when Phase is StepFinished.
+type StepEvent struct {
+	Step   domain.StepName
+	Phase  StepPhase
+	Result domain.StepResult
+}
+
+// Observer receives step lifecycle events during a run. It is optional; a nil
+// Observer means no progress reporting (the non-interactive path). Calls happen
+// on the Runner's goroutine, so an implementation that feeds a UI must not
+// block beyond a quick channel send.
+type Observer interface {
+	OnStep(StepEvent)
+}
