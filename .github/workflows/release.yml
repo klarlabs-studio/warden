@@ -36,8 +36,9 @@ jobs:
   # Assemble the per-platform npm packages from the same binaries and publish
   # them + the main wrapper. The wrapper carries no logic — just launches the
   # binary — so npm is purely a delivery channel.
+  # Independent of goreleaser: it rebuilds the binaries itself and only touches
+  # npm, so a brew/tap hiccup in goreleaser never blocks the npm channel.
   npm:
-    needs: goreleaser
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
