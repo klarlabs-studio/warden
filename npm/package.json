@@ -1,7 +1,7 @@
 {
   "name": "@klarlabs/warden",
   "version": "0.6.0",
-  "description": "Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance. Wraps the warden binary so `npx warden` works with no Go toolchain.",
+  "description": "Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance. Wraps the warden binary so `npx @klarlabs/warden` works with no Go toolchain.",
   "bin": {
     "warden": "bin/warden.cjs"
   },
