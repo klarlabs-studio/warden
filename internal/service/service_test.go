@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -46,7 +47,7 @@ func TestService_InitWritesConfigHooksAndAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,6 +76,46 @@ func TestService_InitWritesConfigHooksAndAdoption(t *testing.T) {
 	}
 }
 
+func TestService_InitDetectsLanguageAndPrefillsCommands(t *testing.T) {
+	dir := initRepo(t)
+	// Mark the repo as a Rust project.
+	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte("[package]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := New(dir, "test", autoApprover{})
+
+	lang, err := svc.Init(domain.AllHooks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lang != domain.LangRust {
+		t.Fatalf("detected language = %q, want rust", lang)
+	}
+	cfg, _ := svc.Config()
+	if cfg.Commands["test"] != "cargo test" {
+		t.Errorf("test command not pre-filled for rust: %q", cfg.Commands["test"])
+	}
+	if cfg.Commands["lint"] == "" {
+		t.Error("lint command should be pre-filled for a detected language")
+	}
+}
+
+func TestService_InitUnknownLanguageLeavesPlaceholders(t *testing.T) {
+	dir := initRepo(t) // no marker files
+	svc, _ := New(dir, "test", autoApprover{})
+	lang, err := svc.Init(domain.AllHooks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lang != domain.LangUnknown {
+		t.Errorf("no marker should be LangUnknown, got %q", lang)
+	}
+	cfg, _ := svc.Config()
+	if _, ok := cfg.Commands["lint"]; !ok {
+		t.Error("expected empty lint placeholder for an unknown project")
+	}
+}
+
 func TestService_InitDoesNotClobberUserConfig(t *testing.T) {
 	dir := initRepo(t)
 	svc, err := New(dir, "test", autoApprover{})
@@ -85,7 +126,7 @@ func TestService_InitDoesNotClobberUserConfig(t *testing.T) {
 	if err := svc.configs.Save(domain.Config{Commands: map[string]string{"lint": "custom"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Init([]domain.Hook{domain.PrePush}); err != nil {
+	if _, err := svc.Init([]domain.Hook{domain.PrePush}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := svc.Config()
@@ -100,7 +141,7 @@ func TestService_InitDoesNotClobberUserConfig(t *testing.T) {
 func TestService_SetHookTogglesShimAndConfig(t *testing.T) {
 	dir := initRepo(t)
 	svc, _ := New(dir, "test", autoApprover{})
-	if err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.SetHook(domain.PreCommit, false); err != nil {
@@ -198,7 +239,7 @@ func TestService_DoctorFlagsUnverifiedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks); err != nil {
 		t.Fatal(err)
 	}
 	// A commit made after adoption with no note is unverified.

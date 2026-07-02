@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // cmdInit handles `warden init [--hooks=...]`, installing the selected hooks,
@@ -25,7 +27,8 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := svc.Init(selected); err != nil {
+	lang, err := svc.Init(selected)
+	if err != nil {
 		return fail(stderr, err)
 	}
 
@@ -34,6 +37,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, " %s", h)
 	}
 	fmt.Fprintln(stdout)
+	if lang != domain.LangUnknown {
+		fmt.Fprintf(stdout, "detected %s — pre-filled lint/test commands in .warden.yaml (adjust as needed).\n", lang)
+	}
 	fmt.Fprintln(stdout, "adoption point recorded at current HEAD; edit .warden.yaml to configure policy.")
 	return 0
 }

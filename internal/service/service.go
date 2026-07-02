@@ -10,6 +10,7 @@ import (
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
+	"go.klarlabs.de/warden/internal/infrastructure/detect"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/hooks"
 	"go.klarlabs.de/warden/internal/infrastructure/kernel"
@@ -102,23 +103,26 @@ func hookSteps(cfg domain.Config, hook domain.Hook) []domain.StepName {
 func (s *Service) ApplyFixPatch(patch string) error { return s.repo.ApplyPatch(patch) }
 
 // Init installs the selected hooks, writes a starter config if absent, and
-// records the adoption point (§9).
-func (s *Service) Init(selected []domain.Hook) error {
+// records the adoption point (§9). It returns the project language detected when
+// writing a starter config (LangUnknown when a config already existed or none
+// was recognized), so the caller can report what it pre-filled.
+func (s *Service) Init(selected []domain.Hook) (domain.Language, error) {
 	gitDir, err := s.repo.GitDir()
 	if err != nil {
-		return err
+		return domain.LangUnknown, err
 	}
 	if err := hooks.Install(gitDir, selected); err != nil {
-		return err
+		return domain.LangUnknown, err
 	}
-	if err := s.writeStarterConfig(selected); err != nil {
-		return err
+	lang, err := s.writeStarterConfig(selected)
+	if err != nil {
+		return domain.LangUnknown, err
 	}
 	head, err := s.repo.HeadSHA()
 	if err != nil {
-		return fmt.Errorf("read HEAD for adoption point: %w", err)
+		return domain.LangUnknown, fmt.Errorf("read HEAD for adoption point: %w", err)
 	}
-	return s.repo.WriteAdoption(head)
+	return lang, s.repo.WriteAdoption(head)
 }
 
 // SetHook enables or disables a single hook after init, updating both the
@@ -162,30 +166,39 @@ func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
 
 // writeStarterConfig writes a minimal .warden.yaml only when none exists. On an
 // existing (user-authored) config it never rewrites the file — it updates just
-// the hooks selection in place, preserving comments and formatting.
-func (s *Service) writeStarterConfig(selected []domain.Hook) error {
+// the hooks selection in place, preserving comments and formatting. When it does
+// write a starter, it detects the project language and pre-fills lint/test
+// commands, returning the detected language for reporting.
+func (s *Service) writeStarterConfig(selected []domain.Hook) (domain.Language, error) {
 	existing, err := s.Config()
 	if err != nil {
-		return err
+		return domain.LangUnknown, err
 	}
 	hookCfg := hookConfigFrom(selected)
 
 	// A config with any rules or commands is considered user-authored: leave it
 	// untouched except for the hooks selection.
 	if len(existing.Rules) > 0 || len(existing.Commands) > 0 {
-		return s.configs.SetHooks(hookCfg)
+		return domain.LangUnknown, s.configs.SetHooks(hookCfg)
+	}
+
+	lang := detect.Language(s.repo.Dir)
+	commands := domain.LanguageCommands(lang)
+	if commands == nil {
+		// Unknown project: leave placeholders for the author to fill in.
+		commands = map[string]string{"lint": "", "test": ""}
 	}
 	cfg := domain.Config{
 		Agent:    "auto",
 		Hooks:    hookCfg,
-		Commands: map[string]string{"lint": "", "test": ""},
+		Commands: commands,
 		Steps: map[string][]domain.StepName{
 			domain.PreCommit.ConfigKey(): domain.DefaultSteps(domain.PreCommit),
 			domain.PrePush.ConfigKey():   domain.DefaultSteps(domain.PrePush),
 		},
 		Risk: domain.RiskConfig(domain.DefaultRiskThresholds()),
 	}
-	return s.configs.Save(cfg)
+	return lang, s.configs.Save(cfg)
 }
 
 // hookConfigFrom turns a hook selection list into a HookConfig.
