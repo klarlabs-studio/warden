@@ -11,7 +11,7 @@ import (
 
 func TestInstallAndInstalled(t *testing.T) {
 	gitDir := t.TempDir()
-	if err := Install(gitDir, domain.AllHooks); err != nil {
+	if err := Install(gitDir, domain.AllHooks, "0.6.0"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -24,9 +24,16 @@ func TestInstallAndInstalled(t *testing.T) {
 		if info.Mode().Perm()&0o100 == 0 {
 			t.Errorf("hook %s must be executable, mode=%v", h, info.Mode())
 		}
-		data, _ := os.ReadFile(path)
-		if !strings.Contains(string(data), "warden run "+string(h)) {
+		raw, _ := os.ReadFile(path)
+		data := string(raw)
+		if !strings.Contains(data, "hook="+string(h)) || !strings.Contains(data, `run "$hook"`) {
 			t.Errorf("hook %s does not invoke warden run: %q", h, data)
+		}
+		if !strings.Contains(data, "pinned: 0.6.0") {
+			t.Errorf("hook %s not version-pinned: %q", h, data)
+		}
+		if !strings.Contains(data, "command -v warden") {
+			t.Errorf("hook %s should prefer a warden on PATH: %q", h, data)
 		}
 	}
 
@@ -47,7 +54,7 @@ func TestInstall_RefusesToClobberForeignHook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Install(gitDir, []domain.Hook{domain.PreCommit}); err == nil {
+	if err := Install(gitDir, []domain.Hook{domain.PreCommit}, "0.6.0"); err == nil {
 		t.Fatal("expected Install to refuse overwriting a non-managed hook")
 	}
 	// The user's hook must be intact.
@@ -59,7 +66,7 @@ func TestInstall_RefusesToClobberForeignHook(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	gitDir := t.TempDir()
-	if err := Install(gitDir, []domain.Hook{domain.PrePush}); err != nil {
+	if err := Install(gitDir, []domain.Hook{domain.PrePush}, "0.6.0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Remove(gitDir, domain.PrePush); err != nil {

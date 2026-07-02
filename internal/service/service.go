@@ -136,7 +136,7 @@ func (s *Service) Init(selected []domain.Hook) (domain.Language, error) {
 	if err != nil {
 		return domain.LangUnknown, err
 	}
-	if err := hooks.Install(gitDir, selected); err != nil {
+	if err := hooks.Install(gitDir, selected, s.version); err != nil {
 		return domain.LangUnknown, err
 	}
 	lang, err := s.writeStarterConfig(selected)
@@ -158,7 +158,7 @@ func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
 		return err
 	}
 	if enabled {
-		if err := hooks.Install(gitDir, []domain.Hook{hook}); err != nil {
+		if err := hooks.Install(gitDir, []domain.Hook{hook}, s.version); err != nil {
 			return err
 		}
 	} else if err := hooks.Remove(gitDir, hook); err != nil {

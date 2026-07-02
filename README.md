@@ -33,7 +33,7 @@ toolchain required.
 
 ```bash
 # npx — no install (works anywhere Node is present)
-npx warden init
+npx @klarlabs/warden init
 
 # curl (Linux/macOS)
 curl -fsSL https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.sh | sh
@@ -47,7 +47,7 @@ go install go.klarlabs.de/warden@latest   # or: go run go.klarlabs.de/warden@lat
 
 On Windows: `irm https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.ps1 | iex`.
 
-The `npx warden` package is a ~15-line launcher: it ships the prebuilt binary
+The `npx @klarlabs/warden` package is a ~15-line launcher: it ships the prebuilt binary
 per platform (the [esbuild pattern](https://github.com/evanw/esbuild/tree/main/npm))
 and execs it. All logic lives in the one Go binary; every channel above ships
 that same binary.
