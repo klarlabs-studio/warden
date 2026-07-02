@@ -6,3 +6,8 @@
 # nox scan output (baseline is committed; raw findings are not)
 /findings.json
 /results.sarif
+
+# release build artifacts (generated, never committed)
+/dist/
+/npm/packages/
+/npm/node_modules/

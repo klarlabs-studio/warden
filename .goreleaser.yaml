@@ -1,0 +1,49 @@
+# goreleaser builds the static warden binaries that every distribution channel
+# (npm wrapper, install.sh, brew, the self-installing hook) ships. One build,
+# many channels — the binary is the single source of truth.
+version: 2
+
+project_name: warden
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: warden
+    main: .
+    binary: warden
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    # Stamp the release version into the binary's cli.Version.
+    ldflags:
+      - -s -w -X go.klarlabs.de/warden/internal/cli.Version={{ .Version }}
+
+archives:
+  - id: warden
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "warden_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+release:
+  github:
+    owner: klarlabs
+    name: warden
+
+homebrew_casks:
+  - repository:
+      owner: klarlabs-studio
+      name: homebrew-tap
+    homepage: https://go.klarlabs.de/warden
+    description: Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance
+    license: MIT
