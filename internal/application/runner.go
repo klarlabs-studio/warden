@@ -25,6 +25,8 @@ type RunResult struct {
 	Findings []domain.Finding
 	// Record is the provenance note written on a passing pre-push run.
 	Record *domain.RunRecord
+	// PR is the pull request opened or found after a passing push, if enabled.
+	PR *domain.PRInfo
 	// FixPatch is the worktree diff to re-apply on a passing pre-commit run.
 	FixPatch string
 	Message  string
@@ -40,6 +42,9 @@ type Runner struct {
 	Configs  ConfigRepository
 	Kernels  KernelFactory
 	Approver Approver
+	// Forge is optional: when set and enabled in config, a passing push opens a
+	// pull request. A nil Forge disables PR creation entirely.
+	Forge    Forge
 	Settings Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -77,7 +82,7 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 	case domain.PreCommit:
 		return r.runPreCommit(ctx, resolved, branch, diff)
 	case domain.PrePush:
-		return r.runPrePush(ctx, resolved, branch, diff)
+		return r.runPrePush(ctx, resolved, branch, diff, cfg.PR)
 	default:
 		return RunResult{}, fmt.Errorf("unsupported hook %q", hook)
 	}
@@ -129,7 +134,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 
 // runPrePush runs the full pipeline in a worktree cloned from the branch tip,
 // then fast-forwards back and pushes on approval (§4.3).
-func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats) (RunResult, error) {
+func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, prCfg domain.PRConfig) (RunResult, error) {
 	seedTip, err := r.Git.HeadSHA()
 	if err != nil {
 		return RunResult{}, err
@@ -188,7 +193,19 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if err := run.MarkPushed(*record, "warden pushed the gated commit(s); local branch fast-forwarded"); err != nil {
 		return RunResult{}, err
 	}
-	return r.result(run, ""), nil
+
+	res := r.result(run, "")
+	// PR creation is best-effort and post-push: a forge failure never unwinds a
+	// push that already succeeded (§4.3). Only run it when enabled and usable.
+	if prCfg.Enabled && r.Forge != nil && r.Forge.Available() {
+		if pr, err := r.Forge.EnsurePR(ctx, branch, prCfg.Base); err == nil {
+			res.PR = &pr
+			if pr.URL != "" {
+				res.Message += "; PR " + pr.URL
+			}
+		}
+	}
+	return res, nil
 }
 
 // runValidation builds the run's kernel and folds each resolved step's outcome

@@ -11,6 +11,7 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 	"go.klarlabs.de/warden/internal/infrastructure/detect"
+	"go.klarlabs.de/warden/internal/infrastructure/forge"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/hooks"
 	"go.klarlabs.de/warden/internal/infrastructure/kernel"
@@ -25,6 +26,7 @@ const DefaultRemote = "origin"
 type Service struct {
 	repo    *git.Repo
 	configs *config.Repository
+	forge   *forge.GH
 	runner  *application.Runner
 	version string
 	remote  string
@@ -39,14 +41,32 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 		return nil, err
 	}
 	configs := config.NewRepository(repo.Dir)
+	gh := forge.NewGH(repo.Dir)
 	runner := &application.Runner{
 		Git:      git.NewAdapter(repo),
 		Configs:  configs,
 		Kernels:  kernel.NewFactory(steps.Default()),
 		Approver: approver,
+		Forge:    gh,
 		Settings: application.Settings{Version: version, Remote: DefaultRemote},
 	}
-	return &Service{repo: repo, configs: configs, runner: runner, version: version, remote: DefaultRemote}, nil
+	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, version: version, remote: DefaultRemote}, nil
+}
+
+// CIStatus reports the CI check status for a branch's pull request (branch ""
+// = current). Used by `warden ci`.
+func (s *Service) CIStatus(ctx context.Context, branch string) (domain.CIStatus, error) {
+	if !s.forge.Available() {
+		return domain.CIStatus{}, fmt.Errorf("gh CLI not found on PATH; install it to query CI status")
+	}
+	if branch == "" {
+		b, err := s.repo.CurrentBranch()
+		if err != nil {
+			return domain.CIStatus{}, err
+		}
+		branch = b
+	}
+	return s.forge.Checks(ctx, branch)
 }
 
 // Repo exposes the underlying repository for git-native surfaces (doctor).

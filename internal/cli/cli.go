@@ -34,6 +34,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdSteps(rest, stdout, stderr)
 	case "doctor":
 		return cmdDoctor(rest, stdout, stderr)
+	case "ci":
+		return cmdCI(rest, stdout, stderr)
 	case "axi":
 		return cmdAxi(rest, stdout, stderr)
 	case "mcp":
@@ -60,6 +62,7 @@ Usage:
   warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]
   warden steps list                           list built-in + custom steps
   warden doctor [--branch b]                  audit provenance since adoption
+  warden ci [--branch b] [--wait]             report CI status for the branch's PR
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio
   warden version

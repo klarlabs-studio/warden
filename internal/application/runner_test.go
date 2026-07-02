@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,23 @@ type fakeApprover struct{ approve bool }
 
 func (a fakeApprover) Approve(context.Context, ApprovalRequest) (Decision, error) {
 	return Decision{Approved: a.approve, Principal: "test"}, nil
+}
+
+// fakeForge records EnsurePR calls and returns a scripted PR.
+type fakeForge struct {
+	available bool
+	called    bool
+	pr        domain.PRInfo
+	err       error
+}
+
+func (f *fakeForge) Available() bool { return f.available }
+func (f *fakeForge) EnsurePR(context.Context, string, string) (domain.PRInfo, error) {
+	f.called = true
+	return f.pr, f.err
+}
+func (f *fakeForge) Checks(context.Context, string) (domain.CIStatus, error) {
+	return domain.CIStatus{}, nil
 }
 
 // fakeConfigs is an in-memory ConfigRepository, so the runner test depends on
@@ -286,6 +304,66 @@ func TestRunner_DefaultNowAndID(t *testing.T) {
 	}
 	if res.Record == nil || res.Record.RunID == "" || res.Record.Timestamp == "" {
 		t.Error("default NewID/Now must produce a non-empty run id and timestamp")
+	}
+}
+
+func TestRunner_OpensPRWhenEnabled(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true, pr: domain.PRInfo{URL: "https://forge/pr/1", Created: true}}
+
+	cfg := prePushCfg()
+	cfg.PR = domain.PRConfig{Enabled: true, Base: "main"}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if !forge.called {
+		t.Error("expected EnsurePR to be called on a passing push")
+	}
+	if res.PR == nil || res.PR.URL != "https://forge/pr/1" {
+		t.Errorf("PR not surfaced: %+v", res.PR)
+	}
+	if !strings.Contains(res.Message, "https://forge/pr/1") {
+		t.Errorf("message should mention the PR: %q", res.Message)
+	}
+}
+
+func TestRunner_NoPRWhenDisabledOrUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		available bool
+	}{
+		{"disabled", false, true},
+		{"unavailable", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+			kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+			forge := &fakeForge{available: tc.available}
+			cfg := prePushCfg()
+			cfg.PR = domain.PRConfig{Enabled: tc.enabled}
+			r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+			r.Forge = forge
+
+			res, err := r.Run(context.Background(), domain.PrePush)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if forge.called {
+				t.Error("EnsurePR must not be called")
+			}
+			if res.PR != nil {
+				t.Errorf("no PR expected, got %+v", res.PR)
+			}
+		})
 	}
 }
 

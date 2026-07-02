@@ -79,6 +79,20 @@ type KernelFactory interface {
 	New(policy domain.ResolvedPolicy, sc StepContext, priors *[]domain.Finding, push PushFunc) (Kernel, error)
 }
 
+// Forge is a code-hosting provider (GitHub via gh, …) used to open a pull
+// request and read CI status after a passing push. It is optional: a nil Forge
+// (or one that reports Available() == false) simply skips PR creation — the
+// push and its provenance are unaffected.
+type Forge interface {
+	// Available reports whether the forge is usable (CLI installed, authed).
+	Available() bool
+	// EnsurePR opens a PR for branch onto base if none is open, else returns
+	// the existing one. base "" means the forge's default branch. Idempotent.
+	EnsurePR(ctx context.Context, branch, base string) (domain.PRInfo, error)
+	// Checks returns the CI status for branch's pull request.
+	Checks(ctx context.Context, branch string) (domain.CIStatus, error)
+}
+
 // ApprovalRequest is what the Runner shows an Approver when the run reaches its
 // approval gate — the accumulated findings and the steps that produced them.
 type ApprovalRequest struct {

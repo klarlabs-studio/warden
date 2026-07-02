@@ -25,6 +25,9 @@ type Config struct {
 
 	Risk RiskConfig `yaml:"risk"`
 
+	// PR configures optional pull-request creation after a passing push.
+	PR PRConfig `yaml:"pr"`
+
 	Rules []Rule `yaml:"rules"`
 }
 

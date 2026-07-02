@@ -16,6 +16,10 @@ linters:
   settings:
     misspell:
       locale: US
+      # GitHub's check-conclusion API value is the British "cancelled"; matching
+      # it is correctness, not a typo.
+      ignore-rules:
+        - cancelled
     gocritic:
       enabled-tags:
         - diagnostic
