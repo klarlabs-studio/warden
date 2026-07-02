@@ -7,6 +7,12 @@ on:
 permissions:
   contents: write # create the GitHub Release
 
+# A tag must produce exactly one release run — two concurrent runs race to
+# upload the same asset names and both fail with 422 already_exists.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Build the binaries + GitHub Release + brew formula.
   goreleaser:
