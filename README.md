@@ -90,6 +90,24 @@ From then on `git commit` / `git push` are gated. Warden's own push runs with
 The pre-push hook always exits non-zero on success — Warden already performed
 the push, so git's own (now-stale) push must be stopped from racing it.
 
+### Signed provenance
+
+Every validation note is signed with a per-machine ed25519 key (generated on
+first run, kept under your user config dir — the private key never leaves the
+machine). The signer's public key is bound into its own signature, so the note
+proves not just that the evidence chain is intact but that *a specific key*
+produced it. `warden verify` reports the signer; pass `--key` to require one:
+
+```bash
+warden key show                    # prints the fingerprint to pin
+warden verify --key <fingerprint>  # exit 0 only if signed by a trusted key
+```
+
+In CI this turns provenance-skip from "a warden ran here" into "a warden **I
+trust** ran here" — pass `key:` to the bundled `warden-verify` action. Notes
+stay verifiable (chain + signature) without pinning; `--key` just adds the trust
+gate.
+
 ## Configuration (`.warden.yaml`)
 
 ```yaml
@@ -155,7 +173,8 @@ force the classic one-step-at-a-time pipeline.
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
-| `warden verify [--commit c] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
+| `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
+| `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |

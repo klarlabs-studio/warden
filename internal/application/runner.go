@@ -48,6 +48,9 @@ type Runner struct {
 	// Observer is optional: when set it receives step lifecycle events for a
 	// live UI. Nil means no progress reporting.
 	Observer Observer
+	// Signer is optional: when set, a passing pre-push run's provenance note is
+	// signed. A nil Signer (or a signing failure) leaves the note unsigned.
+	Signer   Signer
 	Settings Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -187,6 +190,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if err != nil {
 		return RunResult{}, err
 	}
+	r.sign(record)
 	if finalSHA, err := r.Git.HeadSHA(); err == nil {
 		// Note-push is best-effort: a failed note never fails the gate (§9).
 		if err := r.Git.WriteNote(finalSHA, *record); err == nil {
@@ -315,6 +319,28 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 		return run.Abort("push failed: " + err.Error())
 	}
 	return nil
+}
+
+// sign attaches an ed25519 signature to the record when a Signer is configured.
+// Signing is best-effort: a failure leaves the note unsigned rather than failing
+// a push that has already succeeded (§9).
+func (r *Runner) sign(record *domain.RunRecord) {
+	if r.Signer == nil {
+		return
+	}
+	// Set the public key first so SigningPayload binds it into the signature.
+	record.PublicKey = r.Signer.PublicKey()
+	payload, err := record.SigningPayload()
+	if err != nil {
+		record.PublicKey = ""
+		return
+	}
+	sig, err := r.Signer.Sign(payload)
+	if err != nil {
+		record.PublicKey = ""
+		return
+	}
+	record.Signature = sig
 }
 
 // buildRecord finalizes the evidence chain into a provenance RunRecord (§9).

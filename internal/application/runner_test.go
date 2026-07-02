@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +33,7 @@ type fakeGit struct {
 	pushed       bool
 	notesPushed  bool
 	wroteNote    bool
+	note         domain.RunRecord
 	ffErr        error
 	mergeBaseErr error
 	wt           *fakeWorktree
@@ -50,8 +53,9 @@ func (g *fakeGit) SeedWorktreeFromBranch(string) (Worktree, error) {
 }
 func (g *fakeGit) FastForwardTo(_, _, _ string) error { return g.ffErr }
 func (g *fakeGit) Push(string, string) error          { g.pushed = true; return nil }
-func (g *fakeGit) WriteNote(string, domain.RunRecord) error {
+func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	g.wroteNote = true
+	g.note = rec
 	return nil
 }
 func (g *fakeGit) PushNotes(string) error { g.notesPushed = true; return nil }
@@ -185,6 +189,44 @@ func approvalCfg() domain.Config {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// fakeSigner signs with a real ed25519 key so the written record actually
+// verifies, exercising the runner's key-binding order.
+type fakeSigner struct {
+	pub  ed25519.PublicKey
+	priv ed25519.PrivateKey
+}
+
+func newFakeSigner(t *testing.T) *fakeSigner {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fakeSigner{pub: pub, priv: priv}
+}
+
+func (s *fakeSigner) PublicKey() string { return base64.StdEncoding.EncodeToString(s.pub) }
+func (s *fakeSigner) Sign(payload []byte) (string, error) {
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(s.priv, payload)), nil
+}
+
+func TestRunner_PrePushSignsProvenance(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	r.Signer = newFakeSigner(t)
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if !git.note.Signed() {
+		t.Fatal("expected the written provenance note to be signed")
+	}
+	if !git.note.VerifySignature() {
+		t.Error("the runner's signature must verify (public key bound into payload)")
+	}
+}
 
 func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}

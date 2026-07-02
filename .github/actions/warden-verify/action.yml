@@ -13,6 +13,14 @@ inputs:
     description: "Remote holding refs/notes/warden"
     required: false
     default: origin
+  key:
+    description: >-
+      Trusted signer key(s) or fingerprint(s), comma-separated. When set, the
+      commit's note must also carry a valid signature from one of these keys —
+      provenance-skip then means "a warden I trust ran here", not just "a warden
+      ran here". Get a fingerprint with `warden key show`.
+    required: false
+    default: ""
 
 outputs:
   validated:
@@ -34,7 +42,9 @@ runs:
     - id: check
       shell: bash
       run: |
-        if warden verify --commit "${{ inputs.commit }}" --quiet; then
+        KEY_ARG=()
+        if [ -n "${{ inputs.key }}" ]; then KEY_ARG=(--key "${{ inputs.key }}"); fi
+        if warden verify --commit "${{ inputs.commit }}" "${KEY_ARG[@]}" --quiet; then
           echo "validated=true" >> "$GITHUB_OUTPUT"
           echo "warden: ${{ inputs.commit }} already validated — CI can skip its checks."
         else

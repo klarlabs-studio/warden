@@ -142,6 +142,78 @@
       "severity": "low",
       "reason": "Benign: test-fixture git author email in seed_test.go (matches 8 already-baselined sibling test emails); intentional cancel-in-progress concurrency guard in release.yml (matches already-baselined ci.yml).",
       "created_at": "2026-07-02T18:46:19.746484Z"
+    },
+    {
+      "fingerprint": "c438237c3f5bff51a54307e7fdbbfca964c31b033de04ed070d42845d7f6755e",
+      "rule_id": "SEC-163",
+      "file_path": "internal/application/runner_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "39594d9662b481a7843813f368b6add6e998f82e045819e60ca40441cded1956",
+      "rule_id": "SEC-163",
+      "file_path": "internal/cli/cmd_key.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "a83b1b7b319864f7792b5d2f8df4c9c682d2d6366f2568b0450fade270da88b1",
+      "rule_id": "SEC-163",
+      "file_path": "internal/cli/cmd_verify.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "293870333c5f9c0b66ff26d99ef76e268ebe0e2ccde126540d51f8f8b6e8afa9",
+      "rule_id": "SEC-163",
+      "file_path": "internal/domain/signature_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "969d3cd3fc551380c99262d78d03498c998f237a65f3271fcee6dfa2ea340822",
+      "rule_id": "SEC-163",
+      "file_path": "internal/domain/signature_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "055e96bac14f39d7a3d50eb67b81cee6607bfbb894c4929581b82cc06a87232d",
+      "rule_id": "SEC-163",
+      "file_path": "internal/infrastructure/signing/signer_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "abb60f60a183c73cc5f5664b6dc2dc62ed388925f9631c9771a0563b65e2b75f",
+      "rule_id": "SEC-163",
+      "file_path": "internal/infrastructure/signing/signer_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "created_at": "2026-07-02T19:09:12.289443Z"
+    },
+    {
+      "fingerprint": "ec1fefc1c3185f6aced6ea3c32832b3d2f91451f016bcb7979d926f16cb81617",
+      "rule_id": "SEC-163",
+      "file_path": "internal/cli/cmd_signing_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections in signing test files (assertion strings / fake fingerprint fixtures, no real secrets).",
+      "created_at": "2026-07-02T19:11:56.185931Z"
+    },
+    {
+      "fingerprint": "3654c949467617109baaab1b051429243a963950e1d79a0b81ce4d9f2e2f817b",
+      "rule_id": "SEC-163",
+      "file_path": "internal/service/signing_test.go",
+      "severity": "medium",
+      "reason": "False-positive high-entropy detections in signing test files (assertion strings / fake fingerprint fixtures, no real secrets).",
+      "created_at": "2026-07-02T19:11:56.185931Z"
     }
   ]
 }

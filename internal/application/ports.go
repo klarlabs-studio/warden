@@ -116,6 +116,18 @@ type Decision struct {
 	Rationale string
 }
 
+// Signer produces detached ed25519 signatures over provenance payloads. It is
+// optional: a nil Signer leaves run records unsigned, and a signing failure
+// never fails a run — the note is still written, just without a signature (§9).
+type Signer interface {
+	// PublicKey is the base64 ed25519 public key that verifies this signer's
+	// signatures. It is written into the record before signing so the key is
+	// bound into its own signature.
+	PublicKey() string
+	// Sign returns a base64 ed25519 signature over payload.
+	Sign(payload []byte) (string, error)
+}
+
 // Approver resolves the run's approval gate. Interactive delivery shows a TUI;
 // agent surfaces answer programmatically; the default auto-approves clean runs.
 type Approver interface {

@@ -15,6 +15,7 @@ import (
 	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/hooks"
 	"go.klarlabs.de/warden/internal/infrastructure/kernel"
+	"go.klarlabs.de/warden/internal/infrastructure/signing"
 	"go.klarlabs.de/warden/internal/infrastructure/steps"
 	"go.klarlabs.de/warden/internal/policy"
 )
@@ -28,6 +29,7 @@ type Service struct {
 	configs *config.Repository
 	forge   *forge.GH
 	runner  *application.Runner
+	signer  *signing.Signer
 	version string
 	remote  string
 }
@@ -50,7 +52,36 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 		Forge:    gh,
 		Settings: application.Settings{Version: version, Remote: DefaultRemote},
 	}
-	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, version: version, remote: DefaultRemote}, nil
+	// Provenance signing is best-effort: if the key can't be loaded (e.g. a
+	// locked-down home in CI), runs still validate and write unsigned notes.
+	signer := loadSigner()
+	if signer != nil {
+		runner.Signer = signer
+	}
+	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, signer: signer, version: version, remote: DefaultRemote}, nil
+}
+
+// loadSigner loads (or first-time generates) the provenance signing key, or
+// returns nil if the key dir is unavailable — signing is optional (§9).
+func loadSigner() *signing.Signer {
+	dir, err := signing.DefaultDir()
+	if err != nil {
+		return nil
+	}
+	s, err := signing.Load(dir)
+	if err != nil {
+		return nil
+	}
+	return s
+}
+
+// SigningKey returns the machine's provenance public key (base64) and its short
+// fingerprint for `warden key show`. Both are empty when signing is unavailable.
+func (s *Service) SigningKey() (publicKey, fingerprint string) {
+	if s.signer == nil {
+		return "", ""
+	}
+	return s.signer.PublicKey(), s.signer.Fingerprint()
 }
 
 // CIStatus reports the CI check status for a branch's pull request (branch ""

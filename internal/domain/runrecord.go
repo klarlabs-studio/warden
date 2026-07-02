@@ -1,5 +1,13 @@
 package domain
 
+import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+)
+
 // EvidenceEntry is one hash-chained evidence record as it appears in a git
 // note (§9). It mirrors axi-go's domain.EvidenceRecord projected for storage,
 // so `warden doctor` can re-verify the chain without importing the kernel.
@@ -22,6 +30,63 @@ type RunRecord struct {
 	MatchedRules      []string            `json:"matched_rules"`
 	EvidenceChainRoot string              `json:"evidence_chain_root"`
 	Evidence          []EvidenceEntry     `json:"evidence"`
+	// PublicKey is the base64 ed25519 public key of the signer (§9). It is
+	// covered by Signature, so it cannot be swapped without re-signing.
+	PublicKey string `json:"public_key,omitempty"`
+	// Signature is the base64 ed25519 signature over the record's SigningPayload.
+	// Empty on an unsigned record.
+	Signature string `json:"signature,omitempty"`
+}
+
+// SigningPayload is the canonical byte string a signature covers: the record
+// with the Signature field cleared but PublicKey retained, so the key that
+// signed a record is bound into its own signature. encoding/json emits struct
+// fields in declaration order and map keys sorted, so the bytes are stable.
+func (r RunRecord) SigningPayload() ([]byte, error) {
+	r.Signature = "" // value receiver — clears only this copy's field
+	return json.Marshal(r)
+}
+
+// Signed reports whether the record carries a signature.
+func (r RunRecord) Signed() bool { return r.Signature != "" }
+
+// VerifySignature reports whether the record's signature is a valid ed25519
+// signature over its SigningPayload by the embedded public key. An unsigned or
+// malformed record verifies false. This proves integrity and authenticity
+// relative to the embedded key; binding that key to a trusted identity is the
+// caller's job (pin the fingerprint — see SignerFingerprint).
+func (r RunRecord) VerifySignature() bool {
+	if r.Signature == "" || r.PublicKey == "" {
+		return false
+	}
+	pub, err := base64.StdEncoding.DecodeString(r.PublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return false
+	}
+	sig, err := base64.StdEncoding.DecodeString(r.Signature)
+	if err != nil {
+		return false
+	}
+	payload, err := r.SigningPayload()
+	if err != nil {
+		return false
+	}
+	return ed25519.Verify(pub, payload, sig)
+}
+
+// SignerFingerprint is a short, stable identifier for the signing key, for
+// display and for pinning a trusted signer in CI (`warden verify --key`).
+func (r RunRecord) SignerFingerprint() string { return KeyFingerprint(r.PublicKey) }
+
+// KeyFingerprint hashes a base64 ed25519 public key to a 16-hex-char
+// fingerprint. An unparseable key yields "".
+func KeyFingerprint(publicKeyB64 string) string {
+	pub, err := base64.StdEncoding.DecodeString(publicKeyB64)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+	sum := sha256.Sum256(pub)
+	return hex.EncodeToString(sum[:8])
 }
 
 // VerifyChain checks the record's evidence links: the recorded root must equal
