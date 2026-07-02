@@ -17,6 +17,12 @@ type Config struct {
 	// gate. Unset or unparseable = no timeout.
 	Timeouts map[string]string `yaml:"timeouts"`
 
+	// Cache maps a step to the input path globs it depends on. When every matched
+	// file is byte-identical to the step's last passing run, warden skips the
+	// step (a cache hit). Only non-mutating steps are cacheable; correctness
+	// rests on declaring all of a step's inputs (like bazel/turbo).
+	Cache map[string][]string `yaml:"cache"`
+
 	// AgentCommands maps an agent name (as selected by `agent` or a rule's
 	// per-step agent override) to the shell command that invokes it. The
 	// template may reference {prompt}, {step}, and {repo}; e.g.

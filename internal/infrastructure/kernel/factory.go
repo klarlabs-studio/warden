@@ -17,11 +17,19 @@ import (
 // implementations to bind into each run.
 type Factory struct {
 	registry application.Registry
+	cache    application.StepCache
 }
 
 // NewFactory returns a Factory backed by the given built-in step registry.
 func NewFactory(reg application.Registry) *Factory {
 	return &Factory{registry: reg}
+}
+
+// WithCache attaches a step cache so cacheable steps can be skipped when their
+// declared inputs are unchanged. Returns the factory for chaining.
+func (f *Factory) WithCache(c application.StepCache) *Factory {
+	f.cache = c
+	return f
 }
 
 // New builds a fresh kernel for one run and wraps it with a run-level evidence
@@ -31,7 +39,7 @@ func (f *Factory) New(policy domain.ResolvedPolicy, sc application.StepContext, 
 	if push != nil {
 		pf = PushFunc(push)
 	}
-	k, err := Build(f.registry, policy, sc, priors, pf)
+	k, err := Build(f.registry, policy, sc, priors, pf, f.cache)
 	if err != nil {
 		return nil, err
 	}

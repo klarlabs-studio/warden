@@ -9,6 +9,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/cache"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 	"go.klarlabs.de/warden/internal/infrastructure/detect"
 	"go.klarlabs.de/warden/internal/infrastructure/forge"
@@ -44,10 +45,16 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 	}
 	configs := config.NewRepository(repo.Dir)
 	gh := forge.NewGH(repo.Dir)
+	factory := kernel.NewFactory(steps.Default())
+	// Step cache lives under the git dir (per-clone, never committed). A failure
+	// to locate it just disables caching.
+	if gitDir, err := repo.GitDir(); err == nil {
+		factory = factory.WithCache(cache.Open(gitDir))
+	}
 	runner := &application.Runner{
 		Git:      git.NewAdapter(repo),
 		Configs:  configs,
-		Kernels:  kernel.NewFactory(steps.Default()),
+		Kernels:  factory,
 		Approver: approver,
 		Forge:    gh,
 		Settings: application.Settings{Version: version, Remote: DefaultRemote},

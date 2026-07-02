@@ -129,6 +129,7 @@ steps:
 parallel: true   # default — run independent checks concurrently (see below)
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
 notify: true     # default — desktop notification when an interactive pre-push finishes
+cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 rules:
@@ -166,6 +167,16 @@ force the classic one-step-at-a-time pipeline.
 On an interactive terminal the pre-push run shows a live TUI: a spinner and a
 counting-up timer per step, a tail of each running step's output as it streams,
 and the approval gate answered inline.
+
+### Step cache
+
+Declare a step's input globs under `cache:` and warden skips it when every
+matched file is byte-identical to the step's last passing run — so an unchanged
+`test` doesn't re-run on a docs-only push. The cache lives in `.git` (per-clone,
+never committed); the key also covers the step's command, so changing what the
+step runs busts it. Only non-mutating steps are cacheable, and correctness rests
+on declaring *all* of a step's inputs (same contract as bazel/turbo). A step's
+first cache line appears as `test (cached — inputs unchanged)`.
 
 ## Commands
 

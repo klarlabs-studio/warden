@@ -31,6 +31,23 @@ type ResolvedPolicy struct {
 	Parallel bool
 	// Timeouts maps a step to its max run duration; zero means no limit.
 	Timeouts map[StepName]time.Duration
+	// Cache maps a step to its declared input path globs (see Config.Cache).
+	Cache map[StepName][]string
+}
+
+// CachePaths returns the declared input globs for a step, or nil.
+func (p ResolvedPolicy) CachePaths(s StepName) []string {
+	if p.Cache == nil {
+		return nil
+	}
+	return p.Cache[s]
+}
+
+// Cacheable reports whether a step may be cache-skipped: it must declare input
+// paths and must not mutate the worktree (caching a mutating step would skip its
+// writes), so it reuses the Concurrent predicate.
+func (p ResolvedPolicy) Cacheable(s StepName) bool {
+	return len(p.CachePaths(s)) > 0 && p.Concurrent(s)
 }
 
 // TimeoutFor returns the configured timeout for a step, or 0 (no limit).

@@ -70,3 +70,29 @@ func TestResolvedPolicy_Concurrent(t *testing.T) {
 		}
 	}
 }
+
+func TestResolvedPolicy_Cacheable(t *testing.T) {
+	p := ResolvedPolicy{
+		Cache: map[StepName][]string{
+			"test":   {"**/*.go"},
+			"lint":   {"**/*.go"},
+			"rebase": {"**/*.go"}, // declared, but rebase mutates → never cacheable
+		},
+		AutoFix: map[StepName]int{"lint": 1}, // auto-fix mutates → not cacheable
+	}
+	if !p.Cacheable("test") {
+		t.Error("a read-only step with declared inputs must be cacheable")
+	}
+	if p.Cacheable("lint") {
+		t.Error("an auto-fix step must not be cacheable")
+	}
+	if p.Cacheable("rebase") {
+		t.Error("rebase mutates and must never be cacheable")
+	}
+	if p.Cacheable("review") {
+		t.Error("a step without declared inputs must not be cacheable")
+	}
+	if got := p.CachePaths("test"); len(got) != 1 || got[0] != "**/*.go" {
+		t.Errorf("CachePaths(test) = %v", got)
+	}
+}

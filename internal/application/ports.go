@@ -120,6 +120,20 @@ type Decision struct {
 	Rationale string
 }
 
+// StepCache memoizes passing steps by their declared inputs so an unchanged
+// step can be skipped on a later run (§4.4). It is optional: a nil cache simply
+// runs every step. Implementations must be safe for concurrent use, since steps
+// in a parallel batch consult it at once.
+type StepCache interface {
+	// Fingerprint hashes the contents of files under dir matching globs, or ""
+	// when nothing matches (the step is then not cached this run).
+	Fingerprint(dir string, globs []string) string
+	// Seen reports whether key was recorded by a prior passing run.
+	Seen(key string) bool
+	// Record marks key as passed. Best-effort: a store failure is ignored.
+	Record(key string)
+}
+
 // Signer produces detached ed25519 signatures over provenance payloads. It is
 // optional: a nil Signer leaves run records unsigned, and a signing failure
 // never fails a run — the note is still written, just without a signature (§9).

@@ -29,6 +29,20 @@ func parseTimeouts(raw map[string]string) map[domain.StepName]time.Duration {
 	return out
 }
 
+// cacheGlobs re-keys the config's step→globs map by StepName.
+func cacheGlobs(raw map[string][]string) map[domain.StepName][]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[domain.StepName][]string, len(raw))
+	for step, globs := range raw {
+		if len(globs) > 0 {
+			out[domain.StepName(step)] = globs
+		}
+	}
+	return out
+}
+
 // Input carries everything a resolution needs about the invocation under
 // evaluation.
 type Input struct {
@@ -63,6 +77,7 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		// Concurrent step execution is on unless explicitly disabled.
 		Parallel: cfg.Parallel == nil || *cfg.Parallel,
 		Timeouts: parseTimeouts(cfg.Timeouts),
+		Cache:    cacheGlobs(cfg.Cache),
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)

@@ -49,7 +49,7 @@ func stepEffect(s domain.StepName) axidomain.EffectLevel {
 // A new kernel per run is deliberate: it is cheap (in-memory adapters) and lets
 // per-step agent/budget/effect selection be baked into the closures without any
 // cross-run state to reset.
-func Build(reg application.Registry, policy domain.ResolvedPolicy, sc application.StepContext, priors *[]domain.Finding, push PushFunc) (*axi.Kernel, error) {
+func Build(reg application.Registry, policy domain.ResolvedPolicy, sc application.StepContext, priors *[]domain.Finding, push PushFunc, cache application.StepCache) (*axi.Kernel, error) {
 	var actions []*axidomain.ActionDefinition
 	execs := map[axidomain.ActionExecutorRef]axidomain.ActionExecutor{}
 
@@ -76,6 +76,14 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		if sc.Stream != nil {
 			name := name
 			stepSC.OnOutput = func(line string) { sc.Stream(name, line) }
+		}
+
+		// Wrap a cacheable, non-mutating step so an unchanged run is skipped. The
+		// command signature (shell + agent) is part of the key, so changing what a
+		// step runs busts its cache.
+		if cache != nil && policy.Cacheable(name) {
+			cmdSig := policy.Commands[string(name)] + "\x00" + stepSC.AgentCommand
+			step = cachedStep{inner: step, cache: cache, globs: policy.CachePaths(name), command: cmdSig}
 		}
 
 		def, err := newStepAction(name)
