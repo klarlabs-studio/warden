@@ -23,7 +23,7 @@ const releaseRepo = "klarlabs-studio/warden"
 // shim is the hook script body. It is self-bootstrapping and version-pinned:
 // prefer a `warden` on PATH; else use (or fetch, once) a pinned static binary
 // cached under ~/.warden/bin/<version>. So a repo adopted with `npx
-// @klarlabs/warden init` keeps working on every later commit/push with no global
+// @klarlabs-studio/warden init` keeps working on every later commit/push with no global
 // install — and the whole team runs the *same* pinned warden. The script
 // forwards git's stdin and exits with warden's status, so a failing gate blocks
 // git. A version that is not a real release (empty/dev/snapshot) skips the
@@ -40,7 +40,7 @@ if command -v warden >/dev/null 2>&1; then
 fi
 
 case "$ver" in ""|*dev*|*snapshot*)
-  echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs/warden, or https://github.com/%s" >&2
+  echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs-studio/warden, or https://github.com/%s" >&2
   exit 1 ;;
 esac
 

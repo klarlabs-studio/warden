@@ -1,11 +1,11 @@
 # warden (npm)
 
-`npx @klarlabs/warden` — a configurable git commit/push gate with native hooks, worktree
+`npx @klarlabs-studio/warden` — a configurable git commit/push gate with native hooks, worktree
 isolation, and cryptographic provenance. No Go toolchain required.
 
 ```bash
-npx @klarlabs/warden init            # set up the gate in the current repo
-npx @klarlabs/warden import --write   # or: generate config from your existing CI/Makefile
+npx @klarlabs-studio/warden init            # set up the gate in the current repo
+npx @klarlabs-studio/warden import --write   # or: generate config from your existing CI/Makefile
 ```
 
 This package is a thin launcher: it ships the prebuilt `warden` binary per

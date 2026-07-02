@@ -8,7 +8,7 @@
 const { spawnSync } = require("node:child_process");
 
 function binaryPath() {
-  const pkg = `@klarlabs/warden-${process.platform}-${process.arch}`;
+  const pkg = `@klarlabs-studio/warden-${process.platform}-${process.arch}`;
   const exe = process.platform === "win32" ? "warden.exe" : "warden";
   try {
     // npm installed only the platform package matching this os/cpu.

@@ -3,7 +3,7 @@
 //
 //   node npm/scripts/build-packages.mjs <version> [distDir] [outDir]
 //
-// For each supported platform it creates @klarlabs/warden-<os>-<arch> holding
+// For each supported platform it creates @klarlabs-studio/warden-<os>-<arch> holding
 // one prebuilt binary plus os/cpu fields, so `npm install` fetches only the
 // matching package. It also rewrites the main package's version + the
 // optionalDependencies to the release version. Node built-ins only.
@@ -59,7 +59,7 @@ for (const t of TARGETS) {
     console.warn(`skip ${t.platform}-${t.arch}: no binary under ${distDir}`);
     continue;
   }
-  const name = `@klarlabs/warden-${t.platform}-${t.arch}`;
+  const name = `@klarlabs-studio/warden-${t.platform}-${t.arch}`;
   const pkgDir = join(outDir, `warden-${t.platform}-${t.arch}`);
   const binDir = join(pkgDir, "bin");
   mkdirSync(binDir, { recursive: true });
