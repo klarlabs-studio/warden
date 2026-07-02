@@ -1,28 +1,26 @@
 agent: auto
 hooks:
-    pre_commit: true
-    pre_push: false
+  pre_commit: true
+  pre_push: false
 commands:
-    lint: test -z "$(gofmt -l .)" && go vet ./...
-    test: go test ./...
-agent_commands: {}
+  # Mirror CI stage 1: golangci-lint runs gofmt/goimports formatters + govet +
+  # staticcheck + gocritic, so one command is the whole quality gate.
+  lint: "golangci-lint run ./..."
+  # Mirror CI unit + e2e stages.
+  test: "go test -race ./... && go test -tags e2e ./e2e/"
 steps:
-    pre_commit:
-        - lint
-    pre_push:
-        - rebase
-        - test
-        - lint
+  # pre-commit stays fast: quality gate only.
+  pre_commit: [lint]
+  # pre-push mirrors CI order: quality -> security (nox custom step) -> tests.
+  # security-scan is a custom subprocess step (warden-step-security-scan on PATH).
+  pre_push: [rebase, lint, security-scan, test]
 risk:
-    diff_lines_high: 400
-    files_touched_high: 15
+  diff_lines_high: 400
+  files_touched_high: 15
 rules:
-    - match:
-        branch: main
-        paths: []
-        risk: high
-      then:
-        auto_fix: {}
-        require_approval: true
-        agent: {}
-        steps: {}
+  # Large changes on main get a human approval gate at push time.
+  - match:
+      branch: main
+      risk: high
+    then:
+      require_approval: true
