@@ -1,9 +1,9 @@
-//go:build e2e
-
 // Package e2e drives the built warden binary against real git repositories,
 // exercising the whole gate end to end: the pre-commit fast path, the pre-push
 // pipeline with its self-performed push and provenance notes, and the doctor
-// bypass audit. Run with: go test -tags e2e ./e2e/
+// bypass audit. Opt-in via WARDEN_E2E=1 (see Makefile `make e2e`); a plain
+// `go test ./...` skips it. An env gate rather than a build tag keeps the
+// package always listable by go list / coverage tooling.
 package e2e
 
 import (
@@ -18,23 +18,27 @@ import (
 var wardenBin string
 
 func TestMain(m *testing.M) {
+	if os.Getenv("WARDEN_E2E") == "" {
+		os.Exit(0) // opt-in; skip by default so `go test ./...` stays fast
+	}
 	if _, err := exec.LookPath("git"); err != nil {
-		// No git → the whole suite is meaningless; skip by exiting 0.
-		os.Exit(0)
+		os.Exit(0) // no git → nothing to drive
 	}
 	dir, err := os.MkdirTemp("", "warden-e2e-bin-")
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
 
 	wardenBin = filepath.Join(dir, "warden")
 	build := exec.Command("go", "build", "-o", wardenBin, ".")
 	build.Dir = ".." // repo root
 	if out, err := build.CombinedOutput(); err != nil {
+		os.RemoveAll(dir)
 		panic("build warden: " + err.Error() + "\n" + string(out))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(dir) // os.Exit skips defers, so clean up explicitly
+	os.Exit(code)
 }
 
 // harness runs git and warden in a scratch repo.
