@@ -86,6 +86,35 @@ func TestOutputTail_ShownWhileRunningClearedWhenDone(t *testing.T) {
 	}
 }
 
+func TestFindings_CollapseToggle(t *testing.T) {
+	steps := []domain.StepName{"lint"}
+	m := newModel(domain.PrePush, steps, make(chan tea.Msg, 16))
+	m = apply(m, stepMsg{Step: "lint", Phase: application.StepFinished,
+		Result: domain.StepResult{Step: "lint", Status: domain.StepPass,
+			Findings: []domain.Finding{{Severity: domain.SeverityMedium, File: "auth/token.go", Line: 42, Message: "unchecked error"}}}})
+
+	// Expanded by default: the finding and the controls hint show.
+	if f := m.View(); !strings.Contains(f, "auth/token.go:42") || !strings.Contains(f, "1-9 open") {
+		t.Errorf("expanded findings view wrong:\n%s", f)
+	}
+
+	// Press f → collapsed: a count line, no finding detail.
+	m = apply(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	f := m.View()
+	if !strings.Contains(f, "findings (1)") || !strings.Contains(f, "press f to expand") {
+		t.Errorf("collapsed findings view missing count/hint:\n%s", f)
+	}
+	if strings.Contains(f, "auth/token.go:42") {
+		t.Errorf("collapsed view must hide finding detail:\n%s", f)
+	}
+
+	// Press f again → expanded.
+	m = apply(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if f := m.View(); !strings.Contains(f, "auth/token.go:42") {
+		t.Errorf("re-expanded view should show the finding again:\n%s", f)
+	}
+}
+
 func TestTruncateLine(t *testing.T) {
 	if got := truncateLine("short", 72); got != "short" {
 		t.Errorf("short line changed: %q", got)

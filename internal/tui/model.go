@@ -68,6 +68,8 @@ type model struct {
 	steps    []stepView
 	findings []domain.Finding
 	phase    phase
+	// findingsCollapsed folds the findings list to a count line (toggle: f).
+	findingsCollapsed bool
 
 	// approval gate state, set while phaseApproving.
 	approval application.ApprovalRequest
@@ -125,6 +127,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.now = time.Now() // refresh so the running step's counter ticks up
 		return m, tick()   // keep animating until the run completes (Quit stops it)
 
+	case editorDoneMsg:
+		return m, nil // the terminal is restored; the pending event listener persists
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -163,10 +168,25 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if k.Type == tea.KeyCtrlC {
 		return m, tea.Quit
 	}
-	if m.phase != phaseApproving {
-		return m, m.listen()
+
+	// Findings controls work in any phase (a pending event listener persists, so
+	// these return no new command). `f` folds the list; 1-9 opens the Nth
+	// finding at its line in $EDITOR.
+	key := strings.ToLower(k.String())
+	if key == "f" && len(m.findings) > 0 {
+		m.findingsCollapsed = !m.findingsCollapsed
+		return m, nil
 	}
-	switch strings.ToLower(k.String()) {
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		if n := int(key[0] - '0'); n <= len(m.findings) {
+			return m, openFinding(m.findings[n-1])
+		}
+	}
+
+	if m.phase != phaseApproving {
+		return m, nil
+	}
+	switch key {
 	case "y":
 		m.resp <- application.Decision{Approved: true, Principal: "warden-tui", Rationale: "approved in TUI"}
 		m.phase = phaseRunning
@@ -176,7 +196,7 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.phase = phaseRunning
 		return m, m.listen()
 	}
-	return m, m.listen()
+	return m, nil
 }
 
 func (m model) View() string {
@@ -203,9 +223,19 @@ func (m model) View() string {
 	}
 
 	if len(m.findings) > 0 {
-		b.WriteString("\n" + styHeading.Render("findings") + "\n")
-		for _, f := range m.findings {
-			b.WriteString("  " + renderFinding(f) + "\n")
+		if m.findingsCollapsed {
+			b.WriteString("\n" + styHeading.Render(fmt.Sprintf("findings (%d)", len(m.findings))) +
+				styMuted.Render("  press f to expand") + "\n")
+		} else {
+			b.WriteString("\n" + styHeading.Render("findings") + "\n")
+			for i, f := range m.findings {
+				num := "  "
+				if i < 9 { // 1-9 are openable; the rest still list, just unnumbered
+					num = styMuted.Render(fmt.Sprintf("%d ", i+1))
+				}
+				b.WriteString("  " + num + renderFinding(f) + "\n")
+			}
+			b.WriteString(styMuted.Render("  f fold · 1-9 open in $EDITOR") + "\n")
 		}
 	}
 
