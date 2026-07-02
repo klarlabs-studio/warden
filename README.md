@@ -1,10 +1,16 @@
-# warden
+<p align="center">
+  <img src="assets/logo.svg" alt="warden" width="116" height="116">
+</p>
 
-[![CI](https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml/badge.svg)](https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/klarlabs-studio/warden?sort=semver)](https://github.com/klarlabs-studio/warden/releases/latest)
-[![npm](https://img.shields.io/npm/v/@klarlabs-studio/warden?logo=npm)](https://www.npmjs.com/package/@klarlabs-studio/warden)
-[![Go Reference](https://pkg.go.dev/badge/go.klarlabs.de/warden.svg)](https://pkg.go.dev/go.klarlabs.de/warden)
-[![License: MIT](https://img.shields.io/github/license/klarlabs-studio/warden)](LICENSE)
+<h1 align="center">warden</h1>
+
+<p align="center">
+  <a href="https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml"><img src="https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/klarlabs-studio/warden/releases/latest"><img src="https://img.shields.io/github/v/release/klarlabs-studio/warden?sort=semver" alt="Release"></a>
+  <a href="https://www.npmjs.com/package/@klarlabs-studio/warden"><img src="https://img.shields.io/npm/v/@klarlabs-studio/warden?logo=npm" alt="npm"></a>
+  <a href="https://pkg.go.dev/go.klarlabs.de/warden"><img src="https://pkg.go.dev/badge/go.klarlabs.de/warden.svg" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/klarlabs-studio/warden" alt="License: MIT"></a>
+</p>
 
 A configurable git commit/push gate installed as **native git hooks** — `git commit` and `git push` themselves are the gated commands, no second remote and no changed muscle memory.
 

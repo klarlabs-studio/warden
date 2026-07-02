@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="warden">
+  <rect width="200" height="200" rx="44" fill="#17202e"/>
+  <g transform="translate(100 100) scale(1.32) translate(-66 -50)" fill="none"
+     stroke-width="12" stroke-linecap="round" stroke-linejoin="miter">
+    <path d="M14 28 L45 84" stroke="#eef2f6"/>
+    <path d="M87 84 L118 28" stroke="#eef2f6"/>
+    <path d="M50 84 L66 16 L82 84" stroke="#f59e0b"/>
+  </g>
+</svg>

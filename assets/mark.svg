@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 100" role="img" aria-label="warden mark" fill="none">
+  <g stroke-width="12" stroke-linecap="round" stroke-linejoin="miter">
+    <path d="M14 28 L45 84" stroke="#17202e"/>
+    <path d="M87 84 L118 28" stroke="#17202e"/>
+    <path d="M50 84 L66 16 L82 84" stroke="#f59e0b"/>
+  </g>
+</svg>
