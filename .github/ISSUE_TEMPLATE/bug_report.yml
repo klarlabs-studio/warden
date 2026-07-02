@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in warden doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, what happened instead?
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps or a `.warden.yaml` snippet that reproduces it.
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: warden version
+      description: Output of `warden version`.
+    validations: { required: true }
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: macOS 15 arm64
+    validations: { required: true }

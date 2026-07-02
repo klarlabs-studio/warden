@@ -1,5 +1,11 @@
 # warden
 
+[![CI](https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml/badge.svg)](https://github.com/klarlabs-studio/warden/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/klarlabs-studio/warden?sort=semver)](https://github.com/klarlabs-studio/warden/releases/latest)
+[![npm](https://img.shields.io/npm/v/@klarlabs-studio/warden?logo=npm)](https://www.npmjs.com/package/@klarlabs-studio/warden)
+[![Go Reference](https://pkg.go.dev/badge/go.klarlabs.de/warden.svg)](https://pkg.go.dev/go.klarlabs.de/warden)
+[![License: MIT](https://img.shields.io/github/license/klarlabs-studio/warden)](LICENSE)
+
 A configurable git commit/push gate installed as **native git hooks** — `git commit` and `git push` themselves are the gated commands, no second remote and no changed muscle memory.
 
 Warden runs a policy-driven pipeline (lint, test, review, …) in a **disposable worktree** so a run never touches your live checkout, then fast-forwards your real branch and performs the push itself once everything passes. Policy is a set of stacking **rules** (match on branch, path glob, and a risk heuristic → overrides), and the pipeline is extensible with a typed subprocess SDK.
@@ -269,6 +275,14 @@ Architecture (hexagonal): `internal/domain` (policy model), `internal/policy`
 `internal/infrastructure/{git,kernel,steps,hooks,explain}` (adapters),
 `internal/service` (composition root), `internal/cli` + `internal/mcp`
 (delivery), `stepsdk` (public custom-step SDK).
+
+## Contributing
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup
+and the `make ci` pipeline every change must pass. By participating you agree to
+the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security issue? See
+[SECURITY.md](SECURITY.md) — please don't open a public issue. Release history
+is in the [CHANGELOG](CHANGELOG.md).
 
 ## License
 
