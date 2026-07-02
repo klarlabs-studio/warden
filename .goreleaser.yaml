@@ -44,6 +44,9 @@ homebrew_casks:
   - repository:
       owner: klarlabs-studio
       name: homebrew-tap
+      # The default GITHUB_TOKEN is scoped to this repo only and cannot push to
+      # the separate tap repo (403); use the dedicated tap PAT.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: https://go.klarlabs.de/warden
     description: Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance
     license: MIT
