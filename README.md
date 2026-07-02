@@ -36,7 +36,7 @@ toolchain required.
 npx @klarlabs/warden init
 
 # curl (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.sh | sh
 
 # Homebrew
 brew install klarlabs-studio/tap/warden
@@ -45,7 +45,7 @@ brew install klarlabs-studio/tap/warden
 go install go.klarlabs.de/warden@latest   # or: go run go.klarlabs.de/warden@latest init
 ```
 
-On Windows: `irm https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.ps1 | iex`.
+On Windows: `irm https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.ps1 | iex`.
 
 The `npx @klarlabs/warden` package is a ~15-line launcher: it ships the prebuilt binary
 per platform (the [esbuild pattern](https://github.com/evanw/esbuild/tree/main/npm))

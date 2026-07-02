@@ -29,7 +29,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/klarlabs/warden.git"
+    "url": "https://github.com/klarlabs-studio/warden.git"
   },
   "homepage": "https://go.klarlabs.de/warden",
   "engines": {

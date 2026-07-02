@@ -37,7 +37,7 @@ snapshot:
 
 release:
   github:
-    owner: klarlabs
+    owner: klarlabs-studio
     name: warden
 
 homebrew_casks:

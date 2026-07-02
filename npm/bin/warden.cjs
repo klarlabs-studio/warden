@@ -22,7 +22,7 @@ const bin = binaryPath();
 if (!bin) {
   console.error(
     `warden: no prebuilt binary for ${process.platform}-${process.arch}.\n` +
-      `Install another way: https://github.com/klarlabs/warden/releases ` +
+      `Install another way: https://github.com/klarlabs-studio/warden/releases ` +
       `or 'go install go.klarlabs.de/warden@latest'.`,
   );
   process.exit(1);

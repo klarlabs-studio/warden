@@ -1,8 +1,8 @@
 # warden installer for Windows — no toolchain required.
-#   irm https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 
-$repo = "klarlabs/warden"
+$repo = "klarlabs-studio/warden"
 $version = if ($env:WARDEN_VERSION) { $env:WARDEN_VERSION } else { "latest" }
 $binDir = if ($env:WARDEN_BIN_DIR) { $env:WARDEN_BIN_DIR } else { "$HOME\.warden\bin" }
 

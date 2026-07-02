@@ -2,12 +2,12 @@
 # warden installer — no toolchain required. Downloads a prebuilt static binary
 # for this OS/arch from GitHub Releases and drops it in ~/.warden/bin.
 #
-#   curl -fsSL https://raw.githubusercontent.com/klarlabs/warden/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.sh | sh
 #
 # Env: WARDEN_VERSION (default latest), WARDEN_BIN_DIR (default ~/.warden/bin).
 set -eu
 
-REPO="klarlabs/warden"
+REPO="klarlabs-studio/warden"
 VERSION="${WARDEN_VERSION:-latest}"
 BIN_DIR="${WARDEN_BIN_DIR:-$HOME/.warden/bin}"
 

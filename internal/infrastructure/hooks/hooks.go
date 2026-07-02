@@ -18,7 +18,7 @@ const managedMarker = "# warden-managed-hook"
 
 // releaseRepo is the GitHub repo the self-bootstrapping shim downloads pinned
 // binaries from.
-const releaseRepo = "klarlabs/warden"
+const releaseRepo = "klarlabs-studio/warden"
 
 // shim is the hook script body. It is self-bootstrapping and version-pinned:
 // prefer a `warden` on PATH; else use (or fetch, once) a pinned static binary
