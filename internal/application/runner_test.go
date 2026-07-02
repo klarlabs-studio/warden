@@ -79,6 +79,21 @@ func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutco
 	return StepOutcome{Result: domain.StepResult{Step: step, Status: status}}, nil
 }
 
+func (k *fakeKernel) ExecuteBatch(ctx context.Context, steps []domain.StepName, onFinish func(domain.StepName, StepOutcome)) ([]StepOutcome, error) {
+	outcomes := make([]StepOutcome, 0, len(steps))
+	for _, step := range steps {
+		out, err := k.Execute(ctx, step)
+		if err != nil {
+			return nil, err
+		}
+		if onFinish != nil {
+			onFinish(step, out)
+		}
+		outcomes = append(outcomes, out)
+	}
+	return outcomes, nil
+}
+
 func (k *fakeKernel) Approve(ctx context.Context, _, _, _ string) (StepOutcome, error) {
 	k.approved = true
 	if _, err := k.push(ctx); err != nil {

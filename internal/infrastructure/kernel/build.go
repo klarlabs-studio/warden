@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"go.klarlabs.de/axi"
 	axidomain "go.klarlabs.de/axi/domain"
@@ -52,6 +53,10 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	var actions []*axidomain.ActionDefinition
 	execs := map[axidomain.ActionExecutorRef]axidomain.ActionExecutor{}
 
+	// One mutex shared by every executor guards the run's accumulating findings,
+	// so steps in a parallel batch never race on the priors slice.
+	priorsMu := &sync.Mutex{}
+
 	for _, name := range policy.Steps {
 		step, err := resolveStep(reg, name, policy.Commands)
 		if err != nil {
@@ -71,7 +76,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 			return nil, err
 		}
 		actions = append(actions, def)
-		execs[actionRef(name)] = stepExecutor{step: step, sc: stepSC, priors: priors}
+		execs[actionRef(name)] = stepExecutor{step: step, sc: stepSC, priors: priors, priorsMu: priorsMu}
 	}
 
 	if push != nil {

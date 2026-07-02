@@ -63,6 +63,12 @@ type StepOutcome struct {
 // terminal push.
 type Kernel interface {
 	Execute(ctx context.Context, step domain.StepName) (StepOutcome, error)
+	// ExecuteBatch runs steps concurrently and returns their outcomes in steps
+	// order. onFinish, when non-nil, is called (concurrency-safe) as each step
+	// completes so a live UI can show staggered progress. Evidence is folded into
+	// the run's chain in steps order after all finish, so provenance stays
+	// deterministic regardless of completion order.
+	ExecuteBatch(ctx context.Context, steps []domain.StepName, onFinish func(domain.StepName, StepOutcome)) ([]StepOutcome, error)
 	Approve(ctx context.Context, sessionID, principal, rationale string) (StepOutcome, error)
 	Reject(ctx context.Context, sessionID, principal, rationale string) (StepOutcome, error)
 	// Finalize verifies the aggregated run-level evidence chain and returns its
@@ -133,9 +139,10 @@ type StepEvent struct {
 }
 
 // Observer receives step lifecycle events during a run. It is optional; a nil
-// Observer means no progress reporting (the non-interactive path). Calls happen
-// on the Runner's goroutine, so an implementation that feeds a UI must not
-// block beyond a quick channel send.
+// Observer means no progress reporting (the non-interactive path). During a
+// parallel batch, OnStep may be called concurrently from several goroutines, so
+// an implementation must be safe under concurrent calls and must not block
+// beyond a quick channel send.
 type Observer interface {
 	OnStep(StepEvent)
 }

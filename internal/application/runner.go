@@ -213,28 +213,62 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 
 // runValidation builds the run's kernel and folds each resolved step's outcome
 // into the aggregate, stopping as soon as the aggregate reaches a terminal
-// state. It returns the kernel so the caller can resolve the push gate.
+// state. Independent (read-only) steps run concurrently in batches; steps that
+// write the worktree stay sequential barriers (see scheduleBatches). It returns
+// the kernel so the caller can resolve the push gate.
 func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved domain.ResolvedPolicy, sc StepContext, push PushFunc) (Kernel, error) {
 	var priors []domain.Finding
 	kernel, err := r.Kernels.New(resolved, sc, &priors, push)
 	if err != nil {
 		return nil, err
 	}
-	for _, step := range resolved.Steps {
-		r.notify(StepEvent{Step: step, Phase: StepStarted})
-		out, err := kernel.Execute(ctx, step)
-		if err != nil {
-			return nil, fmt.Errorf("step %s: %w", step, err)
-		}
-		if err := run.RecordStep(out.Result); err != nil {
+	for _, batch := range resolved.Batches() {
+		if err := r.runBatch(ctx, run, kernel, batch); err != nil {
 			return nil, err
 		}
-		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
 		if run.IsTerminal() {
 			break
 		}
 	}
 	return kernel, nil
+}
+
+// runBatch runs one scheduled batch and folds its outcomes into the aggregate in
+// declared order. A singleton batch takes the plain Execute path; a multi-step
+// batch runs concurrently through ExecuteBatch, emitting a start event for every
+// step up front so the UI shows them running together, and a finish event per
+// step as it completes.
+func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName) error {
+	if len(batch) == 1 {
+		step := batch[0]
+		r.notify(StepEvent{Step: step, Phase: StepStarted})
+		out, err := kernel.Execute(ctx, step)
+		if err != nil {
+			return fmt.Errorf("step %s: %w", step, err)
+		}
+		if err := run.RecordStep(out.Result); err != nil {
+			return err
+		}
+		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
+		return nil
+	}
+
+	for _, step := range batch {
+		r.notify(StepEvent{Step: step, Phase: StepStarted})
+	}
+	onFinish := func(step domain.StepName, out StepOutcome) {
+		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
+	}
+	outcomes, err := kernel.ExecuteBatch(ctx, batch, onFinish)
+	if err != nil {
+		return err
+	}
+	for _, out := range outcomes {
+		if err := run.RecordStep(out.Result); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // notify forwards a step event to the Observer when one is set.

@@ -108,6 +108,7 @@ agent_commands:
 steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
+parallel: true   # default — run independent checks concurrently (see below)
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 rules:
   - match: { branch: main }
@@ -123,7 +124,23 @@ rules:
 All matching rules stack: per field the most specific wins (ties broken by
 declaration order); step `add`/`skip` are unioned. `warden policy explain`
 prints the result — the intended mitigation for a rule that misconfigures the
-gate.
+gate — including a `schedule:` line that shows exactly which steps run at once.
+
+### Parallel steps
+
+By default Warden runs independent, read-only checks concurrently, so the gate
+is as slow as the slowest check, not the sum of all of them:
+
+```
+schedule:  intent → rebase → [review ∥ test ∥ document ∥ lint]
+```
+
+A step stays a **sequential barrier** (runs alone, in order) when it writes to
+the worktree: `rebase` (rewrites history) and any step given an `auto_fix`
+budget. Steps around a barrier still parallelize. Like `lefthook`'s parallel
+mode, a step that runs concurrently must not modify tracked files — give it an
+`auto_fix` budget (which serializes it) if it needs to. Set `parallel: false` to
+force the classic one-step-at-a-time pipeline.
 
 ## Commands
 

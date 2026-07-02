@@ -23,6 +23,49 @@ type ResolvedPolicy struct {
 	// MatchedRules names the rules that contributed, in declaration order,
 	// for provenance in run notes (§9) and `policy explain`.
 	MatchedRules []string
+	// Parallel enables concurrent execution of independent (read-only) steps.
+	// When true, consecutive steps that don't write to the worktree run at once,
+	// so the gate is as slow as the slowest check, not their sum (§4.4).
+	Parallel bool
+}
+
+// Batches groups the resolved steps into an ordered execution schedule. A batch
+// of one runs on its own; a batch of many runs concurrently. Consecutive
+// Concurrent steps collapse into one parallel batch; a step that mutates the
+// worktree (rebase, an auto-fix step) is a barrier — it runs alone and flushes
+// the batches around it, preserving declared order and every write ordering.
+// With Parallel off, every step is its own batch (the classic pipeline).
+func (p ResolvedPolicy) Batches() [][]StepName {
+	var batches [][]StepName
+	var cur []StepName
+	flush := func() {
+		if len(cur) > 0 {
+			batches = append(batches, cur)
+			cur = nil
+		}
+	}
+	for _, s := range p.Steps {
+		if p.Parallel && p.Concurrent(s) {
+			cur = append(cur, s)
+			continue
+		}
+		flush()
+		batches = append(batches, []StepName{s})
+	}
+	flush()
+	return batches
+}
+
+// Concurrent reports whether step is safe to run alongside other steps in the
+// shared worktree. It must not rewrite history (rebase), must not be the
+// terminal push, and must not apply auto-fixes — a non-zero budget writes to the
+// tree. Read-only checks (lint, test, custom commands, advisory agents) qualify;
+// anything that mutates the tree stays a sequential barrier.
+func (p ResolvedPolicy) Concurrent(s StepName) bool {
+	if s == StepRebase || s == StepPush {
+		return false
+	}
+	return p.AutoFixBudget(s) == 0
 }
 
 // AgentFor returns the resolved agent for a step, or "" if the default applies.

@@ -43,6 +43,8 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		AutoFix:  map[domain.StepName]int{},
 		Commands: cfg.Commands,
 		Risk:     in.Risk,
+		// Concurrent step execution is on unless explicitly disabled.
+		Parallel: cfg.Parallel == nil || *cfg.Parallel,
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)

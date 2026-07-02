@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.klarlabs.de/axi"
 	axidomain "go.klarlabs.de/axi/domain"
@@ -57,6 +58,54 @@ func (r *runKernel) Execute(ctx context.Context, step domain.StepName) (applicat
 	return r.absorb(step, out)
 }
 
+// ExecuteBatch runs steps concurrently against the shared kernel, then folds
+// their evidence into the run ledger in steps order so the provenance chain is
+// identical to a sequential run. axi's session repositories are mutex-guarded,
+// and the run ledger is only touched from this serial second pass, so the only
+// concurrency is the steps' own work (the slow part). onFinish fires from each
+// worker as it lands, letting the UI show staggered completion.
+func (r *runKernel) ExecuteBatch(ctx context.Context, steps []domain.StepName, onFinish func(domain.StepName, application.StepOutcome)) ([]application.StepOutcome, error) {
+	outs := make([]*axi.Result, len(steps))
+	projected := make([]application.StepOutcome, len(steps))
+	errs := make([]error, len(steps))
+
+	var wg sync.WaitGroup
+	for i, step := range steps {
+		wg.Add(1)
+		go func(i int, step domain.StepName) {
+			defer wg.Done()
+			out, err := r.k.Execute(ctx, axi.Invocation{Action: string(step)})
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			outs[i] = out
+			oc, perr := project(step, out)
+			projected[i], errs[i] = oc, perr
+			if perr == nil && onFinish != nil {
+				onFinish(step, oc)
+			}
+		}(i, step)
+	}
+	wg.Wait()
+
+	// Serial second pass: append evidence in steps order (before surfacing any
+	// error, matching absorb) so the run's chain is deterministic.
+	outcomes := make([]application.StepOutcome, len(steps))
+	for i, step := range steps {
+		if outs[i] != nil {
+			for _, ev := range outs[i].Evidence {
+				r.ledger.AppendEvidence(ev)
+			}
+		}
+		if errs[i] != nil {
+			return nil, fmt.Errorf("step %s: %w", step, errs[i])
+		}
+		outcomes[i] = projected[i]
+	}
+	return outcomes, nil
+}
+
 func (r *runKernel) Approve(ctx context.Context, sessionID, principal, rationale string) (application.StepOutcome, error) {
 	out, err := r.k.Approve(ctx, sessionID, axidomain.ApprovalDecision{Principal: principal, Rationale: rationale})
 	if err != nil {
@@ -74,14 +123,22 @@ func (r *runKernel) Reject(ctx context.Context, sessionID, principal, rationale 
 }
 
 // absorb records the axi result's evidence into the run ledger and projects it
-// to an application.StepOutcome. A Failed axi session (the executor returned a
-// Go error, e.g. a push failure) is surfaced as an error rather than an in-band
-// status, so the Runner's error handling catches it instead of mistaking a
-// failed push for success.
+// to an application.StepOutcome. It is the sequential path; ExecuteBatch folds
+// evidence itself so it can parallelize the work.
 func (r *runKernel) absorb(step domain.StepName, out *axi.Result) (application.StepOutcome, error) {
 	for _, ev := range out.Evidence {
 		r.ledger.AppendEvidence(ev)
 	}
+	return project(step, out)
+}
+
+// project maps an axi result to an application.StepOutcome without touching the
+// run ledger, so it is safe to call from concurrent workers (ExecuteBatch folds
+// the evidence in serially afterward). A Failed axi session (the executor
+// returned a Go error, e.g. a push failure) surfaces as an error rather than an
+// in-band status, so the Runner's error handling catches it instead of mistaking
+// a failed push for success.
+func project(step domain.StepName, out *axi.Result) (application.StepOutcome, error) {
 	if out.Status == axidomain.StatusFailed {
 		msg := "execution failed"
 		if out.Failure != nil {

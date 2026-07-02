@@ -70,6 +70,29 @@ func printPolicy(w io.Writer, p domain.ResolvedPolicy) {
 		}
 	}
 	fmt.Fprintln(w)
+
+	// Schedule: show which steps run concurrently vs. as sequential barriers, so
+	// the effect of `parallel` and auto-fix budgets is visible.
+	fmt.Fprintf(w, "schedule:       ")
+	for i, batch := range p.Batches() {
+		if i > 0 {
+			fmt.Fprintf(w, " → ")
+		}
+		if len(batch) == 1 {
+			fmt.Fprintf(w, "%s", batch[0])
+			continue
+		}
+		fmt.Fprintf(w, "[")
+		for j, s := range batch {
+			if j > 0 {
+				fmt.Fprintf(w, " ∥ ")
+			}
+			fmt.Fprintf(w, "%s", s)
+		}
+		fmt.Fprintf(w, "]")
+	}
+	fmt.Fprintln(w)
+
 	if len(p.MatchedRules) > 0 {
 		fmt.Fprintf(w, "matched rules:  ")
 		for _, r := range p.MatchedRules {

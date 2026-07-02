@@ -126,6 +126,22 @@
       "file_path": "go.sum",
       "severity": "medium",
       "created_at": "2026-07-02T07:38:12.199936Z"
+    },
+    {
+      "fingerprint": "ed7a16a528771ccb8d29c095372b613a056ce4e41594e9345de91133f7079f3a",
+      "rule_id": "DATA-001",
+      "file_path": "internal/infrastructure/git/seed_test.go",
+      "severity": "medium",
+      "reason": "Benign: test-fixture git author email in seed_test.go (matches 8 already-baselined sibling test emails); intentional cancel-in-progress concurrency guard in release.yml (matches already-baselined ci.yml).",
+      "created_at": "2026-07-02T18:46:19.746484Z"
+    },
+    {
+      "fingerprint": "8782b17fd3e847a2d76aab01514bc5d47fb765523c6875772eb7a271e5abeac6",
+      "rule_id": "IAC-309",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "low",
+      "reason": "Benign: test-fixture git author email in seed_test.go (matches 8 already-baselined sibling test emails); intentional cancel-in-progress concurrency guard in release.yml (matches already-baselined ci.yml).",
+      "created_at": "2026-07-02T18:46:19.746484Z"
     }
   ]
 }

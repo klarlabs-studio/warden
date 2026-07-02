@@ -23,6 +23,11 @@ type Config struct {
 	// Steps lists the step subset per hook. Keys are "pre_commit"/"pre_push".
 	Steps map[string][]StepName `yaml:"steps"`
 
+	// Parallel toggles concurrent execution of independent (read-only) steps.
+	// Unset (nil) defaults to enabled; set `parallel: false` to force the
+	// classic one-step-at-a-time pipeline.
+	Parallel *bool `yaml:"parallel"`
+
 	Risk RiskConfig `yaml:"risk"`
 
 	// PR configures optional pull-request creation after a passing push.
