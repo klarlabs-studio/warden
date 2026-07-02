@@ -45,7 +45,7 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		}, nil
 	}
 
-	out, err := s.invoke(ctx, command, sc.WorktreeDir)
+	out, err := s.invoke(ctx, command, sc)
 	if err != nil {
 		// A genuinely failed agent run (after retries) is reported as a finding
 		// rather than an operational error, so the pipeline decides the outcome.
@@ -69,7 +69,7 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 // invoke runs the agent command through a resilience chain: bounded retries with
 // exponential backoff, tripping a circuit breaker on repeated failure so a
 // wedged agent fails fast instead of stalling every step.
-func (s AgentStep) invoke(ctx context.Context, command, workdir string) (string, error) {
+func (s AgentStep) invoke(ctx context.Context, command string, sc application.StepContext) (string, error) {
 	cb := circuitbreaker.New[string](circuitbreaker.Config{
 		MaxRequests: 1,
 		Timeout:     30 * time.Second,
@@ -90,8 +90,8 @@ func (s AgentStep) invoke(ctx context.Context, command, workdir string) (string,
 		// Run through the shell so the configured command may use the agent's
 		// own flags and pipes; a zero exit means the step passed.
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
-		cmd.Dir = workdir
-		out, err := cmd.CombinedOutput()
+		cmd.Dir = sc.WorktreeDir
+		out, err := runCaptured(cmd, sc)
 		return string(out), err
 	})
 }

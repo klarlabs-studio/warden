@@ -140,14 +140,20 @@ type StepPhase string
 const (
 	StepStarted  StepPhase = "started"
 	StepFinished StepPhase = "finished"
+	// StepOutput carries one line a running step emitted on stdout/stderr, for a
+	// live output tail. These events are best-effort — a UI may drop them under
+	// load — so they must never carry state the run depends on.
+	StepOutput StepPhase = "output"
 )
 
 // StepEvent is emitted as the pipeline advances so a live UI can render
-// progress. Result is meaningful only when Phase is StepFinished.
+// progress. Result is meaningful only when Phase is StepFinished; Line only
+// when Phase is StepOutput.
 type StepEvent struct {
 	Step   domain.StepName
 	Phase  StepPhase
 	Result domain.StepResult
+	Line   string
 }
 
 // Observer receives step lifecycle events during a run. It is optional; a nil

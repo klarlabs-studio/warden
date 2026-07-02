@@ -160,6 +160,10 @@ mode, a step that runs concurrently must not modify tracked files — give it an
 `auto_fix` budget (which serializes it) if it needs to. Set `parallel: false` to
 force the classic one-step-at-a-time pipeline.
 
+On an interactive terminal the pre-push run shows a live TUI: a spinner and a
+counting-up timer per step, a tail of each running step's output as it streams,
+and the approval gate answered inline.
+
 ## Commands
 
 | Command | Description |

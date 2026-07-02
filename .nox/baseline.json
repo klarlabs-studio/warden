@@ -214,6 +214,14 @@
       "severity": "medium",
       "reason": "False-positive high-entropy detections in signing test files (assertion strings / fake fingerprint fixtures, no real secrets).",
       "created_at": "2026-07-02T19:11:56.185931Z"
+    },
+    {
+      "fingerprint": "cffb8626b7d4b602b8bdf45ebe3320f454f61e6fa14c753c9eaf957c8347ffa2",
+      "rule_id": "SEC-659",
+      "file_path": "internal/infrastructure/steps/stream_test.go",
+      "severity": "high",
+      "reason": "False-positive \"split API key\" on a test assertion string in stream_test.go (no real secret).",
+      "created_at": "2026-07-02T19:20:26.535032Z"
     }
   ]
 }

@@ -23,6 +23,16 @@ type bridge struct {
 }
 
 func (b *bridge) OnStep(e application.StepEvent) {
+	// Live output lines are best-effort: drop one rather than block (and thus
+	// throttle) a verbose step when the UI can't keep up. Lifecycle events
+	// (started/finished) are delivered reliably.
+	if e.Phase == application.StepOutput {
+		select {
+		case b.events <- stepMsg(e):
+		default:
+		}
+		return
+	}
 	b.events <- stepMsg(e)
 }
 

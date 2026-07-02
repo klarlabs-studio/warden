@@ -64,3 +64,35 @@ func apply(m model, msg tea.Msg) model {
 	next, _ := m.Update(msg)
 	return next.(model)
 }
+
+func TestOutputTail_ShownWhileRunningClearedWhenDone(t *testing.T) {
+	steps := []domain.StepName{"test"}
+	m := newModel(domain.PrePush, steps, make(chan tea.Msg, 16))
+
+	m = apply(m, stepMsg{Step: "test", Phase: application.StepStarted})
+	m = apply(m, stepMsg{Step: "test", Phase: application.StepOutput, Line: "=== RUN TestFoo"})
+	m = apply(m, stepMsg{Step: "test", Phase: application.StepOutput, Line: "--- PASS: TestFoo"})
+
+	// Only the most recent line is tailed under the running step.
+	if f := m.View(); strings.Contains(f, "RUN TestFoo") || !strings.Contains(f, "PASS: TestFoo") {
+		t.Errorf("expected only the latest output line tailed:\n%s", f)
+	}
+
+	// Finishing the step drops its tail.
+	m = apply(m, stepMsg{Step: "test", Phase: application.StepFinished,
+		Result: domain.StepResult{Step: "test", Status: domain.StepPass}})
+	if f := m.View(); strings.Contains(f, "PASS: TestFoo") {
+		t.Errorf("a finished step must not keep showing its output tail:\n%s", f)
+	}
+}
+
+func TestTruncateLine(t *testing.T) {
+	if got := truncateLine("short", 72); got != "short" {
+		t.Errorf("short line changed: %q", got)
+	}
+	long := strings.Repeat("x", 100)
+	got := truncateLine(long, 10)
+	if len([]rune(got)) != 10 || !strings.HasSuffix(got, "…") {
+		t.Errorf("truncateLine(len100,10) = %q (len %d)", got, len([]rune(got)))
+	}
+}

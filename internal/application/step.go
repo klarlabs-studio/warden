@@ -31,6 +31,15 @@ type StepContext struct {
 	// PriorFindings carries findings from earlier steps, so a step can react
 	// to what came before (mirrors the wire protocol's prior_findings).
 	PriorFindings []domain.Finding
+	// OnOutput, when set, receives each line the step emits on stdout/stderr as
+	// it runs, for a live output tail. It is called from the step's own
+	// goroutine and may run concurrently with other steps' callbacks, so it must
+	// be quick and concurrency-safe. Nil disables streaming (the default,
+	// non-interactive path).
+	OnOutput func(line string)
+	// Stream is the runner-provided, step-tagged sink the kernel binds into each
+	// step's OnOutput. Steps use OnOutput, not this.
+	Stream func(step domain.StepName, line string)
 }
 
 // Step is one unit of the pipeline. Built-in steps are native Go

@@ -118,7 +118,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	}
 	defer wt.Remove()
 
-	sc := StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands}
+	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
 	run := r.newRun(domain.PreCommit, resolved, branch)
 
 	if _, err := r.runValidation(ctx, run, resolved, sc, nil); err != nil {
@@ -151,7 +151,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	defer wt.Remove()
 
-	sc := StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands}
+	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
 	run := r.newRun(domain.PrePush, resolved, branch)
 
 	// The push closure runs only after the kernel's approval gate clears. It
@@ -280,6 +280,23 @@ func (r *Runner) notify(e StepEvent) {
 	if r.Observer != nil {
 		r.Observer.OnStep(e)
 	}
+}
+
+// streamLine forwards one line of a step's live output to the Observer. It is
+// the sink the kernel binds into each step's OnOutput; it is a no-op without an
+// Observer, so the non-interactive path pays nothing.
+func (r *Runner) streamLine(step domain.StepName, line string) {
+	r.notify(StepEvent{Step: step, Phase: StepOutput, Line: line})
+}
+
+// withStream sets the step-output sink on sc only when a live Observer is
+// attached, so steps stream their output to the UI but stay unbuffered-fast on
+// the plain path.
+func (r *Runner) withStream(sc StepContext) StepContext {
+	if r.Observer != nil {
+		sc.Stream = r.streamLine
+	}
+	return sc
 }
 
 // resolvePushGate drives the write-external push action through its approval

@@ -37,6 +37,9 @@ type stepView struct {
 	status   stepStatus
 	started  time.Time
 	finished time.Time
+	// lastLine is the most recent output line the step emitted, shown as a live
+	// tail beneath a running step.
+	lastLine string
 }
 
 // elapsed returns how long the step has run (live if still running).
@@ -138,7 +141,14 @@ func (m *model) applyStep(e application.StepEvent) {
 			m.steps[i].started = time.Now()
 			return
 		}
+		if e.Phase == application.StepOutput {
+			if line := strings.TrimSpace(e.Line); line != "" {
+				m.steps[i].lastLine = line
+			}
+			return
+		}
 		m.steps[i].finished = time.Now()
+		m.steps[i].lastLine = "" // a finished step drops its live tail
 		if e.Result.Status == domain.StepFail {
 			m.steps[i].status = stepFail
 		} else {
@@ -180,6 +190,9 @@ func (m model) View() string {
 			running = s.name
 			line = styRun.Render("  "+spinnerFrames[m.frame%len(spinnerFrames)]+" "+string(s.name)) +
 				styMuted.Render("  "+fmtDur(s.elapsed(m.now)))
+			if s.lastLine != "" { // live output tail, dimmed and truncated
+				line += "\n" + styMuted.Render("      "+truncateLine(s.lastLine, 72))
+			}
 		} else {
 			line = "  " + m.stepGlyph(s.status) + " " + string(s.name)
 			if !s.finished.IsZero() { // completed → show how long it took
@@ -210,6 +223,19 @@ func (m model) View() string {
 		b.WriteString("\n" + styMuted.Render(spinnerFrames[m.frame%len(spinnerFrames)]+" "+hint+"   (ctrl+c to abort)") + "\n")
 	}
 	return b.String()
+}
+
+// truncateLine clips s to max runes, adding an ellipsis, so a long output line
+// never wraps and breaks the step list's layout.
+func truncateLine(s string, width int) string {
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width < 1 {
+		return ""
+	}
+	return string(r[:width-1]) + "…"
 }
 
 // fmtDur formats a duration as a compact elapsed time: seconds under a minute

@@ -46,7 +46,7 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = sc.WorktreeDir
 	cmd.Env = stepEnv(sc)
-	out, err := cmd.CombinedOutput()
+	out, err := runCaptured(cmd, sc)
 	if err != nil {
 		return domain.StepResult{
 			Step:   s.name,
