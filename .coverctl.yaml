@@ -4,11 +4,6 @@ policy:
   default:
     min: 80
   domains:
-    # cmd is a 3-line os.Exit(cli.Run(...)) wrapper — no logic to unit-test.
-    - name: cmd
-      match:
-        - ./cmd/...
-      min: 0
     - name: application
       match:
         - ./internal/application/...
