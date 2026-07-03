@@ -4,6 +4,19 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-07-03
+
+### Added
+
+- **`node_modules` passthrough for JS/TS steps.** The validation worktree is a
+  git worktree, so it only contained tracked files — gitignored `node_modules`
+  was absent and steps like `tsc`, `eslint`, or `vitest` failed with "command
+  not found". Warden now symlinks each `node_modules` from the live checkout
+  into the worktree (root and nested — `web/`, `apps/*/`, `site/`), so JS/TS
+  gates resolve their dependencies with no reinstall. This makes warden work
+  out of the box for Node and Go+JS monorepos; commands no longer need an
+  `npm ci &&` prefix.
+
 ## [0.7.1] — 2026-07-03
 
 ### Fixed

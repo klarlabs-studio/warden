@@ -112,3 +112,61 @@ func TestCreateWorktreeFromHead_StagedBinary(t *testing.T) {
 		t.Errorf("binary round-trip corrupted: got %v want %v", got, want)
 	}
 }
+
+// TestCreateWorktree_LinksNodeModules guards the JS-monorepo gate: a git
+// worktree only holds tracked files, so gitignored node_modules is absent and
+// tsc/eslint fail with "command not found". The worktree must symlink each
+// node_modules from the live checkout — including nested ones — so JS steps
+// resolve their deps without a reinstall.
+func TestCreateWorktree_LinksNodeModules(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitRun("init")
+	gitRun("config", "user.email", "t@t.co")
+	gitRun("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Root + nested (web/) node_modules with a marker binary, all gitignored.
+	for _, nm := range []string{"node_modules", filepath.Join("web", "node_modules")} {
+		bin := filepath.Join(dir, nm, ".bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, "tsc"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "web", "app.ts"), []byte("export {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun("add", ".")
+	gitRun("commit", "-m", "init")
+
+	repo := &Repo{Dir: dir}
+	wt, err := repo.CreateWorktreeFromHead()
+	if err != nil {
+		t.Fatalf("CreateWorktreeFromHead: %v", err)
+	}
+	defer wt.Remove()
+
+	for _, nm := range []string{"node_modules", filepath.Join("web", "node_modules")} {
+		// The tsc marker must be reachable through the worktree's linked node_modules.
+		if _, err := os.Stat(filepath.Join(wt.Dir, nm, ".bin", "tsc")); err != nil {
+			t.Errorf("worktree missing linked %s (tsc unreachable): %v", nm, err)
+		}
+	}
+}
