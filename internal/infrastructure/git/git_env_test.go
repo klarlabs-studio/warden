@@ -15,15 +15,15 @@ func TestScrubHookEnv(t *testing.T) {
 		"GIT_PREFIX=sub/",
 		"GIT_AUTHOR_NAME=keep-me", // not a hook working-var; must survive
 	}
-	got := scrubHookEnv(in)
+	got := ScrubHookEnv(in)
 	for _, bad := range []string{"GIT_DIR=/repo/.git", "GIT_INDEX_FILE=/repo/.git/index", "GIT_WORK_TREE=/repo", "GIT_PREFIX=sub/"} {
 		if slices.Contains(got, bad) {
-			t.Errorf("scrubHookEnv left %q", bad)
+			t.Errorf("ScrubHookEnv left %q", bad)
 		}
 	}
 	for _, keep := range []string{"PATH=/usr/bin", "HOME=/home/x", "GIT_AUTHOR_NAME=keep-me"} {
 		if !slices.Contains(got, keep) {
-			t.Errorf("scrubHookEnv dropped %q", keep)
+			t.Errorf("ScrubHookEnv dropped %q", keep)
 		}
 	}
 }

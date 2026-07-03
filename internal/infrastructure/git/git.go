@@ -69,13 +69,17 @@ var hookEnvVars = []string{
 func gitCmd(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = scrubHookEnv(os.Environ())
+	cmd.Env = ScrubHookEnv(os.Environ())
 	return cmd
 }
 
-// scrubHookEnv removes the git hook environment variables so a subcommand
-// resolves the repository from cmd.Dir, not from an inherited GIT_DIR.
-func scrubHookEnv(env []string) []string {
+// ScrubHookEnv removes the git hook environment variables (GIT_INDEX_FILE,
+// GIT_DIR, …) that git exports when running a pre-commit/pre-push hook. A step
+// (or warden's own git subcommands) must not inherit them: they point at the
+// live repo's index/gitdir, so a git-aware tool run inside the disposable
+// worktree — golangci-lint's new-from-rev, git diff — would otherwise resolve
+// against the hook's index instead of the worktree and misbehave.
+func ScrubHookEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		if !isHookEnvVar(kv) {

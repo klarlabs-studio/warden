@@ -4,6 +4,20 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] — 2026-07-03
+
+### Fixed
+
+- **Steps no longer inherit the git hook environment.** git exports
+  `GIT_INDEX_FILE`, `GIT_DIR`, etc. when running a pre-commit/pre-push hook.
+  Steps inherited them, so a git-aware tool inside the disposable worktree —
+  notably `golangci-lint --new-from-rev` — resolved git against the live hook
+  index instead of the worktree and mis-reported (e.g. flagging the whole
+  backlog instead of just the change). `stepEnv` now scrubs those vars, the same
+  way warden's own git subcommands already did. This makes incremental linting
+  (`new-from-rev`) reliable in the gate, so a strict linter can be adopted on a
+  repo with existing debt without a big-bang refactor.
+
 ## [0.8.1] — 2026-07-03
 
 ### Fixed
