@@ -280,7 +280,14 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 	if err != nil {
 		return err
 	}
+	// Fold outcomes in declared order. A failing step terminates the run, so
+	// stop before recording into an already-terminal run — otherwise a second
+	// failing/any step in the same parallel batch surfaces the opaque
+	// "record step X: run is already terminal" instead of the real failure.
 	for _, out := range outcomes {
+		if run.IsTerminal() {
+			break
+		}
 		if err := run.RecordStep(out.Result); err != nil {
 			return err
 		}
