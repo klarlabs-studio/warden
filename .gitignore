@@ -11,3 +11,6 @@
 /dist/
 /npm/packages/
 /npm/node_modules/
+
+# macOS
+.DS_Store
