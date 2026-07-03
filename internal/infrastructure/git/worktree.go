@@ -2,7 +2,9 @@ package git
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -63,7 +65,52 @@ func (r *Repo) addDetachedWorktree(ref string) (*Worktree, error) {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	return &Worktree{Dir: dir, repo: r}, nil
+	wt := &Worktree{Dir: dir, repo: r}
+	// A git worktree only contains tracked files, so gitignored dependency
+	// directories (node_modules) are absent — JS/TS steps (tsc, eslint, vitest)
+	// would fail with "command not found". Symlink them in from the live
+	// checkout so those steps resolve their deps without a slow reinstall.
+	// Best-effort: a repo with no node_modules links nothing and steps that
+	// don't need it are unaffected.
+	wt.linkGitignoredDeps()
+	return wt, nil
+}
+
+// depDirNames are gitignored dependency directories worth exposing to steps by
+// symlinking them from the live checkout into the worktree.
+var depDirNames = map[string]bool{"node_modules": true}
+
+// linkGitignoredDeps symlinks each dependency directory (see depDirNames) found
+// in the live checkout into the worktree at the same relative path. It never
+// descends into a linked dependency dir or .git, so a monorepo's nested
+// node_modules (web/, apps/*/, site/) are each linked without walking their
+// contents.
+func (w *Worktree) linkGitignoredDeps() {
+	root := w.repo.Dir
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil //nolint:nilerr // best-effort; skip unreadable entries
+		}
+		name := d.Name()
+		if name == ".git" {
+			return filepath.SkipDir
+		}
+		if !depDirNames[name] {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return filepath.SkipDir
+		}
+		target := filepath.Join(w.Dir, rel)
+		if _, err := os.Lstat(target); err == nil {
+			return filepath.SkipDir // already present (tracked, or already linked)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err == nil {
+			_ = os.Symlink(path, target)
+		}
+		return filepath.SkipDir // never walk into the dependency dir itself
+	})
 }
 
 // applyAndStage applies a unified diff to the worktree and stages it, so the
