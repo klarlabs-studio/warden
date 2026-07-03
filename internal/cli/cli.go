@@ -9,7 +9,7 @@ import (
 )
 
 // Version is the Warden version, overridable at build time via -ldflags.
-var Version = "0.8.0"
+var Version = "0.8.1"
 
 // Run parses args (including argv[0]) and dispatches a subcommand, returning a
 // process exit code. stdout/stderr are injected for testability.

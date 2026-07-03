@@ -4,6 +4,16 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-07-03
+
+### Fixed
+
+- **Homebrew install no longer hangs on first run.** The cask binary isn't
+  notarized, so macOS Gatekeeper quarantined it and the first `warden`
+  invocation blocked on an unsigned-binary check (`spctl: rejected`). The cask
+  now strips the quarantine attribute on install (`xattr -dr
+  com.apple.quarantine`), so the CLI runs immediately after `brew install`.
+
 ## [0.8.0] — 2026-07-03
 
 ### Added
