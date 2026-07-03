@@ -148,7 +148,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/application/runner_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -156,7 +156,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/cli/cmd_key.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -164,7 +164,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/cli/cmd_verify.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -172,7 +172,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/domain/signature_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -180,7 +180,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/domain/signature_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -188,7 +188,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/infrastructure/signing/signer_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -196,7 +196,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/infrastructure/signing/signer_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -228,7 +228,7 @@
       "rule_id": "SEC-161",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
@@ -236,7 +236,7 @@
       "rule_id": "SEC-162",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
@@ -244,8 +244,120 @@
       "rule_id": "SEC-163",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
+    },
+    {
+      "fingerprint": "6f39cc8f986f8e9a5fcdc6ec04d94411270bdb81d0dcb6f0ac5cb29c98cd09ad",
+      "rule_id": "SEC-384",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "7a1f5cbd2e44155c44f32e2a78d8345ec8c4839988401182c23ec6fa94c703e3",
+      "rule_id": "SEC-384",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "3612b90c4fca3a5ecbfb4f1f7d924fa6099a4ac6483b6d3445edc5cd72126ada",
+      "rule_id": "SEC-505",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "665c9af5be402e3c995a1e8c8caa131316b2ef940046ef596fafa3ac3ecc1ace",
+      "rule_id": "SEC-505",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "24f6cb5f160ad2d2c20dada14f18ea81a8933f23bb52927413de857d76c7d55c",
+      "rule_id": "SEC-506",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "04ef256e7cbb7030e036c2e054d5bd4666697747bdb641b0f18854dbaf3b8461",
+      "rule_id": "SEC-506",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "93900296b50f195093c76c3231780686edef4f7bfb36a26c39fe153ee4020437",
+      "rule_id": "SEC-525",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "6930c36f424486ab2c833441529a84de6aaccd37961b719faa40054c59f862a2",
+      "rule_id": "SEC-525",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "58271b5e48e25219aa26f40732bc0f94503d97569330da6916be900930a46bdc",
+      "rule_id": "SEC-543",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "d8f8fb039f0aaa86aec94dcc4aa0e2f792ecb633c50358b02499e973965ca3a1",
+      "rule_id": "SEC-543",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "9387669fb27074dece11b3362784e54db865f0b8e54b29e2c3278ca783eb1102",
+      "rule_id": "SEC-621",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "0cec925652e266857bede0c607e5d7c32cdb6aa40aed9228ef4d0f37f50d2926",
+      "rule_id": "SEC-621",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "904113f832ef710a47d303daceeae90f63d524826782d90f4911e9e2f4472cd1",
+      "rule_id": "SEC-678",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "3803fcae0179d36bdcbf60433425ac8176769208d325cfb22d82e9d585d6f730",
+      "rule_id": "SEC-678",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "076e7b859c1d3bdbd6a143bb9a9b6e4b5f191e754544bcc22fd8529b7a6707b4",
+      "rule_id": "SEC-679",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "f9bf80aa4a711726c43fcacc7b94bd01c51ba2a3282c2840fc6a32be033569fd",
+      "rule_id": "SEC-679",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-03T08:10:00Z"
     }
   ]
 }
