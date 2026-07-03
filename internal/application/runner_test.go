@@ -548,3 +548,28 @@ func TestRunner_PrePushAttachesSignedSBOM(t *testing.T) {
 		t.Error("signature must cover the attached SBOM")
 	}
 }
+
+// TestRunner_ParallelBatchFirstStepFails guards the bug where, in a parallel
+// batch, a non-last failing step terminated the run and the record loop then
+// tried to fold the remaining outcome into the already-terminal run, surfacing
+// the opaque "record step X: run is already terminal" instead of a clean
+// Failed outcome naming the real culprit.
+func TestRunner_ParallelBatchFirstStepFails(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{domain.StepTest: domain.StepFail}}
+	cfg := prePushCfg() // steps: test, lint — parallel by default
+	par := true
+	cfg.Parallel = &par
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatalf("first-step failure in a parallel batch must not error out: %v", err)
+	}
+	if res.Outcome != domain.OutcomeFailed {
+		t.Fatalf("outcome = %s, want failed", res.Outcome)
+	}
+	if git.pushed {
+		t.Error("a failing step must block the push")
+	}
+}

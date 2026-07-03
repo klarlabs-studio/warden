@@ -4,6 +4,17 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] — 2026-07-03
+
+### Fixed
+
+- **A failing step in a parallel batch now reports cleanly.** When one step in a
+  concurrent batch failed, the run went terminal and the record loop still tried
+  to fold the remaining outcomes in, surfacing the opaque `record step X: run is
+  already terminal` instead of a `step Y failed` naming the real culprit. The
+  loop now stops at the terminal transition, so a parallel gate failure is
+  legible.
+
 ## [0.8.2] — 2026-07-03
 
 ### Fixed
