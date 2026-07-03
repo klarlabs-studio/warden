@@ -33,6 +33,24 @@ jobs:
           # HOMEBREW_TAP_TOKEN scopes the tap-repo push for the brew formula.
           TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
+      # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
+      # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
+      # generation must not gate on that, so tolerate the exit code and verify
+      # the artifacts before uploading them to the goreleaser-created release.
+      - name: Generate + attach SBOM
+        run: |
+          go install github.com/nox-hq/nox/cli@v0.8.1
+          mv "$(go env GOPATH)/bin/cli" "$(go env GOPATH)/bin/nox"
+          mkdir -p release-artifacts
+          nox -format cdx,spdx -output release-artifacts scan . || true
+          test -s release-artifacts/sbom.cdx.json
+          test -s release-artifacts/sbom.spdx.json
+          gh release upload "${GITHUB_REF_NAME}" \
+            release-artifacts/sbom.cdx.json \
+            release-artifacts/sbom.spdx.json --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Assemble the per-platform npm packages from the same binaries and publish
   # them + the main wrapper. The wrapper carries no logic — just launches the
   # binary — so npm is purely a delivery channel.

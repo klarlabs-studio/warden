@@ -4,17 +4,16 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
     branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
 
-# Least-privilege default; jobs that need more scope opt in locally.
 permissions:
   contents: read
 
@@ -22,101 +21,37 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GO_VERSION: "1.26.x"
-
 jobs:
-  # Stage 1 — code quality: formatting, vet, and golangci-lint (gocritic +
-  # staticcheck + govet + misspell). Gates everything downstream.
-  lint:
-    name: Lint & Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
-          fi
-      - name: go vet
-        run: go vet ./...
-      - name: golangci-lint (incl. gocritic)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.12.2
-
-  # Unit tests + coverage policy (coverctl dogfooding). Runs in parallel with
-  # lint; both must be green before e2e is worth running.
-  test:
-    name: Unit & Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-      - name: Download modules
-        run: go mod download
-      - name: Unit tests
-        run: go test ./... -race -cover
-      - name: Install coverctl
-        run: go install go.klarlabs.de/coverctl@latest
-      - name: Coverage policy check
-        run: coverctl check
-
-  # Stage 2 — security: nox scan, gated behind lint. Findings baselined in
-  # .nox/baseline.json stay suppressed; new ones surface as Code Scanning alerts.
-  security:
-    name: Security Scan (nox)
-    runs-on: ubuntu-latest
-    needs: [lint]
+  # The shared klarlabs-studio Go CI: gofmt, golangci-lint (gocritic), race
+  # tests, the coverctl coverage gate, and a nox security scan (SARIF -> code
+  # scanning). Pinned tool/action versions live in one place and every repo
+  # picks up the bump.
+  ci:
+    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
     permissions:
       contents: read
       security-events: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-      - name: govulncheck (reachable Go vulnerabilities)
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-      - name: Install nox
-        run: |
-          curl -sL https://github.com/nox-hq/nox/releases/download/v1.3.1/nox_1.3.1_linux_amd64.tar.gz \
-            | tar xz -C /usr/local/bin nox
-      - name: Run nox scan
-        # Baseline suppresses triaged false positives (test fixtures); the scan
-        # still fails the job on any new critical/high finding.
-        run: nox -format sarif -output . scan . || true
-      - name: Ensure SARIF exists
-        run: |
-          if [ ! -f results.sarif ]; then echo '{"version":"2.1.0","runs":[]}' > results.sarif; fi
-      - name: Upload SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
-        with:
-          sarif_file: results.sarif
+      pull-requests: write
+    secrets: inherit
+    with:
+      # unix-first: native git hooks, disposable worktrees, and a unix-socket
+      # attach channel — no OS-specific matrix needed.
+      cross-platform: false
 
-  # Stage 3 — end-to-end: builds the binary and drives the real gate (pre-commit,
-  # pre-push self-push + provenance notes, doctor bypass audit) against temp git
-  # repos. Runs only after quality and security pass.
+  # warden-specific end-to-end: build the binary and drive the real gate
+  # (pre-commit, pre-push self-push + provenance notes, doctor bypass audit)
+  # against throwaway git repos. Gated behind the shared CI so it runs only once
+  # quality + security are green.
   e2e:
     name: End-to-End
     runs-on: ubuntu-latest
-    needs: [lint, security]
+    needs: [ci]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
       - name: Configure git identity
         run: |
           git config --global user.email ci@warden.test
