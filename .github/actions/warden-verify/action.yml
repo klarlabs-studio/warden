@@ -31,9 +31,11 @@ runs:
   using: composite
   steps:
     # warden is a Go install; the caller must have run actions/setup-go first.
+    # GOTOOLCHAIN=auto lets `go install` fetch the toolchain warden requires when
+    # the runner's Go (from the repo's go.mod) is older than warden's minimum.
     - name: Install warden
       shell: bash
-      run: go install go.klarlabs.de/warden@latest
+      run: GOTOOLCHAIN=auto go install go.klarlabs.de/warden@latest
 
     - name: Fetch warden notes
       shell: bash
