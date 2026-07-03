@@ -11,6 +11,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
 )
 
 // ShellStep runs a configured shell command (lint, test) in the worktree. A
@@ -81,7 +82,10 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 // example: `go test $(echo "$WARDEN_CHANGED_FILES" | ...)`. The full change set
 // (not just a per-step subset) is exposed; scoping is the command's choice.
 func stepEnv(sc application.StepContext) []string {
-	env := os.Environ()
+	// Strip the git hook env vars (GIT_INDEX_FILE, GIT_DIR, …) so a git-aware
+	// step run inside the disposable worktree — e.g. golangci-lint's
+	// new-from-rev — resolves git from the worktree, not the live hook index.
+	env := git.ScrubHookEnv(os.Environ())
 	env = append(env,
 		"WARDEN_HOOK="+sc.Hook.ConfigKey(),
 		"WARDEN_BRANCH="+sc.Branch,
