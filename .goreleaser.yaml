@@ -50,3 +50,12 @@ homebrew_casks:
     homepage: https://go.klarlabs.de/warden
     description: Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance
     license: MIT
+    # The binary isn't notarized, so Gatekeeper quarantines it and the first
+    # `warden` invocation hangs/blocks on an unsigned-binary check. Strip the
+    # quarantine attribute on install so the CLI runs immediately.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/warden"]
+          end
