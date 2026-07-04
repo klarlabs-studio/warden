@@ -9,10 +9,12 @@ on:
       - "LICENSE"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
+    # No paths-ignore here: branch protection requires the reusable CI's status
+    # checks (ci / Lint, Test, Build, Security) plus End-to-End, and a docs-only
+    # PR that skips the whole workflow never reports them — so the PR is
+    # unmergeable forever (this is why #19 needed an admin override). Running CI
+    # on docs PRs is cheap (no code changed → cache hits) and keeps them
+    # mergeable; push-to-main below still skips docs, saving minutes on merges.
 
 permissions:
   contents: read
