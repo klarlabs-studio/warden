@@ -35,3 +35,24 @@ func TestStepEnv_ScrubsGitHookVars(t *testing.T) {
 		t.Error("stepEnv dropped a non-hook env var")
 	}
 }
+
+// TestStepEnv_PerWorktreeGolangciCache guards the stale-cache bug: golangci-lint
+// caches results keyed to the worktree's absolute path, so a shared cache across
+// fresh random worktrees returns dead-path results. Each run must get its own.
+func TestStepEnv_PerWorktreeGolangciCache(t *testing.T) {
+	env := stepEnv(application.StepContext{Hook: domain.PreCommit, WorktreeDir: "/tmp/warden-wt-x"})
+	got := ""
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GOLANGCI_LINT_CACHE=") {
+			got = kv
+		}
+	}
+	if got != "GOLANGCI_LINT_CACHE=/tmp/warden-wt-x-golangci-cache" {
+		t.Fatalf("golangci cache = %q", got)
+	}
+	for _, kv := range stepEnv(application.StepContext{Hook: domain.PreCommit}) {
+		if strings.HasPrefix(kv, "GOLANGCI_LINT_CACHE=") {
+			t.Errorf("no worktree → must not pin a cache, got %q", kv)
+		}
+	}
+}

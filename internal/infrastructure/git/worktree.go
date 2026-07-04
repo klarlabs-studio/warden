@@ -153,6 +153,9 @@ func (w *Worktree) Remove() error {
 	// Always attempt directory cleanup even if git already pruned the entry, so
 	// a partially-created worktree never leaks disk.
 	rmErr := os.RemoveAll(w.Dir)
+	// The per-worktree golangci-lint cache (see steps.stepEnv) is a sibling
+	// derived from the worktree dir; remove it too so runs don't leak caches.
+	_ = os.RemoveAll(w.Dir + "-golangci-cache")
 	if gitErr != nil {
 		return gitErr
 	}

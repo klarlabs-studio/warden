@@ -35,33 +35,54 @@ func shim(hook domain.Hook, version string) string {
 hook=%s
 ver=%q
 
+# Resolve the warden binary: prefer one on PATH, else the pinned cached binary
+# (fetched once), so a repo adopted with no global install keeps working.
 if command -v warden >/dev/null 2>&1; then
-  exec warden run "$hook"
-fi
-
-case "$ver" in ""|*dev*|*snapshot*)
-  echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs-studio/warden, or https://github.com/%s" >&2
-  exit 1 ;;
-esac
-
-cache="$HOME/.warden/bin/$ver/warden"
-if [ ! -x "$cache" ]; then
-  os=$(uname -s | tr '[:upper:]' '[:lower:]')
-  arch=$(uname -m)
-  case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; esac
-  url="https://github.com/%s/releases/download/v$ver/warden_${ver}_${os}_${arch}.tar.gz"
-  mkdir -p "$(dirname "$cache")"
-  echo "warden: fetching pinned binary $ver ($os/$arch)…" >&2
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" | tar -xz -C "$(dirname "$cache")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO- "$url" | tar -xz -C "$(dirname "$cache")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
-  else
-    echo "warden: need warden on PATH or curl/wget to fetch it" >&2; exit 1
+  bin=warden
+else
+  case "$ver" in ""|*dev*|*snapshot*)
+    echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs-studio/warden, or https://github.com/%s" >&2
+    exit 1 ;;
+  esac
+  bin="$HOME/.warden/bin/$ver/warden"
+  if [ ! -x "$bin" ]; then
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+    case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; esac
+    url="https://github.com/%s/releases/download/v$ver/warden_${ver}_${os}_${arch}.tar.gz"
+    mkdir -p "$(dirname "$bin")"
+    echo "warden: fetching pinned binary $ver ($os/$arch)…" >&2
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$url" | tar -xz -C "$(dirname "$bin")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO- "$url" | tar -xz -C "$(dirname "$bin")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
+    else
+      echo "warden: need warden on PATH or curl/wget to fetch it" >&2; exit 1
+    fi
+    chmod +x "$bin"
   fi
-  chmod +x "$cache"
 fi
-exec "$cache" run "$hook"
+
+# Preflight: a binary that can't start (Gatekeeper-quarantined, corrupt, blocked)
+# hangs on exec and would wedge every commit/push. Time-box a trivial version
+# call so a broken binary fails fast with an actionable message instead.
+_wd_timeout() {
+  _t=$1; shift
+  if command -v timeout  >/dev/null 2>&1; then timeout  "$_t" "$@"; return $?; fi
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout "$_t" "$@"; return $?; fi
+  if command -v perl     >/dev/null 2>&1; then
+    perl -e '$t=shift; $SIG{ALRM}=sub{exit 124}; alarm $t; exit(system(@ARGV) >> 8)' "$_t" "$@"; return $?
+  fi
+  "$@"  # no timeout tool available — best effort
+}
+if ! _wd_timeout 15 "$bin" --version >/dev/null 2>&1; then
+  echo "warden: '$bin' is installed but not runnable (Gatekeeper-quarantined, corrupt, or blocked)." >&2
+  echo "warden: fix it (macOS: xattr -dr com.apple.quarantine \"$bin\"; or reinstall), then retry." >&2
+  echo "warden: to commit once without the gate: git commit --no-verify" >&2
+  exit 1
+fi
+
+exec "$bin" run "$hook"
 `, managedMarker, version, hook, version, releaseRepo, releaseRepo)
 }
 
