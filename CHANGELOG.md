@@ -4,6 +4,23 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] — 2026-07-04
+
+### Fixed
+
+- **Per-run golangci-lint cache (no more stale-cache phantom failures).**
+  golangci-lint caches results keyed to absolute paths; because each gate run
+  uses a fresh random worktree, a shared cache returned results referencing a
+  deleted worktree path — so `//nolint` directives weren't honored and it
+  reported failures on clean code (cleared only by `golangci-lint cache clean`).
+  Steps now get a per-worktree `GOLANGCI_LINT_CACHE`, cleaned with the worktree.
+  (#11)
+- **The gate fails fast when the warden binary can't run.** If the resolved
+  binary can't start (Gatekeeper-quarantined, corrupt, blocked), the hook shim
+  used to hang on `exec`, wedging every commit/push. The shim now preflights a
+  time-boxed `--version` and, on a hung/unrunnable binary, exits with an
+  actionable message instead of hanging. (#12)
+
 ## [0.8.3] — 2026-07-03
 
 ### Fixed

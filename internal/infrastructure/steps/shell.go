@@ -86,6 +86,16 @@ func stepEnv(sc application.StepContext) []string {
 	// step run inside the disposable worktree — e.g. golangci-lint's
 	// new-from-rev — resolves git from the worktree, not the live hook index.
 	env := git.ScrubHookEnv(os.Environ())
+	// Pin golangci-lint's cache to a per-worktree dir. golangci caches analysis
+	// results keyed to absolute paths; because each run uses a fresh random
+	// worktree, a shared cache returns results referencing a deleted worktree
+	// path — so `//nolint` directives aren't honored and it reports phantom
+	// failures. A per-worktree cache (a deterministic sibling, cleaned by
+	// Worktree.Remove) keeps each run's cache self-consistent. Empty
+	// WorktreeDir (e.g. a step run outside a worktree) leaves the default.
+	if sc.WorktreeDir != "" {
+		env = append(env, "GOLANGCI_LINT_CACHE="+sc.WorktreeDir+"-golangci-cache")
+	}
 	env = append(env,
 		"WARDEN_HOOK="+sc.Hook.ConfigKey(),
 		"WARDEN_BRANCH="+sc.Branch,
