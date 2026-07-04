@@ -4,6 +4,21 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-07-04
+
+### Added
+
+- **`warden init` generates comprehensive, multi-ecosystem configs.** Instead of
+  detecting a single top-level language, init now walks the repo for every
+  buildable unit (skipping `node_modules`/`vendor`/build dirs) and composes a
+  path-scoped lint + test step per ecosystem — so a Go module at `apps/api` and
+  a TypeScript app at `web` both get gated (`cd apps/api && …`, `cd web && …`),
+  with `pre_commit` running the lints and `pre_push` the tests + lints. A nox
+  `security-scan` step is added when nox is on PATH. Single-language repos are
+  unchanged (unprefixed `lint`/`test`). Language knowledge stays in
+  `LanguageCommands` (Go, Rust, JS, TS, Python), so a new language is a table
+  entry, not new code. (#13)
+
 ## [0.8.4] — 2026-07-04
 
 ### Fixed

@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -50,9 +51,19 @@ func TestStepEnv_PerWorktreeGolangciCache(t *testing.T) {
 	if got != "GOLANGCI_LINT_CACHE=/tmp/warden-wt-x-golangci-cache" {
 		t.Fatalf("golangci cache = %q", got)
 	}
-	for _, kv := range stepEnv(application.StepContext{Hook: domain.PreCommit}) {
-		if strings.HasPrefix(kv, "GOLANGCI_LINT_CACHE=") {
-			t.Errorf("no worktree → must not pin a cache, got %q", kv)
+	// With no worktree, stepEnv must not *introduce* a cache override — compare
+	// counts against the ambient env, since running inside warden's own gate
+	// already exports GOLANGCI_LINT_CACHE.
+	count := func(env []string) int {
+		n := 0
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "GOLANGCI_LINT_CACHE=") {
+				n++
+			}
 		}
+		return n
+	}
+	if got, want := count(stepEnv(application.StepContext{Hook: domain.PreCommit})), count(os.Environ()); got != want {
+		t.Errorf("no worktree changed GOLANGCI_LINT_CACHE count: %d, want %d", got, want)
 	}
 }
