@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os/exec"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
@@ -251,23 +252,53 @@ func (s *Service) writeStarterConfig(selected []domain.Hook) (domain.Language, e
 		return domain.LangUnknown, s.configs.SetHooks(hookCfg)
 	}
 
-	lang := detect.Language(s.repo.Dir)
-	commands := domain.LanguageCommands(lang)
-	if commands == nil {
-		// Unknown project: leave placeholders for the author to fill in.
+	// Detect every ecosystem (a monorepo has several) and compose a lint+test
+	// command per unit, path-scoped, plus a nox security scan when nox is on
+	// PATH. Falls back to empty placeholders for a repo with no recognized
+	// ecosystem.
+	ecos := detect.Ecosystems(s.repo.Dir)
+	var commands map[string]string
+	var stepList map[string][]domain.StepName
+	if len(ecos) == 0 {
+		// No recognized ecosystem: leave placeholders for the author to fill in
+		// (and no lone security step).
 		commands = map[string]string{"lint": "", "test": ""}
+		stepList = map[string][]domain.StepName{
+			domain.PreCommit.ConfigKey(): domain.DefaultSteps(domain.PreCommit),
+			domain.PrePush.ConfigKey():   domain.DefaultSteps(domain.PrePush),
+		}
+	} else {
+		commands, stepList = domain.ComposeConfig(ecos, noxAvailable())
 	}
 	cfg := domain.Config{
 		Agent:    "auto",
 		Hooks:    hookCfg,
 		Commands: commands,
-		Steps: map[string][]domain.StepName{
-			domain.PreCommit.ConfigKey(): domain.DefaultSteps(domain.PreCommit),
-			domain.PrePush.ConfigKey():   domain.DefaultSteps(domain.PrePush),
-		},
-		Risk: domain.RiskConfig(domain.DefaultRiskThresholds()),
+		Steps:    stepList,
+		Risk:     domain.RiskConfig(domain.DefaultRiskThresholds()),
 	}
-	return lang, s.configs.Save(cfg)
+	return primaryLanguage(ecos), s.configs.Save(cfg)
+}
+
+// primaryLanguage names the repo's headline language for the init summary: the
+// root ecosystem's language if present, else the first detected.
+func primaryLanguage(ecos []domain.Ecosystem) domain.Language {
+	for _, e := range ecos {
+		if e.Path == "." {
+			return e.Lang
+		}
+	}
+	if len(ecos) > 0 {
+		return ecos[0].Lang
+	}
+	return domain.LangUnknown
+}
+
+// noxAvailable reports whether the nox security scanner is on PATH, so init only
+// wires a security-scan step a user can actually run.
+func noxAvailable() bool {
+	_, err := exec.LookPath("nox")
+	return err == nil
 }
 
 // hookConfigFrom turns a hook selection list into a HookConfig.
