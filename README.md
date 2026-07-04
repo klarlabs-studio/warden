@@ -75,6 +75,11 @@ warden init             # installs hooks + records the adoption point
 `warden init` alone also works — it auto-detects the language (Go, Rust, JS/TS,
 Python) and pre-fills sensible lint/test commands.
 
+Adopting a strict linter on a repo with existing debt, or running warden
+alongside Copilot review and automation PRs? See the
+[adoption guide](docs/adoption-guide.md) for gating the change (not the history)
+and the CI/bot settings that keep automated PRs from stalling.
+
 ## Quick start
 
 ```bash
