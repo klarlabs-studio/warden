@@ -101,20 +101,25 @@ func (p ResolvedPolicy) Batches() [][]StepName {
 // declared tree-writing in config (Config.Writes). Everything else — shell
 // checks like lint/test and custom commands the author owns — runs concurrently.
 func (p ResolvedPolicy) Concurrent(s StepName) bool {
-	if s == StepRebase || s == StepPush {
-		return false
-	}
-	if p.writesTree(s) {
-		return false
-	}
-	return p.AutoFixBudget(s) == 0
+	return s != StepPush && !p.WritesTree(s)
 }
 
-// writesTree reports whether Warden knows step mutates the worktree and so must
-// not share a parallel batch: a built-in agent step, a custom step a rule
-// assigned an agent to, or a step the config declared under `writes:`.
-func (p ResolvedPolicy) writesTree(s StepName) bool {
-	return s.IsAgentStep() || p.AgentFor(s) != "" || p.WriteSteps[s]
+// WritesTree is the single source of truth for "does this step mutate the
+// tracked worktree." Both the scheduler (Concurrent, above) and the kernel's
+// axi effect level derive from it, so the two can never drift — that drift
+// (the scheduler treating a tree-writing agent as read-only) was the root of the
+// parallel-batch race this predicate fixes. A step writes the tree when it is a
+// history rewrite (rebase), a built-in coding-agent step, a custom step a rule
+// assigned an agent to, a step declared under `writes:`, or a step carrying an
+// auto-fix budget (a positive budget writes fixes back). Everything else — the
+// terminal push (external, handled separately), shell checks like lint/test, and
+// custom commands the author owns — is read-only for scheduling purposes.
+func (p ResolvedPolicy) WritesTree(s StepName) bool {
+	return s == StepRebase ||
+		s.IsAgentStep() ||
+		p.AgentFor(s) != "" ||
+		p.WriteSteps[s] ||
+		p.AutoFixBudget(s) > 0
 }
 
 // AgentFor returns the resolved agent for a step, or "" if the default applies.

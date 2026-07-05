@@ -6,6 +6,15 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal: one source of truth for "does a step write the tree."**
+  `ResolvedPolicy.WritesTree` now backs both the parallel-batch scheduler
+  (`Concurrent`) and the kernel's axi effect level, so the two can no longer
+  drift — that drift was the root cause of the parallel-step race fixed in
+  v0.10.1. No behavior change to runs; see
+  `docs/adr/0001-parallel-step-worktree-isolation.md`.
+
 ## [0.11.0] — 2026-07-05
 
 ### Changed

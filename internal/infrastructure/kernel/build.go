@@ -30,14 +30,14 @@ type PushFunc func(ctx context.Context) (domain.StepResult, error)
 // terminal push is write-external so the kernel pauses it at awaiting_approval
 // — the run-level approval point, reached only after every validation step has
 // already produced its findings (§4.4, §5.4).
-func stepEffect(s domain.StepName) axidomain.EffectLevel {
-	switch s {
-	case domain.StepIntent, domain.StepTest:
-		return axidomain.EffectReadLocal
-	case domain.StepPush:
+func stepEffect(s domain.StepName, policy domain.ResolvedPolicy) axidomain.EffectLevel {
+	switch {
+	case s == domain.StepPush:
 		return axidomain.EffectWriteExternal
-	default:
+	case policy.WritesTree(s):
 		return axidomain.EffectWriteLocal
+	default:
+		return axidomain.EffectReadLocal
 	}
 }
 
@@ -86,7 +86,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 			step = cachedStep{inner: step, cache: cache, globs: policy.CachePaths(name), command: cmdSig}
 		}
 
-		def, err := newStepAction(name)
+		def, err := newStepAction(name, policy)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +95,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	}
 
 	if push != nil {
-		def, err := newStepAction(domain.StepPush)
+		def, err := newStepAction(domain.StepPush, policy)
 		if err != nil {
 			return nil, err
 		}
@@ -150,14 +150,14 @@ func resolveStep(reg application.Registry, name domain.StepName, commands map[st
 // newStepAction builds the axi ActionDefinition for a step: empty contracts
 // (step I/O flows through the executor closure, not the kernel's typed input),
 // the step's effect level, and a non-idempotent profile.
-func newStepAction(name domain.StepName) (*axidomain.ActionDefinition, error) {
+func newStepAction(name domain.StepName, policy domain.ResolvedPolicy) (*axidomain.ActionDefinition, error) {
 	def, err := axidomain.NewActionDefinition(
 		axidomain.ActionName(name),
 		fmt.Sprintf("warden %s step", name),
 		axidomain.EmptyContract(),
 		axidomain.EmptyContract(),
 		nil,
-		axidomain.EffectProfile{Level: stepEffect(name)},
+		axidomain.EffectProfile{Level: stepEffect(name, policy)},
 		axidomain.IdempotencyProfile{IsIdempotent: false},
 	)
 	if err != nil {
