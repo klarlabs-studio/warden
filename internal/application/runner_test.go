@@ -5,7 +5,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,12 +21,21 @@ type fakeWorktree struct {
 	headSHA   string
 	removed   bool
 	diffSince string
+	mu        sync.Mutex
+	clones    []*fakeWorktree // clones minted by Clone, for isolation assertions
 }
 
 func (w *fakeWorktree) Dir() string                { return w.dir }
 func (w *fakeWorktree) HeadSHA() (string, error)   { return w.headSHA, nil }
 func (w *fakeWorktree) DiffSince() (string, error) { return w.diffSince, nil }
 func (w *fakeWorktree) Remove() error              { w.removed = true; return nil }
+func (w *fakeWorktree) Clone(bool) (Worktree, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	c := &fakeWorktree{dir: fmt.Sprintf("%s-clone%d", w.dir, len(w.clones)), headSHA: w.headSHA}
+	w.clones = append(w.clones, c)
+	return c, nil
+}
 
 type fakeGit struct {
 	root         string
@@ -217,6 +228,27 @@ func newFakeSigner(t *testing.T) *fakeSigner {
 func (s *fakeSigner) PublicKey() string { return base64.StdEncoding.EncodeToString(s.pub) }
 func (s *fakeSigner) Sign(payload []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(s.priv, payload)), nil
+}
+
+func TestRunner_ParallelBatchIsolatesWorktrees(t *testing.T) {
+	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1"}
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: wt}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	// prePushCfg runs [test, lint] — both read-only, so they form one parallel
+	// batch. Each must get its own ephemeral worktree, torn down after the batch.
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if len(wt.clones) != 2 {
+		t.Fatalf("expected 2 per-step clones for the [test, lint] batch, got %d", len(wt.clones))
+	}
+	for _, c := range wt.clones {
+		if !c.removed {
+			t.Errorf("clone %s was not torn down after the batch", c.dir)
+		}
+	}
 }
 
 func TestRunner_PrePushSignsProvenance(t *testing.T) {

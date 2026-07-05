@@ -60,3 +60,11 @@ func (w worktreeAdapter) Dir() string                { return w.wt.Dir }
 func (w worktreeAdapter) HeadSHA() (string, error)   { return w.wt.HeadSHA() }
 func (w worktreeAdapter) DiffSince() (string, error) { return w.wt.DiffSince() }
 func (w worktreeAdapter) Remove() error              { return w.wt.Remove() }
+
+func (w worktreeAdapter) Clone(materializeDeps bool) (application.Worktree, error) {
+	clone, err := w.wt.Clone(materializeDeps)
+	if err != nil {
+		return nil, err
+	}
+	return worktreeAdapter{clone}, nil
+}

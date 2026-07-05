@@ -44,6 +44,14 @@ type stepExecutor struct {
 // abort decision and the evidence is still recorded.
 func (e stepExecutor) Execute(ctx context.Context, _ any, _ axidomain.CapabilityInvoker) (axidomain.ExecutionResult, []axidomain.EvidenceRecord, error) {
 	sc := e.sc
+	// Per-step worktree isolation: when the runner assigned this step its own
+	// ephemeral worktree (a parallel-batch step), run against it instead of the
+	// shared canonical worktree so its writes can't race a sibling's.
+	if sc.WorktreeFor != nil {
+		if dir := sc.WorktreeFor(e.step.Name()); dir != "" {
+			sc.WorktreeDir = dir
+		}
+	}
 	if e.priors != nil {
 		e.priorsMu.Lock()
 		sc.PriorFindings = append([]domain.Finding(nil), *e.priors...)

@@ -54,6 +54,36 @@ func (r *Repo) CreateWorktreeFromBranch(branch string, materializeDeps bool) (*W
 	return r.addDetachedWorktree(branch, materializeDeps)
 }
 
+// Clone creates an ephemeral worktree matching w's current tracked state — its
+// committed HEAD plus any staged or unstaged changes — used to isolate a
+// parallel-batch step so its writes stay confined and are discarded on Remove.
+// It seeds a fresh detached worktree at w's HEAD and replays `git diff HEAD`
+// (staged+unstaged, binary-safe) on top. Untracked files in w are not
+// reproduced; parallel steps are read-mostly and don't depend on a sibling's
+// untracked scratch. materializeDeps mirrors the run's dependency-exposure mode.
+func (w *Worktree) Clone(materializeDeps bool) (*Worktree, error) {
+	sha, err := w.HeadSHA()
+	if err != nil {
+		return nil, err
+	}
+	clone, err := w.repo.addDetachedWorktree(sha, materializeDeps)
+	if err != nil {
+		return nil, err
+	}
+	diff, err := runRawIn(w.Dir, "diff", "HEAD", "--binary")
+	if err != nil {
+		_ = clone.Remove()
+		return nil, err
+	}
+	if diff != "" {
+		if err := clone.applyAndStage(diff); err != nil {
+			_ = clone.Remove()
+			return nil, err
+		}
+	}
+	return clone, nil
+}
+
 // addDetachedWorktree creates a temp dir and attaches a detached worktree at
 // ref. Detaching avoids leaving a branch checked out in two places, which git
 // forbids. materializeDeps controls how gitignored dependency dirs are exposed

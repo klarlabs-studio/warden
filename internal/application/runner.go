@@ -124,7 +124,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
 	run := r.newRun(domain.PreCommit, resolved, branch)
 
-	if _, err := r.runValidation(ctx, run, resolved, sc, nil); err != nil {
+	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
 		return RunResult{}, err
 	}
 	if run.IsTerminal() {
@@ -182,7 +182,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 	}
 
-	kernel, err := r.runValidation(ctx, run, resolved, sc, push)
+	kernel, err := r.runValidation(ctx, run, resolved, sc, push, wt)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -250,14 +250,21 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 // state. Independent (read-only) steps run concurrently in batches; steps that
 // write the worktree stay sequential barriers (see scheduleBatches). It returns
 // the kernel so the caller can resolve the push gate.
-func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved domain.ResolvedPolicy, sc StepContext, push PushFunc) (Kernel, error) {
+func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved domain.ResolvedPolicy, sc StepContext, push PushFunc, wt Worktree) (Kernel, error) {
+	// Per-step worktree isolation: steps in a parallel batch each run in their own
+	// ephemeral worktree cloned from the canonical one, so a step's writes can't
+	// race a sibling. The registry maps a step to its worktree during a batch; an
+	// unregistered step (a sequential barrier) falls back to the canonical wt.
+	reg := newWorktreeRegistry()
+	sc.WorktreeFor = reg.dirFor
+
 	var priors []domain.Finding
 	kernel, err := r.Kernels.New(resolved, sc, &priors, push)
 	if err != nil {
 		return nil, err
 	}
 	for _, batch := range resolved.Batches() {
-		if err := r.runBatch(ctx, run, kernel, batch); err != nil {
+		if err := r.runBatch(ctx, run, kernel, batch, wt, reg, resolved.MaterializeDeps); err != nil {
 			return nil, err
 		}
 		if run.IsTerminal() {
@@ -272,7 +279,7 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 // batch runs concurrently through ExecuteBatch, emitting a start event for every
 // step up front so the UI shows them running together, and a finish event per
 // step as it completes.
-func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName) error {
+func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName, wt Worktree, reg *worktreeRegistry, materialize bool) error {
 	if len(batch) == 1 {
 		step := batch[0]
 		r.notify(StepEvent{Step: step, Phase: StepStarted})
@@ -285,6 +292,29 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 		}
 		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
 		return nil
+	}
+
+	// Isolate each concurrent step in its own ephemeral worktree cloned from the
+	// canonical one. A clone failure is best-effort: the step falls back to the
+	// canonical worktree (parallel-batch steps are read-only by scheduling, so a
+	// shared fallback is safe). All clones are torn down and the registry cleared
+	// after the batch, discarding the steps' side-effects.
+	if wt != nil {
+		var clones []Worktree
+		defer func() {
+			for _, c := range clones {
+				_ = c.Remove()
+			}
+			reg.reset()
+		}()
+		for _, step := range batch {
+			clone, err := wt.Clone(materialize)
+			if err != nil {
+				continue // best-effort; this step uses the canonical worktree
+			}
+			clones = append(clones, clone)
+			reg.set(step, clone.Dir())
+		}
 	}
 
 	for _, step := range batch {

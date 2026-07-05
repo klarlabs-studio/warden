@@ -44,6 +44,10 @@ type Git interface {
 // Worktree is a disposable checkout the pipeline mutates. Remove tears it down.
 type Worktree interface {
 	Dir() string
+	// Clone makes an ephemeral worktree matching this one's current tracked state,
+	// used to isolate a parallel-batch step; the caller Removes it after the step.
+	// materializeDeps mirrors the run's dependency-exposure mode.
+	Clone(materializeDeps bool) (Worktree, error)
 	// HeadSHA is the worktree's current commit, read after steps have run and
 	// (for rebase/fix steps) committed their changes.
 	HeadSHA() (string, error)
