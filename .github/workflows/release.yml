@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write # create the GitHub Release
+  id-token: write # cosign keyless signing of checksums.txt (OIDC → Fulcio)
 
 # A tag must produce exactly one release run — two concurrent runs race to
 # upload the same asset names and both fail with 422 already_exists.
@@ -24,6 +25,8 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ env.GO_VERSION }}
+      # cosign is invoked by goreleaser's `signs:` block to sign checksums.txt.
+      - uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"

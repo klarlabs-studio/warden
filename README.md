@@ -64,6 +64,13 @@ per platform (the [esbuild pattern](https://github.com/evanw/esbuild/tree/main/n
 and execs it. All logic lives in the one Go binary; every channel above ships
 that same binary.
 
+Every self-fetched binary — the installer scripts and the version-pinned git
+hook that bootstraps warden on a fresh clone — is **SHA-256-verified against the
+release's `checksums.txt` before it is made executable, and fails closed on any
+mismatch**; the cached binary is re-verified on every run. See
+[SECURITY.md](SECURITY.md#supply-chain-integrity-of-the-self-fetched-binary) for
+the integrity model and the signature-verification follow-up.
+
 ## Adopt an existing repo in one command
 
 ```bash
