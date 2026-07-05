@@ -90,6 +90,37 @@ func TestResolvedPolicy_Concurrent(t *testing.T) {
 	}
 }
 
+func TestResolvedPolicy_WritesTree(t *testing.T) {
+	p := ResolvedPolicy{
+		AutoFix:    map[StepName]int{StepLint: 2, "checked": 0},
+		Agents:     map[StepName]string{"custom-agent": "claude"},
+		WriteSteps: map[StepName]bool{"codegen": true},
+	}
+	writes := map[StepName]bool{
+		StepRebase:     true,  // history rewrite
+		StepIntent:     true,  // coding-agent step
+		StepReview:     true,  // coding-agent step
+		StepDocument:   true,  // coding-agent step
+		"custom-agent": true,  // rule-assigned agent
+		"codegen":      true,  // declared under writes:
+		StepLint:       true,  // positive auto-fix budget
+		StepTest:       false, // read-only shell check
+		StepPush:       false, // external, not a tree write (handled separately)
+		"checked":      false, // zero budget, no agent
+		"plain":        false, // ordinary custom command
+	}
+	for s, want := range writes {
+		if got := p.WritesTree(s); got != want {
+			t.Errorf("WritesTree(%s) = %v, want %v", s, got, want)
+		}
+		// Concurrent is exactly "not push and not a tree-writer".
+		wantConc := s != StepPush && !want
+		if got := p.Concurrent(s); got != wantConc {
+			t.Errorf("Concurrent(%s) = %v, want %v", s, got, wantConc)
+		}
+	}
+}
+
 func TestResolvedPolicy_AuthorizesFix(t *testing.T) {
 	cases := []struct {
 		name    string

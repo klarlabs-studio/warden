@@ -97,8 +97,26 @@ have shaped it.
 - **New config surface:** `writes: [step…]` (unions across `extends`, so a base
   cannot silently drop a writer marking).
 
-## Follow-ups (not built)
+## Follow-ups
 
-- **Phase 3 — per-step worktrees** for parallel *writers*, only if demand appears.
-- Unify `Concurrent`/`stepEffect` on a single domain "writes the tree" property so
-  the scheduler and the kernel effect can never drift again.
+- **Unify the tree-writing signal — DONE.** `ResolvedPolicy.WritesTree` is now the
+  single source of truth; both `Concurrent` (scheduling) and the kernel's
+  `stepEffect` (axi `EffectLevel`) derive from it, so they can never drift again.
+  A step writes the tree iff it is a rebase, a coding-agent step, a rule-assigned
+  agent, declared under `writes:`, or carries a positive auto-fix budget. (Safe:
+  axi's `IsWriteEffect` has no callers — only the external axis triggers a pause,
+  which is unchanged for local steps.)
+
+- **Phase 3 — per-step worktrees — reassessed, still not built.** Two things make
+  this less attractive than when the ADR was written:
+  1. **Parallel writers can't be merged.** Isolating two *tree-writing* steps in
+     separate worktrees produces divergent trees with no clean reconciliation, so
+     Phase 3 can only isolate *finding-producing* steps whose writes are
+     *discarded* — which needs a new "writes are discardable" declaration warden
+     doesn't have (it can't tell `review` from `document` by type).
+  2. **Materialization is now the default** (deps are hardlink-copied per
+     worktree), so N ephemeral worktrees per batch means N `node_modules` copies —
+     cheap on same-fs, but a real cost the symlink-era design didn't carry.
+  The concrete benefit is parallelizing ~2 read-mostly agents (`review`,
+  `intent`). Kept documented; build only if agent-parallelism becomes a measured
+  bottleneck.
