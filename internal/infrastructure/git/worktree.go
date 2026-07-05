@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type Worktree struct {
 // staged changes applied on top, reproducing exactly what a pre-commit would
 // produce. Seeding the index from a staged diff lets steps see the pending
 // change without touching the real working tree (§4.2).
-func (r *Repo) CreateWorktreeFromHead() (*Worktree, error) {
+func (r *Repo) CreateWorktreeFromHead(materializeDeps bool) (*Worktree, error) {
 	// Capture the staged diff (raw — a patch must be byte-exact) before creating
 	// the worktree so a failure to stage leaves no orphan directory behind.
 	// --binary emits full index lines + base85 hunks so a staged binary file
@@ -30,7 +31,7 @@ func (r *Repo) CreateWorktreeFromHead() (*Worktree, error) {
 		return nil, err
 	}
 
-	wt, err := r.addDetachedWorktree("HEAD")
+	wt, err := r.addDetachedWorktree("HEAD", materializeDeps)
 	if err != nil {
 		return nil, err
 	}
@@ -49,14 +50,15 @@ func (r *Repo) CreateWorktreeFromHead() (*Worktree, error) {
 // CreateWorktreeFromBranch makes a detached worktree at the tip of branch, the
 // clean starting point for a pre-push run where the changes are already
 // committed (§4.3).
-func (r *Repo) CreateWorktreeFromBranch(branch string) (*Worktree, error) {
-	return r.addDetachedWorktree(branch)
+func (r *Repo) CreateWorktreeFromBranch(branch string, materializeDeps bool) (*Worktree, error) {
+	return r.addDetachedWorktree(branch, materializeDeps)
 }
 
 // addDetachedWorktree creates a temp dir and attaches a detached worktree at
 // ref. Detaching avoids leaving a branch checked out in two places, which git
-// forbids.
-func (r *Repo) addDetachedWorktree(ref string) (*Worktree, error) {
+// forbids. materializeDeps controls how gitignored dependency dirs are exposed
+// (see exposeGitignoredDeps).
+func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree, error) {
 	dir, err := os.MkdirTemp("", "warden-wt-")
 	if err != nil {
 		return nil, fmt.Errorf("git: create worktree temp dir: %w", err)
@@ -68,11 +70,11 @@ func (r *Repo) addDetachedWorktree(ref string) (*Worktree, error) {
 	wt := &Worktree{Dir: dir, repo: r}
 	// A git worktree only contains tracked files, so gitignored dependency
 	// directories (node_modules) are absent — JS/TS steps (tsc, eslint, vitest)
-	// would fail with "command not found". Symlink them in from the live
-	// checkout so those steps resolve their deps without a slow reinstall.
-	// Best-effort: a repo with no node_modules links nothing and steps that
-	// don't need it are unaffected.
-	wt.linkGitignoredDeps()
+	// would fail with "command not found". Expose them from the live checkout so
+	// those steps resolve their deps without a slow reinstall. Best-effort: a
+	// repo with no node_modules exposes nothing and steps that don't need it are
+	// unaffected.
+	wt.exposeGitignoredDeps(materializeDeps)
 	return wt, nil
 }
 
@@ -80,12 +82,21 @@ func (r *Repo) addDetachedWorktree(ref string) (*Worktree, error) {
 // symlinking them from the live checkout into the worktree.
 var depDirNames = map[string]bool{"node_modules": true}
 
-// linkGitignoredDeps symlinks each dependency directory (see depDirNames) found
-// in the live checkout into the worktree at the same relative path. It never
-// descends into a linked dependency dir or .git, so a monorepo's nested
-// node_modules (web/, apps/*/, site/) are each linked without walking their
+// exposeGitignoredDeps makes each dependency directory (see depDirNames) found
+// in the live checkout available in the worktree at the same relative path. It
+// never descends into an exposed dependency dir or .git, so a monorepo's nested
+// node_modules (web/, apps/*/, site/) are each exposed without walking their
 // contents.
-func (w *Worktree) linkGitignoredDeps() {
+//
+// By default it SYMLINKS the directory (fast, O(1)) — enough for tsc, eslint,
+// vitest, and Node's own resolver, which all follow the symlink happily. Some
+// build tools reject a node_modules symlink whose real target resolves outside
+// the worktree's filesystem root: Next.js 16 / Turbopack fails with
+// "Symlink node_modules is invalid, it points out of the filesystem root".
+// When materialize is true, the directory is instead hardlink-copied so the
+// deps are REAL files inside the worktree root, which those tools accept. See
+// domain.Config.MaterializeDeps for the per-step opt-in that drives this.
+func (w *Worktree) exposeGitignoredDeps(materialize bool) {
 	root := w.repo.Dir
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
@@ -104,13 +115,84 @@ func (w *Worktree) linkGitignoredDeps() {
 		}
 		target := filepath.Join(w.Dir, rel)
 		if _, err := os.Lstat(target); err == nil {
-			return filepath.SkipDir // already present (tracked, or already linked)
+			return filepath.SkipDir // already present (tracked, or already exposed)
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err == nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return filepath.SkipDir
+		}
+		if materialize {
+			if err := materializeTree(path, target); err != nil {
+				// Best-effort: fall back to a symlink so the run still proceeds
+				// rather than leaving a half-populated dependency dir behind.
+				_ = os.RemoveAll(target)
+				_ = os.Symlink(path, target)
+			}
+		} else {
 			_ = os.Symlink(path, target)
 		}
 		return filepath.SkipDir // never walk into the dependency dir itself
 	})
+}
+
+// materializeTree recreates the directory tree rooted at src under dst using
+// hardlinks for regular files (near-instant, no extra disk on the same
+// filesystem), falling back to a byte copy when a hardlink can't be made (e.g.
+// src and dst live on different filesystems). Directories are recreated and
+// symlinks are preserved verbatim, so the result is a real in-root directory a
+// filesystem-root-strict tool (Turbopack) accepts.
+func materializeTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		switch {
+		case d.IsDir():
+			return os.MkdirAll(out, 0o755)
+		case d.Type()&fs.ModeSymlink != 0:
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, out)
+		case d.Type().IsRegular():
+			// Hardlink shares the inode (fast); on a cross-filesystem link error,
+			// fall back to copying the bytes so materialization still succeeds.
+			if err := os.Link(path, out); err == nil {
+				return nil
+			}
+			return copyFile(path, out)
+		default:
+			return nil // skip sockets/devices/pipes — never present in node_modules
+		}
+	})
+}
+
+// copyFile copies src to dst preserving the file mode, used as the cross-
+// filesystem fallback for materializeTree.
+func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // applyAndStage applies a unified diff to the worktree and stages it, so the

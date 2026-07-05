@@ -29,6 +29,16 @@ type Config struct {
 	// rests on declaring all of a step's inputs (like bazel/turbo).
 	Cache map[string][]string `yaml:"cache"`
 
+	// MaterializeDeps lists steps that need gitignored dependency directories
+	// (node_modules) as REAL files in the disposable worktree rather than the
+	// default symlink. Symlinking is fast and works for tsc/eslint/vitest/Node,
+	// but some build tools reject a node_modules symlink whose target resolves
+	// outside the worktree root — notably Next.js 16 / Turbopack ("Symlink
+	// node_modules is invalid, it points out of the filesystem root"). List such
+	// steps (e.g. `build`) here and warden hardlink-copies the deps for any run
+	// that includes one of them. Empty (the default) always symlinks.
+	MaterializeDeps []string `yaml:"materialize_deps"`
+
 	// AgentCommands maps an agent name (as selected by `agent` or a rule's
 	// per-step agent override) to the shell command that invokes it. The
 	// template may reference {prompt}, {step}, and {repo}; e.g.

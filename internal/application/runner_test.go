@@ -46,9 +46,9 @@ func (g *fakeGit) MergeBase(string) (string, error) { return "base", g.mergeBase
 func (g *fakeGit) DiffStats(string) (domain.DiffStats, error) {
 	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2}, nil
 }
-func (g *fakeGit) StagedDiffStats() (domain.DiffStats, error) { return domain.DiffStats{}, nil }
-func (g *fakeGit) SeedWorktreeFromHead() (Worktree, error)    { return g.wt, nil }
-func (g *fakeGit) SeedWorktreeFromBranch(string) (Worktree, error) {
+func (g *fakeGit) StagedDiffStats() (domain.DiffStats, error)  { return domain.DiffStats{}, nil }
+func (g *fakeGit) SeedWorktreeFromHead(bool) (Worktree, error) { return g.wt, nil }
+func (g *fakeGit) SeedWorktreeFromBranch(string, bool) (Worktree, error) {
 	return g.wt, nil
 }
 func (g *fakeGit) FastForwardTo(_, _, _ string) error { return g.ffErr }

@@ -33,6 +33,10 @@ type ResolvedPolicy struct {
 	Timeouts map[StepName]time.Duration
 	// Cache maps a step to its declared input path globs (see Config.Cache).
 	Cache map[StepName][]string
+	// MaterializeDeps is true when this run includes a step that needs gitignored
+	// dependency dirs materialized as real files in the worktree rather than
+	// symlinked (see Config.MaterializeDeps). Resolved from the run's step set.
+	MaterializeDeps bool
 }
 
 // CachePaths returns the declared input globs for a step, or nil.

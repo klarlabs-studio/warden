@@ -54,6 +54,31 @@ func mustParse(t *testing.T) domain.Config {
 	return specConfig()
 }
 
+func TestResolve_MaterializeDeps(t *testing.T) {
+	base := domain.Config{
+		Steps: map[string][]domain.StepName{
+			"pre_commit": {"lint"},
+			"pre_push":   {"lint", "test", "build"},
+		},
+		MaterializeDeps: []string{"build"},
+	}
+
+	// A run whose steps include a materialize step opts in.
+	if got := Resolve(base, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); !got.MaterializeDeps {
+		t.Error("pre_push includes build → MaterializeDeps should be true")
+	}
+	// A run without any materialize step does not (pre_commit is lint only).
+	if got := Resolve(base, Input{Hook: domain.PreCommit, Risk: domain.RiskLow}); got.MaterializeDeps {
+		t.Error("pre_commit has no materialize step → MaterializeDeps should be false")
+	}
+	// No materialize_deps configured → never materialize.
+	none := base
+	none.MaterializeDeps = nil
+	if got := Resolve(none, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); got.MaterializeDeps {
+		t.Error("empty materialize_deps → MaterializeDeps should be false")
+	}
+}
+
 func TestResolve_BaselineNoRules(t *testing.T) {
 	cfg := mustParse(t)
 	got := Resolve(cfg, Input{Hook: domain.PrePush, Branch: "feature/x", Risk: domain.RiskLow})

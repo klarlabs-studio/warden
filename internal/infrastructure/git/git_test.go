@@ -128,7 +128,7 @@ func TestWorktreeFromHead(t *testing.T) {
 		t.Fatalf("git add: %v: %s", err, out)
 	}
 
-	wt, err := repo.CreateWorktreeFromHead()
+	wt, err := repo.CreateWorktreeFromHead(false)
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}

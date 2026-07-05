@@ -26,8 +26,12 @@ type Git interface {
 	DiffStats(base string) (domain.DiffStats, error)
 	StagedDiffStats() (domain.DiffStats, error)
 
-	SeedWorktreeFromHead() (Worktree, error)
-	SeedWorktreeFromBranch(branch string) (Worktree, error)
+	// SeedWorktreeFrom* build the disposable worktree. materializeDeps hardlink-
+	// copies gitignored dependency dirs (node_modules) into it as real files
+	// rather than symlinking them, for build tools that reject an out-of-root
+	// symlink (Next.js/Turbopack). See domain.Config.MaterializeDeps.
+	SeedWorktreeFromHead(materializeDeps bool) (Worktree, error)
+	SeedWorktreeFromBranch(branch string, materializeDeps bool) (Worktree, error)
 
 	// FastForwardTo advances branch to sha only if branch still points at
 	// expectedTip, else returns a branch-moved error (the mid-run guard).

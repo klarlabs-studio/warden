@@ -69,7 +69,7 @@ func TestWorktreeFromBranchAndDiffSince(t *testing.T) {
 	dir := newTestRepo(t)
 	repo := &Repo{Dir: dir}
 
-	wt, err := repo.CreateWorktreeFromBranch("main")
+	wt, err := repo.CreateWorktreeFromBranch("main", false)
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromBranch: %v", err)
 	}

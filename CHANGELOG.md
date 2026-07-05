@@ -4,6 +4,23 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`materialize_deps:` — real (not symlinked) dependency dirs for build steps.**
+  warden exposes gitignored dependency directories (`node_modules`) to steps by
+  symlinking them from the live checkout into the disposable worktree — fast, and
+  fine for `tsc`/`eslint`/`vitest`/Node. But Next.js 16 / Turbopack rejects a
+  `node_modules` symlink whose target resolves outside the worktree root
+  (`TurbopackInternalError: Symlink node_modules is invalid, it points out of the
+  filesystem root`), so a `build` step failed as a false positive. List the
+  affected steps under `materialize_deps` (e.g. `materialize_deps: [build]`) and
+  warden hardlink-copies the deps into the worktree as real files for any run
+  that includes one of them — Turbopack accepts it, and other runs keep the fast
+  symlink. Hardlinks fall back to a byte copy across filesystems; internal
+  symlinks (`.bin`) are preserved.
+
 ## [0.9.0] — 2026-07-04
 
 ### Added

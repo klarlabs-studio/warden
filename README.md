@@ -154,6 +154,7 @@ parallel: true   # default — run independent checks concurrently (see below)
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
 notify: true     # default — desktop notification when an interactive pre-push finishes
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
+materialize_deps: [build]   # hardlink-copy node_modules (not symlink) for these steps — for Next.js/Turbopack
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 rules:
@@ -201,6 +202,24 @@ never committed); the key also covers the step's command, so changing what the
 step runs busts it. Only non-mutating steps are cacheable, and correctness rests
 on declaring *all* of a step's inputs (same contract as bazel/turbo). A step's
 first cache line appears as `test (cached — inputs unchanged)`.
+
+### Materializing dependencies (Next.js / Turbopack)
+
+warden validates in a disposable git worktree, which only contains tracked
+files — so gitignored `node_modules` is absent. warden bridges the gap by
+**symlinking** each `node_modules` from your live checkout into the worktree:
+fast, O(1), and enough for `tsc`, `eslint`, `vitest`, and Node's own resolver,
+which all follow the symlink happily.
+
+Some build tools don't. Next.js 16 / Turbopack resolves the symlink's real path,
+sees it lands outside the worktree root, and fails:
+`TurbopackInternalError: Symlink node_modules is invalid, it points out of the
+filesystem root`. List those steps under `materialize_deps` and warden instead
+**hardlink-copies** the dependency dirs into the worktree as real files for any
+run that includes one of them — Turbopack accepts them, while your other steps
+keep the fast symlink. Hardlinks cost no extra disk on the same filesystem (they
+fall back to a byte copy across filesystems), and internal `.bin` symlinks are
+preserved.
 
 ## Commands
 

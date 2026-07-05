@@ -53,7 +53,7 @@ func TestAdapterWorktreeAndPublish(t *testing.T) {
 	bare := setupBareRemote(t, dir)
 
 	// Seed a worktree from HEAD through the adapter and drive its port methods.
-	wt, err := a.SeedWorktreeFromHead()
+	wt, err := a.SeedWorktreeFromHead(false)
 	if err != nil {
 		t.Fatalf("SeedWorktreeFromHead: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAdapterWorktreeAndPublish(t *testing.T) {
 		t.Errorf("worktree Remove: %v", err)
 	}
 
-	wtBranch, err := a.SeedWorktreeFromBranch("main")
+	wtBranch, err := a.SeedWorktreeFromBranch("main", false)
 	if err != nil {
 		t.Fatalf("SeedWorktreeFromBranch: %v", err)
 	}
