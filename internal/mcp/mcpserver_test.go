@@ -46,7 +46,7 @@ func (f *fakeFacade) RunTrigger(_ context.Context, hook domain.Hook) (RunSummary
 }
 
 func TestNewServer_BuildsWithoutPanic(t *testing.T) {
-	srv := NewServer(&fakeFacade{}, "1.2.3")
+	srv := NewServer(&fakeFacade{}, "1.2.3", AllowAllRuns)
 	if srv == nil {
 		t.Fatal("NewServer returned nil")
 	}
@@ -139,7 +139,7 @@ func TestHandleRunTrigger(t *testing.T) {
 	}
 	f := &fakeFacade{run: want}
 
-	got, err := handleRunTrigger(context.Background(), f, RunTriggerInput{Hook: "pre-push"})
+	got, err := handleRunTrigger(context.Background(), f, AllowAllRuns, RunTriggerInput{Hook: "pre-push"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestHandleRunTrigger(t *testing.T) {
 }
 
 func TestHandleRunTrigger_BadHook(t *testing.T) {
-	_, err := handleRunTrigger(context.Background(), &fakeFacade{}, RunTriggerInput{Hook: "nope"})
+	_, err := handleRunTrigger(context.Background(), &fakeFacade{}, AllowAllRuns, RunTriggerInput{Hook: "nope"})
 	if err == nil {
 		t.Fatal("expected error for unknown hook, got nil")
 	}
@@ -160,9 +160,52 @@ func TestHandleRunTrigger_BadHook(t *testing.T) {
 
 func TestHandleRunTrigger_FacadeError(t *testing.T) {
 	sentinel := errors.New("pipeline exploded")
-	_, err := handleRunTrigger(context.Background(), &fakeFacade{runErr: sentinel}, RunTriggerInput{Hook: "pre-commit"})
+	_, err := handleRunTrigger(context.Background(), &fakeFacade{runErr: sentinel}, AllowAllRuns, RunTriggerInput{Hook: "pre-commit"})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected run error to propagate, got %v", err)
+	}
+}
+
+// TestHandleRunTrigger_GateRefuses is the core trust guard: when the gate
+// denies, run_trigger returns the gate's error and never touches the facade, so
+// a possibly-untrusted repo's commands are not executed on the auto-approved
+// MCP/axi path.
+func TestHandleRunTrigger_GateRefuses(t *testing.T) {
+	sentinel := errors.New("not trusted")
+	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
+	deny := func() error { return sentinel }
+
+	_, err := handleRunTrigger(context.Background(), f, deny, RunTriggerInput{Hook: "pre-push"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected gate refusal to propagate, got %v", err)
+	}
+	if f.runHook != "" {
+		t.Errorf("facade must not run when the gate refuses; ran hook %q", f.runHook)
+	}
+}
+
+// TestHandleRunTrigger_GatePermits confirms a permitting gate lets the run
+// proceed to the facade unchanged.
+func TestHandleRunTrigger_GatePermits(t *testing.T) {
+	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
+	got, err := handleRunTrigger(context.Background(), f, AllowAllRuns, RunTriggerInput{Hook: "pre-push"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Outcome != "passed" || f.runHook != domain.PrePush {
+		t.Errorf("permitted run did not reach facade: got %+v hook=%q", got, f.runHook)
+	}
+}
+
+// TestHandleRunTrigger_NilGateUnguarded documents that a nil gate leaves
+// run_trigger unguarded, so embedders must opt in deliberately.
+func TestHandleRunTrigger_NilGateUnguarded(t *testing.T) {
+	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
+	if _, err := handleRunTrigger(context.Background(), f, nil, RunTriggerInput{Hook: "pre-push"}); err != nil {
+		t.Fatalf("nil gate should not block: %v", err)
+	}
+	if f.runHook != domain.PrePush {
+		t.Errorf("nil gate should reach facade, got hook %q", f.runHook)
 	}
 }
 

@@ -221,14 +221,27 @@ commands:
 		t.Errorf("axi steps output shape: %q", out)
 	}
 
-	// run-trigger against pre-commit passes and reports the outcome.
-	code, out, errb = run("axi", "run-trigger", "--hook", "pre-commit")
+	// run-trigger is refused by default: it executes repo-authored shell on the
+	// auto-approved path, so without explicit trust it must not run.
+	if code, _, errb := run("axi", "run-trigger", "--hook", "pre-commit"); code != 1 || !strings.Contains(errb, "run_trigger refused") {
+		t.Errorf("axi run-trigger untrusted should refuse: code=%d err=%q", code, errb)
+	}
+
+	// With --trust it runs and reports the outcome.
+	code, out, errb = run("axi", "run-trigger", "--hook", "pre-commit", "--trust")
 	if code != 0 {
-		t.Fatalf("axi run-trigger: code=%d err=%q", code, errb)
+		t.Fatalf("axi run-trigger --trust: code=%d err=%q", code, errb)
 	}
 	if !strings.Contains(out, "outcome") {
 		t.Errorf("axi run-trigger output shape: %q", out)
 	}
+
+	// The env-var opt-in is equivalent to --trust for repos the operator trusts.
+	t.Setenv("WARDEN_MCP_ALLOW_RUN", "1")
+	if code, out, errb := run("axi", "run-trigger", "--hook", "pre-commit"); code != 0 || !strings.Contains(out, "outcome") {
+		t.Errorf("axi run-trigger with env opt-in: code=%d out=%q err=%q", code, out, errb)
+	}
+	t.Setenv("WARDEN_MCP_ALLOW_RUN", "")
 
 	// Unknown verb → exit 2.
 	if code, _, errb := run("axi", "bogus"); code != 2 || !strings.Contains(errb, "unknown verb") {
@@ -257,6 +270,40 @@ func TestAxi_EmitTOONAndStringHelpers(t *testing.T) {
 	}
 	if got := anyStrings(nil); len(got) != 0 {
 		t.Errorf("anyStrings nil: %v", got)
+	}
+}
+
+func TestMCPRunTrusted(t *testing.T) {
+	// Explicit trust (the axi --trust flag) permits regardless of env.
+	t.Setenv("WARDEN_MCP_ALLOW_RUN", "")
+	if !mcpRunTrusted(true) {
+		t.Error("explicit trust should permit")
+	}
+	// Without explicit trust and no env, refuse.
+	if mcpRunTrusted(false) {
+		t.Error("no trust signal should refuse")
+	}
+	// Truthy env spellings opt in; anything else stays off.
+	for _, v := range []string{"1", "true", "TRUE", "yes", "on", " On "} {
+		t.Setenv("WARDEN_MCP_ALLOW_RUN", v)
+		if !mcpRunTrusted(false) {
+			t.Errorf("env %q should permit", v)
+		}
+	}
+	for _, v := range []string{"", "0", "false", "no", "off", "bogus"} {
+		t.Setenv("WARDEN_MCP_ALLOW_RUN", v)
+		if mcpRunTrusted(false) {
+			t.Errorf("env %q should refuse", v)
+		}
+	}
+}
+
+func TestErrUntrustedMCPRun_IsActionable(t *testing.T) {
+	msg := errUntrustedMCPRun().Error()
+	for _, want := range []string{"run_trigger refused", "WARDEN_MCP_ALLOW_RUN", "--trust"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal message missing %q: %q", want, msg)
+		}
 	}
 }
 

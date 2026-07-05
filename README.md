@@ -225,6 +225,28 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden axi <verb>` | flags-only agent surface, TOON output |
 | `warden mcp serve` | MCP server over stdio |
 
+### Agent surfaces and `run_trigger` trust
+
+The `axi` and `mcp` surfaces are non-interactive: they auto-approve gate
+findings because there is no human at a prompt. That is fine for the read-only
+operations (`policy_explain` / `policy-explain`, `steps_list` / `steps`), but
+`run_trigger` (and `warden axi run-trigger`) **executes the repository's
+`.warden.yaml` `commands` as shell**. Pointing an MCP-enabled agent at an
+untrusted cloned repo and letting it call `run_trigger` would therefore be
+arbitrary code execution from that repo's config, with the human-approval step a
+normal interactive `warden run` keeps.
+
+So `run_trigger` **refuses by default** on these surfaces and runs only when the
+operator has explicitly trusted the repo:
+
+- **MCP** (`warden mcp serve`): set `WARDEN_MCP_ALLOW_RUN=1` in the server's
+  environment. An MCP client cannot pass flags, so the env var is the only knob.
+- **axi** (`warden axi run-trigger`): pass `--trust`, or set
+  `WARDEN_MCP_ALLOW_RUN=1`.
+
+Grant trust only for repositories whose `.warden.yaml` you have reviewed. The
+normal interactive `warden` flow is unaffected — it still prompts a human.
+
 ## Custom steps
 
 Two ways, easy first.

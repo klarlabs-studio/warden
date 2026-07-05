@@ -13,7 +13,7 @@ func TestServe_ReturnsOnCancelledContext(t *testing.T) {
 	cancel() // already canceled before Serve starts
 
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, &fakeFacade{}, "test") }()
+	go func() { done <- Serve(ctx, &fakeFacade{}, "test", AllowAllRuns) }()
 
 	select {
 	case <-done:

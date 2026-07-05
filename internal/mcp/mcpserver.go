@@ -59,6 +59,29 @@ type RunTriggerInput struct {
 	Hook string `json:"hook" jsonschema:"required,description=Hook pipeline to run: pre-commit or pre-push"`
 }
 
+// RunGate authorizes run_trigger before it executes the repository's configured
+// commands. It returns nil to permit the run, or a descriptive error to refuse
+// it. run_trigger runs on the auto-approving MCP/axi path with no human in the
+// loop, so this is the sole operator-controlled checkpoint standing between an
+// AI client and arbitrary shell authored by a possibly-untrusted cloned repo;
+// the CLI supplies a gate backed by an explicit trust opt-in. The read-only
+// tools (policy_explain, steps_list) never consult it. A nil gate leaves
+// run_trigger unguarded, so callers embedding the server elsewhere must opt in
+// deliberately.
+type RunGate func() error
+
+// AllowAllRuns is a permissive RunGate for trusted embeddings and tests.
+func AllowAllRuns() error { return nil }
+
+// runTriggerDescription documents that run_trigger executes repo-authored shell
+// and is gated on explicit trust, so an agent reading the tool list understands
+// the checkpoint before it calls and the refusal it may get back.
+const runTriggerDescription = "Run the pipeline for a hook and return a compact run summary. " +
+	"This EXECUTES the repository's configured commands as shell on the auto-approved, " +
+	"non-interactive path (no human approval prompt), so it is refused unless the operator " +
+	"has explicitly trusted this repo (WARDEN_MCP_ALLOW_RUN=1, or the axi --trust flag). " +
+	"The read-only tools are always available."
+
 // NewServer builds an MCP server exposing Warden's operation set as typed tools:
 //   - policy_explain(hook, branch?, paths?) -> ResolvedPolicy
 //   - steps_list() -> {pre_commit, pre_push}
@@ -67,7 +90,10 @@ type RunTriggerInput struct {
 // run_respond/run_status are intentionally absent: v0 runs synchronously, so
 // there is no out-of-band run to poll or respond to. A stub tool documents this
 // rather than silently omitting the operation, so an agent gets a clear error.
-func NewServer(f Facade, version string) *mcp.Server {
+//
+// gate authorizes run_trigger before it executes repo-authored commands; see
+// RunGate. Pass AllowAllRuns for a permissive server.
+func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 	srv := mcp.NewServer(mcp.ServerInfo{
 		Name:        "warden",
 		Version:     version,
@@ -90,9 +116,9 @@ func NewServer(f Facade, version string) *mcp.Server {
 		})
 
 	srv.Tool("run_trigger").
-		Description("Run the pipeline for a hook and return a compact run summary.").
+		Description(runTriggerDescription).
 		Handler(func(ctx context.Context, in RunTriggerInput) (RunSummary, error) {
-			return handleRunTrigger(ctx, f, in)
+			return handleRunTrigger(ctx, f, gate, in)
 		})
 
 	srv.Tool("run_respond").
@@ -110,9 +136,10 @@ func NewServer(f Facade, version string) *mcp.Server {
 	return srv
 }
 
-// Serve starts the server on stdio and blocks until ctx is canceled.
-func Serve(ctx context.Context, f Facade, version string) error {
-	return mcp.ServeStdio(ctx, NewServer(f, version))
+// Serve starts the server on stdio and blocks until ctx is canceled. gate
+// authorizes run_trigger; see RunGate.
+func Serve(ctx context.Context, f Facade, version string, gate RunGate) error {
+	return mcp.ServeStdio(ctx, NewServer(f, version, gate))
 }
 
 // handlePolicyExplain parses the hook and delegates to the facade. It is split
@@ -135,9 +162,17 @@ func handleStepsList(f Facade) (StepsListOutput, error) {
 	return StepsListOutput{PreCommit: preCommit, PrePush: prePush}, nil
 }
 
-// handleRunTrigger parses the hook and runs the pipeline, propagating context so
-// the run honors cancellation from the MCP client.
-func handleRunTrigger(ctx context.Context, f Facade, in RunTriggerInput) (RunSummary, error) {
+// handleRunTrigger authorizes the run through the gate, then parses the hook and
+// runs the pipeline, propagating context so the run honors cancellation from the
+// MCP client. The gate is consulted before anything else so a refusal is
+// deterministic and never leaks whether the hook or config was otherwise valid.
+// A nil gate leaves the run unguarded (see RunGate).
+func handleRunTrigger(ctx context.Context, f Facade, gate RunGate, in RunTriggerInput) (RunSummary, error) {
+	if gate != nil {
+		if err := gate(); err != nil {
+			return RunSummary{}, err
+		}
+	}
 	hook, err := domain.ParseHook(in.Hook)
 	if err != nil {
 		return RunSummary{}, err

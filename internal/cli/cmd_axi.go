@@ -80,8 +80,15 @@ func axiRunTrigger(f facade, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("axi run-trigger", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	hookFlag := fs.String("hook", "pre-push", "hook")
+	trustFlag := fs.Bool("trust", false, "trust this repo and run its configured commands (also WARDEN_MCP_ALLOW_RUN=1)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	// run-trigger executes repo-authored shell on the auto-approved path, so
+	// refuse unless the operator explicitly trusts this repo. Checked before
+	// hook parsing so the refusal is deterministic.
+	if !mcpRunTrusted(*trustFlag) {
+		return fail(stderr, errUntrustedMCPRun())
 	}
 	hook, err := domain.ParseHook(*hookFlag)
 	if err != nil {
