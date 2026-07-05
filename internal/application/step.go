@@ -17,6 +17,13 @@ import (
 type StepContext struct {
 	Hook        domain.Hook
 	WorktreeDir string
+	// WorktreeFor, when set, returns the worktree directory a specific step must
+	// run in, overriding WorktreeDir. It backs per-step worktree isolation: steps
+	// in a parallel batch each get their own ephemeral worktree so a step's writes
+	// can't race a sibling. A "" result (or a nil func) means use WorktreeDir (the
+	// canonical worktree). It is consulted per step execution and may be called
+	// concurrently, so implementations must be safe for concurrent reads.
+	WorktreeFor func(domain.StepName) string
 	Branch      string
 	Diff        domain.DiffStats
 	// Agent is the resolved coding-agent name for this step ("" = none).

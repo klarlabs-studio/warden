@@ -311,3 +311,65 @@ func TestCreateWorktree_ExposesSymlinkedNodeModules(t *testing.T) {
 		t.Errorf("symlinked node_modules not exposed (tsc unreachable): %v", err)
 	}
 }
+
+// TestWorktree_Clone verifies an ephemeral clone reproduces the canonical
+// worktree's tracked state — its committed HEAD plus uncommitted changes — so a
+// parallel-batch step runs against an accurate, isolated copy whose writes are
+// discarded on Remove.
+func TestWorktree_Clone(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitRun("init")
+	gitRun("config", "user.email", "t@t.co")
+	gitRun("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "committed.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun("add", ".")
+	gitRun("commit", "-m", "init")
+
+	repo := &Repo{Dir: dir}
+	wt, err := repo.CreateWorktreeFromHead(false)
+	if err != nil {
+		t.Fatalf("CreateWorktreeFromHead: %v", err)
+	}
+	defer wt.Remove()
+
+	// Simulate a prior barrier mutating the canonical worktree (uncommitted).
+	if err := os.WriteFile(filepath.Join(wt.Dir, "committed.txt"), []byte("v2-modified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	clone, err := wt.Clone(false)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// The clone must reflect the canonical's uncommitted modification.
+	got, err := os.ReadFile(filepath.Join(clone.Dir, "committed.txt"))
+	if err != nil || string(got) != "v2-modified\n" {
+		t.Fatalf("clone should reproduce the uncommitted change: got %q err=%v", got, err)
+	}
+	// Writing in the clone must not affect the canonical worktree (isolation).
+	if err := os.WriteFile(filepath.Join(clone.Dir, "committed.txt"), []byte("clone-only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	canon, _ := os.ReadFile(filepath.Join(wt.Dir, "committed.txt"))
+	if string(canon) != "v2-modified\n" {
+		t.Errorf("clone write leaked into the canonical worktree: %q", canon)
+	}
+	// Remove discards the clone's tree.
+	if err := clone.Remove(); err != nil {
+		t.Fatalf("clone.Remove: %v", err)
+	}
+}

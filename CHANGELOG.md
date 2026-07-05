@@ -6,6 +6,14 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Internal: per-step worktree isolation (ADR-0001 Phase 3, part 1).** Steps in a
+  parallel batch now each run in their own ephemeral worktree cloned from the
+  canonical one, so a step's writes can't race a sibling; the clones are torn down
+  after the batch (side-effects discarded). No scheduling change yet — this is the
+  foundation for letting finding-producing agents parallelize.
+
 ### Changed
 
 - **Internal: one source of truth for "does a step write the tree."**
