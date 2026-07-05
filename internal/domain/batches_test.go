@@ -71,6 +71,28 @@ func TestResolvedPolicy_Concurrent(t *testing.T) {
 	}
 }
 
+func TestResolvedPolicy_AuthorizesFix(t *testing.T) {
+	cases := []struct {
+		name    string
+		autoFix map[StepName]int
+		want    bool
+	}{
+		{"nil map", nil, false},
+		{"empty map", map[StepName]int{}, false},
+		{"zero budget only", map[StepName]int{StepLint: 0}, false},
+		{"one positive budget", map[StepName]int{StepLint: 1}, true},
+		{"mixed zero and positive", map[StepName]int{StepLint: 0, StepTest: 2}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := ResolvedPolicy{AutoFix: tc.autoFix}
+			if got := p.AuthorizesFix(); got != tc.want {
+				t.Errorf("AuthorizesFix() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolvedPolicy_Cacheable(t *testing.T) {
 	p := ResolvedPolicy{
 		Cache: map[StepName][]string{
