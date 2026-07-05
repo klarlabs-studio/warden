@@ -1,23 +1,11 @@
 //go:build unix
 
-// Package proc holds process-management helpers shared by the step
-// implementations. Warden runs configured commands (lint, test, agents, custom
-// steps) as `sh -c` subprocesses, and those in turn spawn their own children
-// (go test, tsc, an agent CLI). Warden builds on Linux and macOS, so these
-// helpers use the unix process-group primitives.
 package proc
 
 import (
 	"os/exec"
 	"syscall"
-	"time"
 )
-
-// killGrace bounds how long os/exec waits for a step's output pipes to drain
-// after its context is cancelled. A grandchild that inherited the pipe and
-// outlived the SIGKILL would otherwise block Wait forever; after this delay
-// exec closes the pipes and returns.
-const killGrace = 5 * time.Second
 
 // Isolate makes cmd the leader of its own process group and, when the command's
 // context is cancelled (a per-step timeout or a Ctrl-C/SIGTERM at the gate),
