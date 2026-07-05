@@ -52,14 +52,35 @@ var builtinSteps = map[StepName]bool{
 // IsBuiltin reports whether s is a Warden built-in step.
 func (s StepName) IsBuiltin() bool { return builtinSteps[s] }
 
+// builtinAgentSteps are the built-in steps executed by a coding agent (see
+// infrastructure/steps registry). Editing the worktree is part of what these do
+// — a document agent writes docs, an intent/review agent may amend — so for
+// scheduling they count as tree-writers and never share a parallel batch.
+var builtinAgentSteps = map[StepName]bool{
+	StepIntent:   true,
+	StepReview:   true,
+	StepDocument: true,
+}
+
+// IsAgentStep reports whether s is a built-in coding-agent step. Custom steps
+// assigned an agent by a rule are detected separately via ResolvedPolicy.AgentFor.
+func (s StepName) IsAgentStep() bool { return builtinAgentSteps[s] }
+
 // DefaultSteps returns the default step subset for a hook when config omits an
 // explicit list: lint only for pre-commit, the full sequence for pre-push.
+//
+// The pre-push order groups the tree-writing coding-agent steps (review,
+// document) ahead of the read-only checks (test, lint) deliberately: agent
+// steps run as sequential barriers (they may edit the tree), so keeping the
+// checks consecutive lets them share a single parallel batch instead of being
+// split by an intervening writer. It also means the checks validate the tree
+// after the agents have finished shaping it.
 func DefaultSteps(h Hook) []StepName {
 	switch h {
 	case PreCommit:
 		return []StepName{StepLint}
 	case PrePush:
-		return []StepName{StepIntent, StepRebase, StepReview, StepTest, StepDocument, StepLint}
+		return []StepName{StepIntent, StepRebase, StepReview, StepDocument, StepTest, StepLint}
 	default:
 		return nil
 	}

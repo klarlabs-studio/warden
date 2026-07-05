@@ -15,6 +15,7 @@ agent: auto
 hooks: { pre_commit: true, pre_push: true }
 commands: { lint: "golangci-lint run ./...", test: "go test ./..." }
 materialize_deps: [build]
+writes: [codegen]
 steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
@@ -38,6 +39,9 @@ rules:
 	}
 	if len(cfg.MaterializeDeps) != 1 || cfg.MaterializeDeps[0] != "build" {
 		t.Errorf("materialize_deps not parsed: %+v", cfg.MaterializeDeps)
+	}
+	if len(cfg.Writes) != 1 || cfg.Writes[0] != "codegen" {
+		t.Errorf("writes not parsed: %+v", cfg.Writes)
 	}
 }
 

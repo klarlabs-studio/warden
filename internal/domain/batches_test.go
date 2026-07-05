@@ -6,7 +6,7 @@ import (
 )
 
 func TestResolvedPolicy_Batches(t *testing.T) {
-	full := []StepName{StepIntent, StepRebase, StepReview, StepTest, StepDocument, StepLint}
+	full := DefaultSteps(PrePush) // intent, rebase, review, document, test, lint
 
 	tests := []struct {
 		name string
@@ -14,20 +14,31 @@ func TestResolvedPolicy_Batches(t *testing.T) {
 		want [][]StepName
 	}{
 		{
-			name: "parallel groups consecutive read-only steps; rebase is a barrier",
+			name: "only read-only checks batch; rebase and agent steps are barriers",
 			pol:  ResolvedPolicy{Steps: full, Parallel: true},
 			want: [][]StepName{
-				{StepIntent},
-				{StepRebase},
-				{StepReview, StepTest, StepDocument, StepLint},
+				{StepIntent},         // agent: may edit → barrier
+				{StepRebase},         // rewrites history → barrier
+				{StepReview},         // agent → barrier
+				{StepDocument},       // agent → barrier
+				{StepTest, StepLint}, // read-only checks → one parallel batch
 			},
 		},
 		{
 			name: "disabled parallelism keeps every step sequential",
 			pol:  ResolvedPolicy{Steps: full, Parallel: false},
 			want: [][]StepName{
-				{StepIntent}, {StepRebase}, {StepReview}, {StepTest}, {StepDocument}, {StepLint},
+				{StepIntent}, {StepRebase}, {StepReview}, {StepDocument}, {StepTest}, {StepLint},
 			},
+		},
+		{
+			name: "a config-declared writer is a barrier that splits reader batches",
+			pol: ResolvedPolicy{
+				Steps:      []StepName{StepTest, "codegen", StepLint},
+				Parallel:   true,
+				WriteSteps: map[StepName]bool{"codegen": true},
+			},
+			want: [][]StepName{{StepTest}, {"codegen"}, {StepLint}},
 		},
 		{
 			name: "an auto-fix step is a barrier that splits the batch around it",
@@ -55,14 +66,22 @@ func TestResolvedPolicy_Batches(t *testing.T) {
 }
 
 func TestResolvedPolicy_Concurrent(t *testing.T) {
-	p := ResolvedPolicy{AutoFix: map[StepName]int{StepLint: 3}}
+	p := ResolvedPolicy{
+		AutoFix:    map[StepName]int{StepLint: 3},
+		Agents:     map[StepName]string{"custom-agent": "claude"},
+		WriteSteps: map[StepName]bool{"codegen": true},
+	}
 	cases := map[StepName]bool{
-		StepRebase: false, // rewrites history
-		StepPush:   false, // terminal write-external gate
-		StepLint:   false, // has an auto-fix budget → writes
-		StepTest:   true,  // read-only check
-		StepReview: true,  // advisory agent
-		"custom":   true,  // custom command, no budget
+		StepRebase:     false, // rewrites history
+		StepPush:       false, // terminal write-external gate
+		StepLint:       false, // has an auto-fix budget → writes
+		StepIntent:     false, // coding-agent step → may edit the tree
+		StepReview:     false, // coding-agent step → may edit the tree
+		StepDocument:   false, // coding-agent step → writes docs
+		"custom-agent": false, // custom step a rule assigned an agent to
+		"codegen":      false, // declared under `writes:`
+		StepTest:       true,  // read-only shell check
+		"custom":       true,  // custom command, no agent, no budget
 	}
 	for step, want := range cases {
 		if got := p.Concurrent(step); got != want {

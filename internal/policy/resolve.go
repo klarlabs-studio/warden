@@ -82,12 +82,26 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)
 	res.MaterializeDeps = needsMaterializedDeps(cfg.MaterializeDeps, res.Steps)
+	res.WriteSteps = stepSet(cfg.Writes)
 	resolveOverlays(&res, matches)
 
 	for _, m := range matches {
 		res.MatchedRules = append(res.MatchedRules, m.name)
 	}
 	return res
+}
+
+// stepSet builds a StepName set from a config string list (e.g. Config.Writes),
+// or nil when empty.
+func stepSet(names []string) map[domain.StepName]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	set := make(map[domain.StepName]bool, len(names))
+	for _, n := range names {
+		set[domain.StepName(n)] = true
+	}
+	return set
 }
 
 // needsMaterializedDeps reports whether any step in this run's resolved step

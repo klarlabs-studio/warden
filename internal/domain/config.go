@@ -41,6 +41,13 @@ type Config struct {
 	// that includes one of them. Empty (the default) always symlinks.
 	MaterializeDeps []string `yaml:"materialize_deps"`
 
+	// Writes lists steps that mutate the worktree and must therefore run as
+	// sequential barriers rather than in a parallel batch. Warden already treats
+	// rebase, auto-fix, and coding-agent steps as writers; use this for a custom
+	// step (a codegen or formatter command) that edits tracked files, so a
+	// concurrent lint/test never reads a half-written tree. e.g. `writes: [codegen]`.
+	Writes []string `yaml:"writes"`
+
 	// AgentCommands maps an agent name (as selected by `agent` or a rule's
 	// per-step agent override) to the shell command that invokes it. The
 	// template may reference {prompt}, {step}, and {repo}; e.g.
@@ -82,6 +89,11 @@ func (c Config) Validate() error {
 			if !n.Valid() {
 				return fmt.Errorf("invalid step name %q in steps.%s: names must match [a-zA-Z0-9][a-zA-Z0-9_-]*", string(n), hook)
 			}
+		}
+	}
+	for _, n := range c.Writes {
+		if !StepName(n).Valid() {
+			return fmt.Errorf("invalid step name %q in writes", n)
 		}
 	}
 	for i, r := range c.Rules {

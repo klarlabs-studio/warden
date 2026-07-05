@@ -158,6 +158,7 @@ steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
 parallel: true   # default — run independent checks concurrently (see below)
+writes: [codegen]   # steps that edit the tree — run as barriers, never in a parallel batch
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
 notify: true     # default — desktop notification when an interactive pre-push finishes
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
