@@ -133,10 +133,19 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	if err := run.Pass(); err != nil {
 		return RunResult{}, err
 	}
-	// Capture any auto-fixes so the hook can re-apply them to the live tree.
-	patch, err := wt.DiffSince()
-	if err != nil {
-		return RunResult{}, fmt.Errorf("compute fix patch: %w", err)
+	// Capture any auto-fixes so the hook can re-apply them to the live tree — but
+	// only when a step was actually authorized to fix. wt.DiffSince() is the whole
+	// worktree diff and gets written back to the developer's live tree verbatim;
+	// if no step held an auto-fix budget this run is read-only, so any writes a
+	// step made (a review/intent agent, a lint with a stray --fix) are unsanctioned
+	// and must never land in the dev's tree. AutoFixBudget bounds retry counts, not
+	// who may mutate — AuthorizesFix is the enforcement boundary (§4.2).
+	var patch string
+	if resolved.AuthorizesFix() {
+		patch, err = wt.DiffSince()
+		if err != nil {
+			return RunResult{}, fmt.Errorf("compute fix patch: %w", err)
+		}
 	}
 	return r.result(run, patch), nil
 }

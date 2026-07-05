@@ -466,11 +466,24 @@ func preCommitCfg() domain.Config {
 	}
 }
 
+// preCommitAutoFixCfg grants the lint step an auto-fix budget, authorizing it to
+// mutate the worktree and have those edits written back to the live tree.
+func preCommitAutoFixCfg() domain.Config {
+	cfg := preCommitCfg()
+	cfg.Rules = []domain.Rule{{
+		Match: domain.Match{},
+		Then:  domain.Then{AutoFix: map[domain.StepName]int{"lint": 1}},
+	}}
+	return cfg
+}
+
 func TestRunner_PreCommitPassCapturesFixPatch(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1",
 		wt: &fakeWorktree{dir: "/wt", headSHA: "sha1", diffSince: "PATCH"}}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-	r := newRunner(t, git, kernel, fakeApprover{approve: true}, preCommitCfg())
+	// A run with an auto-fix-budgeted step is authorized to write back, so its
+	// worktree diff is captured and re-applied.
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, preCommitAutoFixCfg())
 
 	res, err := r.Run(context.Background(), domain.PreCommit)
 	if err != nil {
@@ -487,6 +500,31 @@ func TestRunner_PreCommitPassCapturesFixPatch(t *testing.T) {
 	}
 	if !git.wt.removed {
 		t.Error("worktree must be torn down")
+	}
+}
+
+// TestRunner_PreCommitNoAutoFixWritesNothing is the enforcement guarantee: a
+// passing pre-commit whose policy granted NO auto-fix budget must return an
+// empty fix patch even when a step "wrote" files in the worktree (diffSince is
+// non-empty). A read-only run must never write back to the developer's tree.
+func TestRunner_PreCommitNoAutoFixWritesNothing(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1",
+		wt: &fakeWorktree{dir: "/wt", headSHA: "sha1", diffSince: "STRAY-WRITE"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, preCommitCfg())
+
+	res, err := r.Run(context.Background(), domain.PreCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if res.FixPatch != "" {
+		t.Errorf("fix patch = %q, want empty: a read-only run must never write back", res.FixPatch)
+	}
+	if git.pushed {
+		t.Error("pre-commit must never push")
 	}
 }
 

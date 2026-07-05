@@ -116,3 +116,18 @@ func (p ResolvedPolicy) AutoFixBudget(s StepName) int {
 	}
 	return p.AutoFix[s]
 }
+
+// AuthorizesFix reports whether any step in this run was granted an auto-fix
+// budget, i.e. was authorized to mutate the worktree and have those edits
+// written back to the developer's tree. When false the run is read-only: no
+// step may legitimately write back, so a passing pre-commit must capture no fix
+// patch at all — this is the enforcement boundary on who may mutate the tree,
+// not just a bound on subprocess retry counts.
+func (p ResolvedPolicy) AuthorizesFix() bool {
+	for _, budget := range p.AutoFix {
+		if budget > 0 {
+			return true
+		}
+	}
+	return false
+}
