@@ -55,27 +55,25 @@ func mustParse(t *testing.T) domain.Config {
 }
 
 func TestResolve_MaterializeDeps(t *testing.T) {
-	base := domain.Config{
-		Steps: map[string][]domain.StepName{
-			"pre_commit": {"lint"},
-			"pre_push":   {"lint", "test", "build"},
-		},
-		MaterializeDeps: []string{"build"},
-	}
+	base := domain.Config{Steps: map[string][]domain.StepName{"pre_push": {"lint", "test"}}}
 
-	// A run whose steps include a materialize step opts in.
+	// Materialization is the default (no config needed).
 	if got := Resolve(base, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); !got.MaterializeDeps {
-		t.Error("pre_push includes build → MaterializeDeps should be true")
+		t.Error("materialize should default to true")
 	}
-	// A run without any materialize step does not (pre_commit is lint only).
-	if got := Resolve(base, Input{Hook: domain.PreCommit, Risk: domain.RiskLow}); got.MaterializeDeps {
-		t.Error("pre_commit has no materialize step → MaterializeDeps should be false")
+	// symlink_deps: true opts out.
+	optOut := base
+	yes := true
+	optOut.SymlinkDeps = &yes
+	if got := Resolve(optOut, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); got.MaterializeDeps {
+		t.Error("symlink_deps: true → MaterializeDeps should be false")
 	}
-	// No materialize_deps configured → never materialize.
-	none := base
-	none.MaterializeDeps = nil
-	if got := Resolve(none, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); got.MaterializeDeps {
-		t.Error("empty materialize_deps → MaterializeDeps should be false")
+	// symlink_deps: false is explicit materialize (the default).
+	no := false
+	optIn := base
+	optIn.SymlinkDeps = &no
+	if got := Resolve(optIn, Input{Hook: domain.PrePush, Risk: domain.RiskLow}); !got.MaterializeDeps {
+		t.Error("symlink_deps: false → MaterializeDeps should be true")
 	}
 }
 

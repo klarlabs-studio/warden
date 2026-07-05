@@ -46,6 +46,9 @@ func (c Config) OverlayOnto(base Config) Config {
 	if c.Parallel != nil {
 		out.Parallel = c.Parallel
 	}
+	if c.SymlinkDeps != nil {
+		out.SymlinkDeps = c.SymlinkDeps
+	}
 	if c.Notify != nil {
 		out.Notify = c.Notify
 	}

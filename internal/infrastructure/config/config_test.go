@@ -15,6 +15,7 @@ agent: auto
 hooks: { pre_commit: true, pre_push: true }
 commands: { lint: "golangci-lint run ./...", test: "go test ./..." }
 materialize_deps: [build]
+symlink_deps: true
 writes: [codegen]
 steps:
   pre_commit: [lint]
@@ -36,6 +37,9 @@ rules:
 	}
 	if cfg.Risk.DiffLinesHigh != 400 {
 		t.Errorf("risk threshold = %d, want 400", cfg.Risk.DiffLinesHigh)
+	}
+	if cfg.SymlinkDeps == nil || !*cfg.SymlinkDeps {
+		t.Errorf("symlink_deps not parsed: %v", cfg.SymlinkDeps)
 	}
 	if len(cfg.MaterializeDeps) != 1 || cfg.MaterializeDeps[0] != "build" {
 		t.Errorf("materialize_deps not parsed: %+v", cfg.MaterializeDeps)

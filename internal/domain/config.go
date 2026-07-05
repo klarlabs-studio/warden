@@ -31,14 +31,20 @@ type Config struct {
 	// rests on declaring all of a step's inputs (like bazel/turbo).
 	Cache map[string][]string `yaml:"cache"`
 
-	// MaterializeDeps lists steps that need gitignored dependency directories
-	// (node_modules) as REAL files in the disposable worktree rather than the
-	// default symlink. Symlinking is fast and works for tsc/eslint/vitest/Node,
-	// but some build tools reject a node_modules symlink whose target resolves
-	// outside the worktree root — notably Next.js 16 / Turbopack ("Symlink
-	// node_modules is invalid, it points out of the filesystem root"). List such
-	// steps (e.g. `build`) here and warden hardlink-copies the deps for any run
-	// that includes one of them. Empty (the default) always symlinks.
+	// SymlinkDeps opts out of dependency materialization. By default warden
+	// hardlink-copies gitignored dependency directories (node_modules) into the
+	// disposable worktree as REAL files, so any tool works — including Next.js 16
+	// / Turbopack, which rejects a node_modules symlink whose target resolves
+	// outside the worktree root. Hardlinks are near-instant on the same
+	// filesystem (and fall back to a byte copy across filesystems). Set
+	// `symlink_deps: true` to force the old fast symlink instead — fine for
+	// tsc/eslint/vitest/Node (which follow symlinks) and cheaper when node_modules
+	// is large and the worktree temp dir is on a different filesystem.
+	SymlinkDeps *bool `yaml:"symlink_deps"`
+
+	// MaterializeDeps is deprecated: materialization is now the default (see
+	// SymlinkDeps). The field is still parsed for backward compatibility but no
+	// longer changes behavior.
 	MaterializeDeps []string `yaml:"materialize_deps"`
 
 	// Writes lists steps that mutate the worktree and must therefore run as

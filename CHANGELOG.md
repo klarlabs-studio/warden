@@ -6,6 +6,20 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-05
+
+### Changed
+
+- **Gitignored dependencies (`node_modules`) are now materialized by default.**
+  warden hardlink-copies them into the disposable worktree as real files instead
+  of symlinking, so any tool works out of the box — including Next.js /
+  Turbopack, which rejects an out-of-root `node_modules` symlink. Hardlinks are
+  near-instant on the same filesystem (byte-copy fallback across filesystems).
+  Set `symlink_deps: true` to force the old fast symlink (fine for
+  tsc/eslint/vitest, cheaper for a large `node_modules` on a separate `/tmp`
+  filesystem). The per-step `materialize_deps:` key is deprecated (materialization
+  is now the default) but still parsed for compatibility.
+
 ## [0.10.1] — 2026-07-05
 
 ### Fixed
