@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-07-05
+
 ### Fixed
 
 - **Linked worktrees with a symlinked `node_modules` now work.** When the live
