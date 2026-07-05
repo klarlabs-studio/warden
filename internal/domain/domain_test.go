@@ -134,12 +134,20 @@ func TestNewCommitStatus(t *testing.T) {
 	if cs.HasNote || cs.ChainIntact {
 		t.Error("nil note should be unverified")
 	}
-	// Note with intact chain.
-	rec := &RunRecord{RunID: "r1", StepsRun: []StepName{StepLint},
+	// Note with an intact chain that binds to the commit → intact.
+	rec := &RunRecord{RunID: "r1", CommitSHA: "sha", StepsRun: []StepName{StepLint},
 		EvidenceChainRoot: "h0", Evidence: []EvidenceEntry{{Hash: "h0"}}}
 	cs = NewCommitStatus("sha", "a", "d", "s", rec)
 	if !cs.HasNote || !cs.ChainIntact || cs.RunID != "r1" {
 		t.Errorf("verified commit misclassified: %+v", cs)
+	}
+	// An intact chain that does NOT bind to the commit (transplanted / unbound)
+	// is present but not intact.
+	unbound := &RunRecord{RunID: "r2", CommitSHA: "other",
+		EvidenceChainRoot: "h0", Evidence: []EvidenceEntry{{Hash: "h0"}}}
+	cs = NewCommitStatus("sha", "a", "d", "s", unbound)
+	if !cs.HasNote || cs.ChainIntact {
+		t.Errorf("unbound note must be present-but-not-intact: %+v", cs)
 	}
 }
 

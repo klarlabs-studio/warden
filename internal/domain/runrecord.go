@@ -32,9 +32,15 @@ type DependencyManifest struct {
 // RunRecord is the payload written to refs/notes/warden for each validated
 // commit (§9). It is the tamper-evident provenance a shared branch relies on.
 type RunRecord struct {
-	RunID             string              `json:"run_id"`
-	Timestamp         string              `json:"timestamp"`
-	WardenVersion     string              `json:"warden_version"`
+	RunID         string `json:"run_id"`
+	Timestamp     string `json:"timestamp"`
+	WardenVersion string `json:"warden_version"`
+	// CommitSHA is the commit this record attests. It is part of the signed
+	// payload, so a signature binds the provenance to exactly one commit — a
+	// signed note cannot be transplanted onto (or replayed against) a different
+	// commit. Empty only on legacy pre-binding notes, which then bind to nothing
+	// and fail verification (fail-closed). See RunRecord.BindsTo and Service.Verify.
+	CommitSHA         string              `json:"commit_sha,omitempty"`
 	Agent             map[StepName]string `json:"agent"`
 	StepsRun          []StepName          `json:"steps_run"`
 	MatchedRules      []string            `json:"matched_rules"`
@@ -64,6 +70,25 @@ func (r RunRecord) SigningPayload() ([]byte, error) {
 
 // Signed reports whether the record carries a signature.
 func (r RunRecord) Signed() bool { return r.Signature != "" }
+
+// BindsTo reports whether this record attests the given commit. A record with
+// an empty CommitSHA (a legacy pre-binding note, or a hand-forged `{}` note)
+// binds to no commit and never matches, so unbound notes fail closed. Because
+// CommitSHA is inside SigningPayload, a signed record's binding cannot be
+// altered without invalidating the signature — this is what makes a signed note
+// non-transplantable.
+func (r RunRecord) BindsTo(sha string) bool {
+	return r.CommitSHA != "" && r.CommitSHA == sha
+}
+
+// Attests reports whether the record is a self-consistent, commit-bound
+// attestation of sha: its evidence chain is intact and non-empty and it binds
+// to sha. This is the minimum bar for `warden verify` to treat a commit as
+// validated; pinning a trusted key (Service.Verify with --key) adds
+// cryptographic trust on top.
+func (r RunRecord) Attests(sha string) bool {
+	return len(r.Evidence) > 0 && r.VerifyChain() && r.BindsTo(sha)
+}
 
 // VerifySignature reports whether the record's signature is a valid ed25519
 // signature over its SigningPayload by the embedded public key. An unsigned or

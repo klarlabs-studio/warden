@@ -29,9 +29,10 @@ func TestService_Verify(t *testing.T) {
 		}
 	})
 
-	t.Run("intact note validates", func(t *testing.T) {
+	t.Run("intact note bound to the commit validates", func(t *testing.T) {
 		rec := domain.RunRecord{
 			RunID:             "run_x",
+			CommitSHA:         head,
 			StepsRun:          []domain.StepName{"lint", "test"},
 			EvidenceChainRoot: "h0",
 			Evidence: []domain.EvidenceEntry{
@@ -53,6 +54,7 @@ func TestService_Verify(t *testing.T) {
 
 	t.Run("tampered note fails", func(t *testing.T) {
 		bad := domain.RunRecord{
+			CommitSHA:         head,
 			EvidenceChainRoot: "forged",
 			Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
 		}
@@ -65,6 +67,38 @@ func TestService_Verify(t *testing.T) {
 		}
 		if res.Validated {
 			t.Error("a note whose root does not match its chain must not validate")
+		}
+	})
+
+	t.Run("empty note does not validate", func(t *testing.T) {
+		if err := svc.Repo().WriteNote(head, domain.RunRecord{}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.Verify("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Validated {
+			t.Error("an empty {} note must not validate (no evidence, no commit binding)")
+		}
+	})
+
+	t.Run("note bound to a different commit does not validate", func(t *testing.T) {
+		transplanted := domain.RunRecord{
+			RunID:             "run_elsewhere",
+			CommitSHA:         "0000000000000000000000000000000000000000",
+			EvidenceChainRoot: "h0",
+			Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
+		}
+		if err := svc.Repo().WriteNote(head, transplanted); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.Verify("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Validated {
+			t.Error("a note attesting another commit must not validate here (transplant)")
 		}
 	})
 }
@@ -86,6 +120,7 @@ func TestService_Verify_SignedAndPinned(t *testing.T) {
 
 	rec := domain.RunRecord{
 		RunID:             "run_signed",
+		CommitSHA:         head,
 		StepsRun:          []domain.StepName{"lint"},
 		EvidenceChainRoot: "h0",
 		Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
@@ -144,6 +179,37 @@ func TestService_Verify_SignedAndPinned(t *testing.T) {
 		}
 		if !res.SignatureValid {
 			t.Error("the signature itself is still valid; only trust should fail")
+		}
+	})
+
+	t.Run("a validly-signed note transplanted from another commit fails even when trusted", func(t *testing.T) {
+		// A real, trusted signature over a record that attests a DIFFERENT commit,
+		// copied onto HEAD's note. The signature verifies and the key is trusted,
+		// but the commit binding must reject it — the core of the transplant fix.
+		other := domain.RunRecord{
+			RunID:             "run_other_commit",
+			CommitSHA:         "0000000000000000000000000000000000000000",
+			EvidenceChainRoot: "h0",
+			Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
+			PublicKey:         pubB64,
+		}
+		p, err := other.SigningPayload()
+		if err != nil {
+			t.Fatal(err)
+		}
+		other.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, p))
+		if err := svc.Repo().WriteNote(head, other); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.Verify("", fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.SignatureValid || !res.Trusted {
+			t.Fatalf("signature is genuine and key is trusted; got %+v", res)
+		}
+		if res.Validated {
+			t.Error("a signed note attesting another commit must NOT validate here (transplant)")
 		}
 	})
 }

@@ -43,15 +43,19 @@ func (s *Service) Verify(commitish string, trustedKeys ...string) (VerifyResult,
 	}
 
 	res := VerifyResult{
-		SHA:            sha,
-		Validated:      rec.VerifyChain(),
+		SHA: sha,
+		// Attests requires an intact, non-empty evidence chain AND that the record
+		// binds to this exact commit (rec.CommitSHA == sha). This closes two forgeries
+		// the bare chain check allowed: an empty `{}` note (binds to nothing) and a
+		// signed note transplanted from another commit (binds to that commit, not this).
+		Validated:      rec.Attests(sha),
 		Record:         rec,
 		Signed:         rec.Signed(),
 		SignatureValid: rec.VerifySignature(),
 		Signer:         rec.SignerFingerprint(),
 	}
 	if len(trustedKeys) > 0 {
-		// A pinned run must chain-verify, signature-verify, and be signed by a
+		// A pinned run must attest this commit, signature-verify, and be signed by a
 		// trusted key — otherwise it is not validated for provenance-skip.
 		res.Trusted = res.SignatureValid && keyTrusted(rec, trustedKeys)
 		res.Validated = res.Validated && res.Trusted

@@ -83,4 +83,43 @@ func TestRunRecord_Signature(t *testing.T) {
 			t.Error("malformed key/signature must verify false")
 		}
 	})
+
+	t.Run("commit binding is covered by the signature", func(t *testing.T) {
+		rec := base()
+		rec.CommitSHA = "abc123"
+		signRecord(t, &rec, pub, priv)
+		if !rec.VerifySignature() {
+			t.Fatal("a bound, signed record must verify")
+		}
+		// Re-pointing the record at a different commit (a transplant) must break
+		// the signature, because CommitSHA is inside SigningPayload.
+		rec.CommitSHA = "def456"
+		if rec.VerifySignature() {
+			t.Error("changing CommitSHA must invalidate the signature (transplant)")
+		}
+	})
+}
+
+func TestRunRecord_BindsAndAttests(t *testing.T) {
+	rec := RunRecord{
+		CommitSHA:         "sha1",
+		EvidenceChainRoot: "h0",
+		Evidence:          []EvidenceEntry{{Hash: "h0"}},
+	}
+	if !rec.BindsTo("sha1") || rec.BindsTo("sha2") || rec.BindsTo("") {
+		t.Error("BindsTo must match only the exact non-empty CommitSHA")
+	}
+	if !rec.Attests("sha1") {
+		t.Error("an intact, non-empty, bound record must attest its commit")
+	}
+	if rec.Attests("sha2") {
+		t.Error("a record must not attest a commit it isn't bound to")
+	}
+	// Empty and unbound records attest nothing.
+	if (RunRecord{}).Attests("sha1") {
+		t.Error("an empty record must attest nothing")
+	}
+	if (RunRecord{CommitSHA: "sha1"}).Attests("sha1") {
+		t.Error("a bound record with no evidence must not attest (empty chain)")
+	}
 }

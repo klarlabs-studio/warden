@@ -27,7 +27,9 @@ func NewCommitStatus(sha, author, date, subject string, note *RunRecord) CommitS
 	cs.HasNote = true
 	cs.RunID = note.RunID
 	cs.Steps = note.StepsRun
-	cs.ChainIntact = note.VerifyChain()
+	// "Intact" now requires the note to actually attest THIS commit — an intact
+	// but unbound or transplanted note (or a hand-forged `{}`) no longer counts.
+	cs.ChainIntact = note.Attests(sha)
 	return cs
 }
 
