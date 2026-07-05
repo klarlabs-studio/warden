@@ -23,6 +23,11 @@ func (c Config) OverlayOnto(base Config) Config {
 	out.Timeouts = mergeStringMap(base.Timeouts, c.Timeouts)
 	out.Cache = mergeGlobMap(base.Cache, c.Cache)
 	out.Steps = mergeStepMap(base.Steps, c.Steps)
+	// MaterializeDeps: a child that names any step replaces the base's list (it is
+	// a repo-local performance choice, not something to inherit-merge).
+	if len(c.MaterializeDeps) > 0 {
+		out.MaterializeDeps = c.MaterializeDeps
+	}
 
 	if c.Risk != (RiskConfig{}) {
 		out.Risk = c.Risk

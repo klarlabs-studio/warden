@@ -115,7 +115,7 @@ func (r *Runner) diffForRisk(hook domain.Hook, branch string) (domain.DiffStats,
 // runPreCommit runs the fast local subset in a worktree seeded from HEAD plus
 // staged changes, then reports any fixes to re-apply to the real index (§4.2).
 func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats) (RunResult, error) {
-	wt, err := r.Git.SeedWorktreeFromHead()
+	wt, err := r.Git.SeedWorktreeFromHead(resolved.MaterializeDeps)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
@@ -148,7 +148,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if err != nil {
 		return RunResult{}, err
 	}
-	wt, err := r.Git.SeedWorktreeFromBranch(branch)
+	wt, err := r.Git.SeedWorktreeFromBranch(branch, resolved.MaterializeDeps)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
