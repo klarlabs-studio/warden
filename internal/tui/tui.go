@@ -75,14 +75,24 @@ type Runner interface {
 // Run drives an interactive gate run under a live TUI and returns the outcome.
 // approverInto wires the bridge as the run's approver: the caller builds the
 // service with it. steps is the resolved step order used to seed the display.
-func Run(svc Runner, br application.Approver, hook domain.Hook, steps []domain.StepName, extra application.Observer, opts ...tea.ProgramOption) (application.RunResult, error) {
+// ctx carries interrupt cancellation from the CLI boundary; quitting the TUI
+// (bubbletea consumes Ctrl-C itself) also cancels the run so an in-flight
+// pipeline can't push after the user has walked away.
+func Run(ctx context.Context, svc Runner, br application.Approver, hook domain.Hook, steps []domain.StepName, extra application.Observer, opts ...tea.ProgramOption) (application.RunResult, error) {
 	b := br.(*bridge)
 	// Fan step events to the TUI and any extra observer (e.g. the attach socket).
 	svc.SetObserver(application.MultiObserver{b, extra})
 
+	// Cancel the run when the TUI exits (quit or completion). bubbletea catches
+	// Ctrl-C and quits the program rather than delivering it to the signal
+	// context, so canceling here is what stops a run the user abandoned before
+	// its push gate resolves.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	m := newModel(hook, steps, b.events)
 	go func() {
-		res, err := svc.Run(context.Background(), hook)
+		res, err := svc.Run(runCtx, hook)
 		b.events <- doneMsg{res: res, err: err}
 	}()
 

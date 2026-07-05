@@ -9,6 +9,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 	"go.klarlabs.de/warden/stepsdk"
 )
 
@@ -60,6 +61,9 @@ func (s SubprocessStep) Run(ctx context.Context, sc application.StepContext) (do
 
 	cmd := exec.CommandContext(ctx, s.bin)
 	cmd.Dir = sc.WorktreeDir
+	// Own process group so a cancelled/timed-out custom step is killed with any
+	// children it spawned, not left orphaned past the run.
+	proc.Isolate(cmd)
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

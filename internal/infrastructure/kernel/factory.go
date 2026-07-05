@@ -82,6 +82,14 @@ func (r *runKernel) ExecuteBatch(ctx context.Context, steps []domain.StepName, o
 		wg.Add(1)
 		go func(i int, step domain.StepName) {
 			defer wg.Done()
+			// A step (or the executor it drives) that panics must become a
+			// per-step error, not an unrecovered goroutine panic that crashes
+			// the whole gate and skips the runner's worktree teardown.
+			defer func() {
+				if rec := recover(); rec != nil {
+					errs[i] = fmt.Errorf("step %s panicked: %v", step, rec)
+				}
+			}()
 			out, err := r.k.Execute(ctx, axi.Invocation{Action: string(step)})
 			if err != nil {
 				errs[i] = err

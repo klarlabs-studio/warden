@@ -13,6 +13,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 // AgentStep runs a coding-agent (claude, codex, …) to perform a reasoning step
@@ -91,6 +92,9 @@ func (s AgentStep) invoke(ctx context.Context, command string, sc application.St
 		// own flags and pipes; a zero exit means the step passed.
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
 		cmd.Dir = sc.WorktreeDir
+		// Own process group: a timed-out or cancelled agent CLI is killed with
+		// its whole subtree, not left running detached past the step.
+		proc.Isolate(cmd)
 		out, err := runCaptured(cmd, sc)
 		return string(out), err
 	})

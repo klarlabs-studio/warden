@@ -57,7 +57,7 @@ func TestRun_ProgramLoopDrivesToCompletion(t *testing.T) {
 
 	done := make(chan application.RunResult, 1)
 	go func() {
-		res, err := Run(svc, br, domain.PrePush, steps, nil,
+		res, err := Run(context.Background(), svc, br, domain.PrePush, steps, nil,
 			tea.WithInput(pr), tea.WithOutput(&out), tea.WithoutSignalHandler())
 		if err != nil {
 			t.Errorf("Run: %v", err)
