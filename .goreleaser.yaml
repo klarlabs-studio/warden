@@ -32,6 +32,25 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Sign checksums.txt (and emit the signing certificate) with cosign keyless
+# (Sigstore: Fulcio cert + Rekor transparency log). The digest list that
+# install.sh, install.ps1 and the self-fetching git hook verify downloads
+# against is thereby itself verifiable — closing the "unsigned checksums" gap.
+# Requires cosign on the release runner and `id-token: write` for the OIDC
+# keyless flow (see .github/workflows/release.yml).
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 

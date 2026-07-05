@@ -13,14 +13,35 @@ if ($version -eq "latest") {
   $version = $rel.tag_name
 }
 $ver = $version.TrimStart("v")
-$url = "https://github.com/$repo/releases/download/$version/warden_${ver}_windows_${arch}.zip"
+$archive = "warden_${ver}_windows_${arch}.zip"
+$base = "https://github.com/$repo/releases/download/$version"
 
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$zip = "$env:TEMP\warden.zip"
-Write-Host "downloading warden $version (windows/$arch)…"
-Invoke-WebRequest -Uri $url -OutFile $zip
-Expand-Archive -Path $zip -DestinationPath $binDir -Force
-Remove-Item $zip
+
+# Use an unpredictable temp name (avoids a fixed, hijackable %TEMP%\warden.zip);
+# give it a .zip extension so Expand-Archive accepts it.
+$tmp = New-TemporaryFile
+$zip = "$($tmp.FullName).zip"
+$sums = "$($tmp.FullName).checksums"
+try {
+  Write-Host "downloading warden $version (windows/$arch)…"
+  Invoke-WebRequest -Uri "$base/$archive" -OutFile $zip
+  Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile $sums
+
+  # Fail closed: verify the archive against the published checksum before extract.
+  $line = Select-String -Path $sums -Pattern ([regex]::Escape($archive)) | Select-Object -First 1
+  if (-not $line) { throw "no checksum for $archive in checksums.txt" }
+  $want = (($line.Line -split '\s+') | Where-Object { $_ })[0]
+  $got = (Get-FileHash -Path $zip -Algorithm SHA256).Hash
+  if ($got.ToLower() -ne $want.ToLower()) {
+    throw "checksum mismatch for $archive (expected $want, got $got)"
+  }
+
+  Expand-Archive -Path $zip -DestinationPath $binDir -Force
+}
+finally {
+  Remove-Item -Force -ErrorAction SilentlyContinue $tmp.FullName, $zip, $sums
+}
 
 Write-Host "installed: $binDir\warden.exe"
 Write-Host "add to PATH:  `$env:Path = `"$binDir;`$env:Path`""

@@ -28,6 +28,17 @@ const releaseRepo = "klarlabs-studio/warden"
 // forwards git's stdin and exits with warden's status, so a failing gate blocks
 // git. A version that is not a real release (empty/dev/snapshot) skips the
 // download branch and requires a warden on PATH.
+//
+// Supply-chain integrity: the self-fetched tarball is verified against the
+// SHA-256 published in the release's checksums.txt *before* it is ever made
+// executable — a mismatch (or an absent tool/checksum) fails closed (exit 1).
+// The cached binary is re-verified on every run against the digest recorded at
+// install time, so post-install tampering or bitrot is caught and re-fetched.
+// The cache lives in a user-only (0700) directory. Residual gap: checksums.txt
+// is fetched over the same TLS/host as the tarball and is not yet signature-
+// verified here, so this defends against corruption, CDN/asset tampering and
+// accidental drift, but not a determined TLS-breaking MITM — signature
+// verification of a cosign-signed checksums.txt is the follow-up that closes it.
 func shim(hook domain.Hook, version string) string {
 	return fmt.Sprintf(`#!/bin/sh
 %s
@@ -35,8 +46,23 @@ func shim(hook domain.Hook, version string) string {
 hook=%s
 ver=%q
 
+# --- integrity helpers -------------------------------------------------------
+# Print the SHA-256 of $1 as a bare hex digest (empty if no tool is available).
+_wd_sha256() {
+  if   command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum    >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else echo ""; fi
+}
+_wd_have_sha() { command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1; }
+_wd_fetch() { # $1 url  $2 dest-file
+  if   command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then wget -qO "$2" "$1"
+  else echo "warden: need curl or wget to fetch $1" >&2; return 1; fi
+}
+
 # Resolve the warden binary: prefer one on PATH, else the pinned cached binary
-# (fetched once), so a repo adopted with no global install keeps working.
+# (fetched once, checksum-verified), so a repo adopted with no global install
+# keeps working — and the whole team runs the *same* verified binary.
 if command -v warden >/dev/null 2>&1; then
   bin=warden
 else
@@ -44,22 +70,67 @@ else
     echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs-studio/warden, or https://github.com/%s" >&2
     exit 1 ;;
   esac
-  bin="$HOME/.warden/bin/$ver/warden"
+  bindir="$HOME/.warden/bin/$ver"
+  bin="$bindir/warden"
+  sha_file="$bindir/warden.sha256"
+
+  # Re-verify the cached binary on *every* run against the digest recorded at
+  # verified-install time. A mismatch (tamper, bitrot, partial write) discards
+  # the cache and forces a fresh, checksum-verified download — we never exec an
+  # unverified binary.
+  if [ -x "$bin" ]; then
+    _wd_want=$(cat "$sha_file" 2>/dev/null || echo "")
+    _wd_got=$(_wd_sha256 "$bin")
+    if [ -z "$_wd_want" ] || [ -z "$_wd_got" ] || [ "$_wd_want" != "$_wd_got" ]; then
+      echo "warden: cached binary failed its integrity check — refetching" >&2
+      rm -f "$bin" "$sha_file"
+    fi
+  fi
+
   if [ ! -x "$bin" ]; then
+    if ! _wd_have_sha; then
+      echo "warden: cannot verify the download (need sha256sum or shasum); put warden on PATH instead" >&2
+      exit 1
+    fi
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
     arch=$(uname -m)
     case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; esac
-    url="https://github.com/%s/releases/download/v$ver/warden_${ver}_${os}_${arch}.tar.gz"
-    mkdir -p "$(dirname "$bin")"
+    archive="warden_${ver}_${os}_${arch}.tar.gz"
+    base="https://github.com/%s/releases/download/v$ver"
+
+    # Private, user-only cache dir (0700): keep other local accounts from
+    # planting a binary we would later exec.
+    mkdir -p "$bindir" || { echo "warden: cannot create $bindir" >&2; exit 1; }
+    chmod 700 "$HOME/.warden" "$HOME/.warden/bin" "$bindir" 2>/dev/null || true
+
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/warden.XXXXXX") || { echo "warden: mktemp failed" >&2; exit 1; }
+    trap 'rm -rf "$tmp"' EXIT INT TERM
+
     echo "warden: fetching pinned binary $ver ($os/$arch)…" >&2
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$url" | tar -xz -C "$(dirname "$bin")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
-    elif command -v wget >/dev/null 2>&1; then
-      wget -qO- "$url" | tar -xz -C "$(dirname "$bin")" warden || { echo "warden: download failed ($url)" >&2; exit 1; }
-    else
-      echo "warden: need warden on PATH or curl/wget to fetch it" >&2; exit 1
+    _wd_fetch "$base/$archive"      "$tmp/$archive"      || { echo "warden: download failed ($base/$archive)" >&2; exit 1; }
+    _wd_fetch "$base/checksums.txt" "$tmp/checksums.txt" || { echo "warden: checksums download failed ($base/checksums.txt)" >&2; exit 1; }
+
+    # Fail closed: the archive digest MUST match the one published for this exact
+    # release tag before we make anything executable.
+    want=$(awk -v f="$archive" '$2==f {print $1}' "$tmp/checksums.txt" | head -n1)
+    [ -n "$want" ] || { echo "warden: no checksum for $archive in checksums.txt — refusing to run" >&2; exit 1; }
+    got=$(_wd_sha256 "$tmp/$archive")
+    if [ "$want" != "$got" ]; then
+      echo "warden: CHECKSUM MISMATCH for $archive" >&2
+      echo "warden:   expected $want" >&2
+      echo "warden:   got      $got" >&2
+      echo "warden: refusing to execute an unverified binary" >&2
+      exit 1
     fi
-    chmod +x "$bin"
+
+    # Verified — now (and only now) extract, record the binary's own digest for
+    # future re-verification, mark executable, and install into the cache.
+    tar -xzf "$tmp/$archive" -C "$tmp" warden || { echo "warden: extract failed ($archive)" >&2; exit 1; }
+    _wd_sha256 "$tmp/warden" > "$tmp/warden.sha256"
+    chmod +x "$tmp/warden"
+    mv -f "$tmp/warden"        "$bin"
+    mv -f "$tmp/warden.sha256" "$sha_file"
+    rm -rf "$tmp"; trap - EXIT INT TERM
   fi
 fi
 

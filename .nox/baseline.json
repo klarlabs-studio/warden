@@ -414,6 +414,20 @@
       "file_path": "README.md",
       "severity": "high",
       "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "4da2ab2e8a1568ed77c34c43d4300b9832edda20314f01fae4569a227612fbb8",
+      "rule_id": "IAC-351",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "critical",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "ce93ff2f386f3eaea148dba72a6ea264c57844846085769fc84484cef6760933",
+      "rule_id": "IAC-351",
+      "file_path": ".goreleaser.yaml",
+      "severity": "critical",
+      "created_at": "2026-07-05T00:00:00Z"
     }
   ]
 }
