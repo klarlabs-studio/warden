@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-05
+
 ### Changed
 
 - **Coding-agent steps (`review`, `document`, `intent`) run in parallel again —
