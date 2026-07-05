@@ -107,16 +107,25 @@ have shaped it.
   axi's `IsWriteEffect` has no callers — only the external axis triggers a pause,
   which is unchanged for local steps.)
 
-- **Phase 3 — per-step worktrees — reassessed, still not built.** Two things make
-  this less attractive than when the ADR was written:
-  1. **Parallel writers can't be merged.** Isolating two *tree-writing* steps in
-     separate worktrees produces divergent trees with no clean reconciliation, so
-     Phase 3 can only isolate *finding-producing* steps whose writes are
-     *discarded* — which needs a new "writes are discardable" declaration warden
-     doesn't have (it can't tell `review` from `document` by type).
-  2. **Materialization is now the default** (deps are hardlink-copied per
-     worktree), so N ephemeral worktrees per batch means N `node_modules` copies —
-     cheap on same-fs, but a real cost the symlink-era design didn't carry.
-  The concrete benefit is parallelizing ~2 read-mostly agents (`review`,
-  `intent`). Kept documented; build only if agent-parallelism becomes a measured
-  bottleneck.
+- **Phase 3 — per-step worktrees — DONE.** Each step in a parallel batch runs in
+  its own ephemeral worktree cloned from the canonical one (`Worktree.Clone`,
+  `StepContext.WorktreeFor`, `worktreeRegistry`); clones are torn down after the
+  batch, so a step's writes are discarded. The scheduler no longer serializes
+  agents: a step is a barrier only when its **writes must be kept**
+  (`ResolvedPolicy.KeepsWrites` = rebase, an auto-fix budget, or `writes:`);
+  everything else — including finding-producing agents (`review`/`intent`/
+  `document`) — is *isolatable* and runs concurrently, each in its own worktree.
+
+  Two consequences worth noting:
+  1. **To keep a step's tree writes, declare it** — give it an auto-fix budget or
+     list it under `writes:` (either makes it a barrier in the canonical
+     worktree). An un-declared agent's writes are discarded, so e.g. a `document`
+     agent that must persist docs needs a budget. This also *scopes the pre-commit
+     auto-fix capture* correctly: only barrier steps touch the canonical worktree,
+     so `DiffSince` no longer sweeps up an isolatable step's incidental writes.
+  2. **Cost:** N ephemeral worktrees per batch × materialize-by-default = N
+     dependency copies. Cheap on the same filesystem (hardlinks); set
+     `symlink_deps: true` to make the per-clone dependency exposure O(1).
+
+  `WritesTree` (kept as the kernel's effect signal = `KeepsWrites` + agents) and
+  `KeepsWrites` (scheduling) are both derived from one place, so they can't drift.

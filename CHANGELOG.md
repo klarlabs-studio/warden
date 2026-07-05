@@ -6,6 +6,17 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Coding-agent steps (`review`, `document`, `intent`) run in parallel again —
+  safely.** Building on per-step worktree isolation, the scheduler now serializes
+  a step only when its **writes must be kept** (a rebase, an auto-fix budget, or a
+  step listed under `writes:`). Everything else — including agents — runs
+  concurrently, each in its own ephemeral worktree, so they can't race. An agent's
+  incidental tree writes are **discarded**; to persist a step's writes, give it an
+  auto-fix budget or declare it under `writes:`. This also correctly scopes the
+  pre-commit auto-fix capture to those barrier steps. Completes ADR-0001 Phase 3.
+
 ### Added
 
 - **Internal: per-step worktree isolation (ADR-0001 Phase 3, part 1).** Steps in a
