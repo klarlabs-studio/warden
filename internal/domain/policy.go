@@ -101,25 +101,31 @@ func (p ResolvedPolicy) Batches() [][]StepName {
 // declared tree-writing in config (Config.Writes). Everything else — shell
 // checks like lint/test and custom commands the author owns — runs concurrently.
 func (p ResolvedPolicy) Concurrent(s StepName) bool {
-	return s != StepPush && !p.WritesTree(s)
+	return s != StepPush && !p.KeepsWrites(s)
+}
+
+// KeepsWrites reports whether a step's worktree writes must be PRESERVED and
+// ordered, so it runs as a sequential barrier in the canonical worktree: a
+// history rewrite (rebase), an auto-fix step (its fixes are folded back into the
+// tree), or a step declared under `writes:`. Every other step is isolatable — it
+// may run in a parallel batch, each step in its own ephemeral worktree whose
+// writes are discarded (only findings are kept), so even a tree-touching agent
+// (review/document/intent) can run concurrently without racing a sibling.
+func (p ResolvedPolicy) KeepsWrites(s StepName) bool {
+	return s == StepRebase || p.AutoFixBudget(s) > 0 || p.WriteSteps[s]
 }
 
 // WritesTree is the single source of truth for "does this step mutate the
-// tracked worktree." Both the scheduler (Concurrent, above) and the kernel's
-// axi effect level derive from it, so the two can never drift — that drift
-// (the scheduler treating a tree-writing agent as read-only) was the root of the
-// parallel-batch race this predicate fixes. A step writes the tree when it is a
-// history rewrite (rebase), a built-in coding-agent step, a custom step a rule
-// assigned an agent to, a step declared under `writes:`, or a step carrying an
-// auto-fix budget (a positive budget writes fixes back). Everything else — the
-// terminal push (external, handled separately), shell checks like lint/test, and
-// custom commands the author owns — is read-only for scheduling purposes.
+// tracked worktree at all" — kept or discarded — and drives the kernel's axi
+// effect level. It is KeepsWrites plus the coding-agent steps (a built-in agent
+// or a rule-assigned one), which edit files even though a parallel run discards
+// those writes. Keeping this and the scheduler's KeepsWrites derived from the
+// same place is what stops the two from drifting (that drift — the scheduler
+// treating a tree-writing agent as read-only in a SHARED worktree — was the root
+// of the race fixed in v0.10.1; per-step isolation now makes agent concurrency
+// safe).
 func (p ResolvedPolicy) WritesTree(s StepName) bool {
-	return s == StepRebase ||
-		s.IsAgentStep() ||
-		p.AgentFor(s) != "" ||
-		p.WriteSteps[s] ||
-		p.AutoFixBudget(s) > 0
+	return p.KeepsWrites(s) || s.IsAgentStep() || p.AgentFor(s) != ""
 }
 
 // AgentFor returns the resolved agent for a step, or "" if the default applies.

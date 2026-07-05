@@ -14,14 +14,12 @@ func TestResolvedPolicy_Batches(t *testing.T) {
 		want [][]StepName
 	}{
 		{
-			name: "only read-only checks batch; rebase and agent steps are barriers",
+			name: "agents and checks batch (each isolated); only rebase is a barrier",
 			pol:  ResolvedPolicy{Steps: full, Parallel: true},
 			want: [][]StepName{
-				{StepIntent},         // agent: may edit → barrier
-				{StepRebase},         // rewrites history → barrier
-				{StepReview},         // agent → barrier
-				{StepDocument},       // agent → barrier
-				{StepTest, StepLint}, // read-only checks → one parallel batch
+				{StepIntent}, // followed by the rebase barrier
+				{StepRebase}, // rewrites history → barrier
+				{StepReview, StepDocument, StepTest, StepLint}, // agents + checks, each in its own worktree
 			},
 		},
 		{
@@ -72,16 +70,16 @@ func TestResolvedPolicy_Concurrent(t *testing.T) {
 		WriteSteps: map[StepName]bool{"codegen": true},
 	}
 	cases := map[StepName]bool{
-		StepRebase:     false, // rewrites history
+		StepRebase:     false, // rewrites history → barrier
 		StepPush:       false, // terminal write-external gate
-		StepLint:       false, // has an auto-fix budget → writes
-		StepIntent:     false, // coding-agent step → may edit the tree
-		StepReview:     false, // coding-agent step → may edit the tree
-		StepDocument:   false, // coding-agent step → writes docs
-		"custom-agent": false, // custom step a rule assigned an agent to
-		"codegen":      false, // declared under `writes:`
+		StepLint:       false, // has an auto-fix budget → writes are kept → barrier
+		"codegen":      false, // declared under `writes:` → barrier
+		StepIntent:     true,  // agent — isolatable (own worktree, writes discarded)
+		StepReview:     true,  // agent — isolatable
+		StepDocument:   true,  // agent — isolatable
+		"custom-agent": true,  // rule-assigned agent — isolatable
 		StepTest:       true,  // read-only shell check
-		"custom":       true,  // custom command, no agent, no budget
+		"custom":       true,  // custom command, no budget/writes
 	}
 	for step, want := range cases {
 		if got := p.Concurrent(step); got != want {
@@ -96,27 +94,34 @@ func TestResolvedPolicy_WritesTree(t *testing.T) {
 		Agents:     map[StepName]string{"custom-agent": "claude"},
 		WriteSteps: map[StepName]bool{"codegen": true},
 	}
-	writes := map[StepName]bool{
-		StepRebase:     true,  // history rewrite
-		StepIntent:     true,  // coding-agent step
-		StepReview:     true,  // coding-agent step
-		StepDocument:   true,  // coding-agent step
-		"custom-agent": true,  // rule-assigned agent
-		"codegen":      true,  // declared under writes:
-		StepLint:       true,  // positive auto-fix budget
-		StepTest:       false, // read-only shell check
-		StepPush:       false, // external, not a tree write (handled separately)
-		"checked":      false, // zero budget, no agent
-		"plain":        false, // ordinary custom command
+	// writesTree = does it mutate the tree at all (kept or discarded);
+	// keepsWrites = must its writes be preserved (→ barrier).
+	cases := []struct {
+		step                    StepName
+		writesTree, keepsWrites bool
+	}{
+		{StepRebase, true, true},      // history rewrite, kept
+		{StepLint, true, true},        // positive auto-fix budget, kept
+		{"codegen", true, true},       // declared under writes:, kept
+		{StepIntent, true, false},     // agent: writes, but discarded (isolatable)
+		{StepReview, true, false},     // agent
+		{StepDocument, true, false},   // agent
+		{"custom-agent", true, false}, // rule-assigned agent
+		{StepTest, false, false},      // read-only check
+		{StepPush, false, false},      // external, handled separately
+		{"checked", false, false},     // zero budget, no agent
+		{"plain", false, false},       // ordinary custom command
 	}
-	for s, want := range writes {
-		if got := p.WritesTree(s); got != want {
-			t.Errorf("WritesTree(%s) = %v, want %v", s, got, want)
+	for _, c := range cases {
+		if got := p.WritesTree(c.step); got != c.writesTree {
+			t.Errorf("WritesTree(%s) = %v, want %v", c.step, got, c.writesTree)
 		}
-		// Concurrent is exactly "not push and not a tree-writer".
-		wantConc := s != StepPush && !want
-		if got := p.Concurrent(s); got != wantConc {
-			t.Errorf("Concurrent(%s) = %v, want %v", s, got, wantConc)
+		if got := p.KeepsWrites(c.step); got != c.keepsWrites {
+			t.Errorf("KeepsWrites(%s) = %v, want %v", c.step, got, c.keepsWrites)
+		}
+		// Concurrent is exactly "not push and not a keeps-writes barrier".
+		if got, want := p.Concurrent(c.step), c.step != StepPush && !c.keepsWrites; got != want {
+			t.Errorf("Concurrent(%s) = %v, want %v", c.step, got, want)
 		}
 	}
 }
