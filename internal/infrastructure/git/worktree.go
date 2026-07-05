@@ -88,49 +88,73 @@ var depDirNames = map[string]bool{"node_modules": true}
 // node_modules (web/, apps/*/, site/) are each exposed without walking their
 // contents.
 //
-// By default it SYMLINKS the directory (fast, O(1)) — enough for tsc, eslint,
-// vitest, and Node's own resolver, which all follow the symlink happily. Some
-// build tools reject a node_modules symlink whose real target resolves outside
-// the worktree's filesystem root: Next.js 16 / Turbopack fails with
-// "Symlink node_modules is invalid, it points out of the filesystem root".
-// When materialize is true, the directory is instead hardlink-copied so the
-// deps are REAL files inside the worktree root, which those tools accept. See
+// The live checkout's dependency dir may itself be a SYMLINK — this is the norm
+// in a linked git worktree (e.g. Claude Code's .claude/worktrees/…), where
+// node_modules points back at the main checkout's copy so deps aren't installed
+// per worktree. Such a symlink is resolved to its real target so the deps are
+// still exposed; a naive "only real directories" walk would skip it and leave
+// the disposable worktree with no node_modules, failing every JS step.
+//
+// By default it SYMLINKS the resolved directory (fast, O(1)) — enough for tsc,
+// eslint, vitest, and Node's own resolver, which all follow the symlink happily.
+// Some build tools reject a node_modules symlink whose real target resolves
+// outside the worktree's filesystem root: Next.js 16 / Turbopack fails with
+// "Symlink node_modules is invalid, it points out of the filesystem root". When
+// materialize is true, the directory is instead hardlink-copied so the deps are
+// REAL files inside the worktree root, which those tools accept. See
 // domain.Config.MaterializeDeps for the per-step opt-in that drives this.
 func (w *Worktree) exposeGitignoredDeps(materialize bool) {
 	root := w.repo.Dir
+	// skipDeps stops the walk descending into a real dependency dir (its contents
+	// are exposed wholesale); a symlink entry is a leaf and isn't descended anyway.
+	skipDeps := func(d fs.DirEntry) error {
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
+		if err != nil {
 			return nil //nolint:nilerr // best-effort; skip unreadable entries
 		}
 		name := d.Name()
 		if name == ".git" {
-			return filepath.SkipDir
+			return skipDeps(d)
 		}
 		if !depDirNames[name] {
-			return nil
+			return nil // descend into ordinary dirs; ordinary files are leaves
+		}
+		// A dependency dir by name — a real directory OR a symlink to one. Resolve
+		// symlinks so a worktree that shares node_modules by symlink still works.
+		src, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return skipDeps(d)
+		}
+		if info, err := os.Stat(src); err != nil || !info.IsDir() {
+			return skipDeps(d)
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			return filepath.SkipDir
+			return skipDeps(d)
 		}
 		target := filepath.Join(w.Dir, rel)
 		if _, err := os.Lstat(target); err == nil {
-			return filepath.SkipDir // already present (tracked, or already exposed)
+			return skipDeps(d) // already present (tracked, or already exposed)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return filepath.SkipDir
+			return skipDeps(d)
 		}
 		if materialize {
-			if err := materializeTree(path, target); err != nil {
+			if err := materializeTree(src, target); err != nil {
 				// Best-effort: fall back to a symlink so the run still proceeds
 				// rather than leaving a half-populated dependency dir behind.
 				_ = os.RemoveAll(target)
-				_ = os.Symlink(path, target)
+				_ = os.Symlink(src, target)
 			}
 		} else {
-			_ = os.Symlink(path, target)
+			_ = os.Symlink(src, target)
 		}
-		return filepath.SkipDir // never walk into the dependency dir itself
+		return skipDeps(d)
 	})
 }
 

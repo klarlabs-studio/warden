@@ -246,3 +246,68 @@ func TestCreateWorktree_MaterializesNodeModules(t *testing.T) {
 		t.Fatalf("materialized symlink should resolve to the marker: %q err=%v", b, err)
 	}
 }
+
+// TestCreateWorktree_ExposesSymlinkedNodeModules guards the linked-worktree
+// case: when the live checkout is itself a git worktree, node_modules is
+// commonly a SYMLINK back to the main checkout's copy (e.g. Claude Code's
+// .claude/worktrees/…). Warden must resolve that symlink and expose the real
+// deps into its disposable worktree — otherwise every JS step fails with no
+// node_modules. (Repro: roadmapper in .claude/worktrees, node_modules ->
+// ../../../node_modules.)
+func TestCreateWorktree_ExposesSymlinkedNodeModules(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real node_modules living OUTSIDE the repo (like the main checkout's), with
+	// a marker binary the JS steps would need.
+	store := filepath.Join(parent, "store", "node_modules", ".bin")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "tsc"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// In the repo, node_modules is a SYMLINK to that real dir (relative, out of tree).
+	if err := os.Symlink(filepath.Join("..", "store", "node_modules"), filepath.Join(dir, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitRun("init")
+	gitRun("config", "user.email", "t@t.co")
+	gitRun("config", "user.name", "t")
+	// No trailing slash: `node_modules/` matches only a directory, which would
+	// leave the symlink tracked; a real linked worktree has it untracked.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.ts"), []byte("export {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun("add", ".")
+	gitRun("commit", "-m", "init")
+
+	repo := &Repo{Dir: dir}
+	wt, err := repo.CreateWorktreeFromHead(false)
+	if err != nil {
+		t.Fatalf("CreateWorktreeFromHead: %v", err)
+	}
+	defer wt.Remove()
+
+	// The deps must be reachable through the disposable worktree even though the
+	// source node_modules was a symlink.
+	if _, err := os.Stat(filepath.Join(wt.Dir, "node_modules", ".bin", "tsc")); err != nil {
+		t.Errorf("symlinked node_modules not exposed (tsc unreachable): %v", err)
+	}
+}

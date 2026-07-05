@@ -6,6 +6,17 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linked worktrees with a symlinked `node_modules` now work.** When the live
+  checkout is itself a git worktree (e.g. `.claude/worktrees/…`), `node_modules`
+  is commonly a symlink back to the main checkout's copy. warden's dependency
+  exposure only handled a real directory and silently skipped the symlink, so the
+  disposable worktree got no `node_modules` and every JS step (typecheck / lint /
+  test / build) failed. It now resolves a symlinked dependency dir to its real
+  target and exposes the actual deps (or hardlink-copies them under
+  `materialize_deps`).
+
 ### Security
 
 - **Parallel steps no longer share a worktree with a writer.** Coding-agent
