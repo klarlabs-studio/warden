@@ -28,16 +28,16 @@ func (a *Adapter) DiffStats(base string) (domain.DiffStats, error) {
 // StagedPaths, but it returns full DiffStats).
 func (a *Adapter) StagedDiffStats() (domain.DiffStats, error) { return a.repo.StagedPaths() }
 
-func (a *Adapter) SeedWorktreeFromHead() (application.Worktree, error) {
-	wt, err := a.repo.CreateWorktreeFromHead()
+func (a *Adapter) SeedWorktreeFromHead(materializeDeps bool) (application.Worktree, error) {
+	wt, err := a.repo.CreateWorktreeFromHead(materializeDeps)
 	if err != nil {
 		return nil, err
 	}
 	return worktreeAdapter{wt}, nil
 }
 
-func (a *Adapter) SeedWorktreeFromBranch(branch string) (application.Worktree, error) {
-	wt, err := a.repo.CreateWorktreeFromBranch(branch)
+func (a *Adapter) SeedWorktreeFromBranch(branch string, materializeDeps bool) (application.Worktree, error) {
+	wt, err := a.repo.CreateWorktreeFromBranch(branch, materializeDeps)
 	if err != nil {
 		return nil, err
 	}

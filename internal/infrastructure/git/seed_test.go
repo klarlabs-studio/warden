@@ -50,7 +50,7 @@ func TestCreateWorktreeFromHead_TrailingBlankContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := repo.CreateWorktreeFromHead()
+	wt, err := repo.CreateWorktreeFromHead(false)
 	if err != nil {
 		t.Fatalf("seeding must not corrupt the staged patch: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestCreateWorktreeFromHead_StagedBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wt, err := repo.CreateWorktreeFromHead()
+	wt, err := repo.CreateWorktreeFromHead(false)
 	if err != nil {
 		t.Fatalf("seeding a staged binary file must succeed: %v", err)
 	}
@@ -157,16 +157,92 @@ func TestCreateWorktree_LinksNodeModules(t *testing.T) {
 	gitRun("commit", "-m", "init")
 
 	repo := &Repo{Dir: dir}
-	wt, err := repo.CreateWorktreeFromHead()
+	wt, err := repo.CreateWorktreeFromHead(false)
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}
 	defer wt.Remove()
 
 	for _, nm := range []string{"node_modules", filepath.Join("web", "node_modules")} {
+		// The default exposes deps as a symlink (fast, O(1)).
+		fi, err := os.Lstat(filepath.Join(wt.Dir, nm))
+		if err != nil {
+			t.Fatalf("worktree missing %s: %v", nm, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink by default, got mode %v", nm, fi.Mode())
+		}
 		// The tsc marker must be reachable through the worktree's linked node_modules.
 		if _, err := os.Stat(filepath.Join(wt.Dir, nm, ".bin", "tsc")); err != nil {
 			t.Errorf("worktree missing linked %s (tsc unreachable): %v", nm, err)
 		}
+	}
+}
+
+// TestCreateWorktree_MaterializesNodeModules guards the Turbopack fix: with
+// materializeDeps=true, node_modules must be a REAL directory in the worktree
+// (not a symlink pointing out of the filesystem root), so Next.js 16/Turbopack
+// accepts it — while its contents remain reachable for the JS steps.
+func TestCreateWorktree_MaterializesNodeModules(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitRun("init")
+	gitRun("config", "user.email", "t@t.co")
+	gitRun("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// node_modules with a regular marker file and an internal .bin symlink
+	// (mirrors a real install: .bin/tsc → ../typescript/bin/tsc).
+	bin := filepath.Join(dir, "node_modules", ".bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "node_modules", "marker"), []byte("dep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "marker"), filepath.Join(bin, "tsc")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun("add", ".")
+	gitRun("commit", "-m", "init")
+
+	repo := &Repo{Dir: dir}
+	wt, err := repo.CreateWorktreeFromHead(true)
+	if err != nil {
+		t.Fatalf("CreateWorktreeFromHead: %v", err)
+	}
+	defer wt.Remove()
+
+	// node_modules must be a real directory, NOT a symlink.
+	fi, err := os.Lstat(filepath.Join(wt.Dir, "node_modules"))
+	if err != nil {
+		t.Fatalf("worktree missing materialized node_modules: %v", err)
+	}
+	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("node_modules should be a real directory, got mode %v", fi.Mode())
+	}
+	// The regular file is materialized (hardlink or copy) as a real file.
+	mfi, err := os.Lstat(filepath.Join(wt.Dir, "node_modules", "marker"))
+	if err != nil || mfi.Mode()&os.ModeSymlink != 0 || !mfi.Mode().IsRegular() {
+		t.Fatalf("marker should be a real regular file: mode=%v err=%v", mfi.Mode(), err)
+	}
+	// The internal symlink is preserved and still resolves.
+	lfi, err := os.Lstat(filepath.Join(wt.Dir, "node_modules", ".bin", "tsc"))
+	if err != nil || lfi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf(".bin/tsc should stay a symlink: mode=%v err=%v", lfi.Mode(), err)
+	}
+	if b, err := os.ReadFile(filepath.Join(wt.Dir, "node_modules", ".bin", "tsc")); err != nil || string(b) != "dep\n" {
+		t.Fatalf("materialized symlink should resolve to the marker: %q err=%v", b, err)
 	}
 }

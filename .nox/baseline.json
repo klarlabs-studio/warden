@@ -148,7 +148,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/application/runner_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -156,7 +156,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/cli/cmd_key.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -164,7 +164,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/cli/cmd_verify.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -172,7 +172,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/domain/signature_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -180,7 +180,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/domain/signature_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -188,7 +188,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/infrastructure/signing/signer_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -196,7 +196,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/infrastructure/signing/signer_test.go",
       "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) \u2014 same class as the already-baselined importer_test.go:220.",
+      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
@@ -228,7 +228,7 @@
       "rule_id": "SEC-161",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
@@ -236,7 +236,7 @@
       "rule_id": "SEC-162",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
@@ -244,7 +244,7 @@
       "rule_id": "SEC-163",
       "file_path": "internal/application/comment_test.go",
       "severity": "medium",
-      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) \u2014 public, not a secret; three entropy rules fire on the same line.",
+      "reason": "Test fixture is a base64 ed25519 PUBLIC key (comment_test.go, for signer-fingerprint rendering) — public, not a secret; three entropy rules fire on the same line.",
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
@@ -358,6 +358,62 @@
       "file_path": "README.md",
       "severity": "high",
       "created_at": "2026-07-03T08:10:00Z"
+    },
+    {
+      "fingerprint": "497a79668b769db60cb7b3789b9552dc03aed05aa9cb0eaf6ca31084d58d219e",
+      "rule_id": "SEC-384",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "4928506223648f2ab2c5dfd3842c6a368f73858f34b3d7ff2994b8fd69f2672b",
+      "rule_id": "SEC-505",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "974b86e80553490642d223906df511c5a0c89ce008e700705d6c22168d21f11a",
+      "rule_id": "SEC-506",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "6214238e534c7b770adaef77db30eee27f615f0b3632ebd0bce0b170777cf087",
+      "rule_id": "SEC-525",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "049d7c58725daaa668565ac26ea2d5fe0bbd7f6f7fac8d2360c1fbefbde7a29d",
+      "rule_id": "SEC-543",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "b45e70bea150e9cb270759d812843e71f2d78fb0cac96984da70ca3bad76ec50",
+      "rule_id": "SEC-621",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "ced1aa8866ebf02e7be88cfcc1e73f8bcce0341b4ed7d81d7a26b4cfd646f59c",
+      "rule_id": "SEC-678",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "b9763617020250ac18ea18cf24031f508d9cdea8f4180721909b721ae75be325",
+      "rule_id": "SEC-679",
+      "file_path": "README.md",
+      "severity": "high",
+      "created_at": "2026-07-05T00:00:00Z"
     }
   ]
 }

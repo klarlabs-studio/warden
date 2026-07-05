@@ -14,6 +14,7 @@ func TestParse_SpecConfig(t *testing.T) {
 agent: auto
 hooks: { pre_commit: true, pre_push: true }
 commands: { lint: "golangci-lint run ./...", test: "go test ./..." }
+materialize_deps: [build]
 steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
@@ -34,6 +35,9 @@ rules:
 	}
 	if cfg.Risk.DiffLinesHigh != 400 {
 		t.Errorf("risk threshold = %d, want 400", cfg.Risk.DiffLinesHigh)
+	}
+	if len(cfg.MaterializeDeps) != 1 || cfg.MaterializeDeps[0] != "build" {
+		t.Errorf("materialize_deps not parsed: %+v", cfg.MaterializeDeps)
 	}
 }
 

@@ -81,12 +81,32 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)
+	res.MaterializeDeps = needsMaterializedDeps(cfg.MaterializeDeps, res.Steps)
 	resolveOverlays(&res, matches)
 
 	for _, m := range matches {
 		res.MatchedRules = append(res.MatchedRules, m.name)
 	}
 	return res
+}
+
+// needsMaterializedDeps reports whether any step in this run's resolved step
+// list is named in the config's materialize_deps set — i.e. whether the
+// worktree must hardlink-copy gitignored deps rather than symlink them.
+func needsMaterializedDeps(materialize []string, steps []domain.StepName) bool {
+	if len(materialize) == 0 {
+		return false
+	}
+	want := make(map[domain.StepName]bool, len(materialize))
+	for _, s := range materialize {
+		want[domain.StepName(s)] = true
+	}
+	for _, s := range steps {
+		if want[s] {
+			return true
+		}
+	}
+	return false
 }
 
 // matchingRules returns the rules whose every set condition is satisfied, in
