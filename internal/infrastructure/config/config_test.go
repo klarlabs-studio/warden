@@ -133,17 +133,18 @@ func TestRepository_SaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestRepository_LoadResolvesExtends(t *testing.T) {
-	dir := t.TempDir()
-	// Base config one level up from the repo.
-	base := filepath.Join(dir, "base.yaml")
+	repoDir := t.TempDir()
+	// Base config committed inside the repo (a versioned org-policy file); the
+	// containment rule requires an extends target to stay within the repo root.
+	baseDir := filepath.Join(repoDir, "policy")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(baseDir, "base.yaml")
 	if err := os.WriteFile(base, []byte("agent: claude\ncommands:\n  lint: \"golangci-lint run\"\n  test: \"go test ./...\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repoDir := filepath.Join(dir, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	child := "extends: ../base.yaml\ncommands:\n  test: \"go test -race ./...\"\n"
+	child := "extends: policy/base.yaml\ncommands:\n  test: \"go test -race ./...\"\n"
 	if err := os.WriteFile(filepath.Join(repoDir, FileName), []byte(child), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +161,63 @@ func TestRepository_LoadResolvesExtends(t *testing.T) {
 	}
 	if cfg.Commands["test"] != "go test -race ./..." {
 		t.Errorf("child override lost: %q", cfg.Commands["test"])
+	}
+}
+
+func TestRepository_ExtendsEscapeRejected(t *testing.T) {
+	// A repo config must not inherit from a file outside the repo root, whether
+	// via a ".." escape or an absolute path — such a file is un-versioned and
+	// could smuggle commands: that later run via `sh -c`.
+	cases := map[string]string{
+		"parent-escape": "extends: ../../shared.yaml\n",
+		"absolute":      "extends: /etc/warden/shared.yaml\n",
+	}
+	for name, child := range cases {
+		t.Run(name, func(t *testing.T) {
+			repoDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(repoDir, FileName), []byte(child), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := NewRepository(repoDir).Load()
+			if err == nil {
+				t.Fatal("expected extends escaping the repo root to error")
+			}
+			if !strings.Contains(err.Error(), "escapes repo root") {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepository_InvalidStepNameRejected(t *testing.T) {
+	// A custom step name containing a path separator would be treated by
+	// exec.LookPath("warden-step-"+name) as a relative path; reject it at load.
+	repoDir := t.TempDir()
+	yaml := "steps:\n  pre_push: [lint, \"x/evil\"]\n"
+	if err := os.WriteFile(filepath.Join(repoDir, FileName), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewRepository(repoDir).Load()
+	if err == nil {
+		t.Fatal("expected an invalid step name to error")
+	}
+	if !strings.Contains(err.Error(), "invalid step name") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRepository_LoadRejectsOversizedConfig(t *testing.T) {
+	repoDir := t.TempDir()
+	big := strings.Repeat("# padding comment line\n", (maxConfigBytes/23)+2)
+	if err := os.WriteFile(filepath.Join(repoDir, FileName), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewRepository(repoDir).Load()
+	if err == nil {
+		t.Fatal("expected an oversized config to error")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

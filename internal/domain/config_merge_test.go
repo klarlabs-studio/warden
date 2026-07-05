@@ -57,3 +57,65 @@ func TestOverlayOnto_ChildScalarsWin(t *testing.T) {
 		t.Errorf("child risk must win: %d", got.Risk.DiffLinesHigh)
 	}
 }
+
+// TestOverlayOnto_StepsUnionKeepsBaseStep guards the security fix: a repo that
+// re-declares a hook's steps must not silently drop an org-mandated base step.
+func TestOverlayOnto_StepsUnionKeepsBaseStep(t *testing.T) {
+	base := Config{Steps: map[string][]StepName{"pre_push": {"review", "test", "lint"}}}
+	// Child omits the org-required "review" step and adds a repo-specific one.
+	child := Config{Steps: map[string][]StepName{"pre_push": {"test", "lint", "bench"}}}
+	got := child.OverlayOnto(base)
+	want := []StepName{"review", "test", "lint", "bench"}
+	if !reflect.DeepEqual(got.Steps["pre_push"], want) {
+		t.Errorf("steps union = %v, want %v (base 'review' must survive)", got.Steps["pre_push"], want)
+	}
+}
+
+// TestOverlayOnto_RiskFieldLevel guards that a child setting only one threshold
+// does not zero the base's other threshold.
+func TestOverlayOnto_RiskFieldLevel(t *testing.T) {
+	base := Config{Risk: RiskConfig{DiffLinesHigh: 100, FilesTouchedHigh: 20}}
+	child := Config{Risk: RiskConfig{FilesTouchedHigh: 30}} // only sets one field
+	got := child.OverlayOnto(base)
+	if got.Risk.DiffLinesHigh != 100 {
+		t.Errorf("base DiffLinesHigh must survive a partial child risk: %d", got.Risk.DiffLinesHigh)
+	}
+	if got.Risk.FilesTouchedHigh != 30 {
+		t.Errorf("child FilesTouchedHigh must win: %d", got.Risk.FilesTouchedHigh)
+	}
+}
+
+func TestStepNameValid(t *testing.T) {
+	valid := []StepName{StepIntent, StepRebase, StepReview, StepTest, StepDocument, StepLint, StepPush, "security-scan", "bench_2", "a"}
+	for _, n := range valid {
+		if !n.Valid() {
+			t.Errorf("step name %q should be valid", n)
+		}
+	}
+	invalid := []StepName{"x/evil", "../../bin/sh", "a b", "bad;rm", "-leading", "", "a.b", "$(x)"}
+	for _, n := range invalid {
+		if n.Valid() {
+			t.Errorf("step name %q should be rejected", n)
+		}
+	}
+}
+
+func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
+	cases := map[string]Config{
+		"steps":        {Steps: map[string][]StepName{"pre_push": {"lint", "x/evil"}}},
+		"rule-add":     {Rules: []Rule{{Then: Then{Steps: map[string]StepEdit{"pre_push": {Add: []StepName{"../evil"}}}}}}},
+		"rule-autofix": {Rules: []Rule{{Then: Then{AutoFix: map[StepName]int{"a;b": 1}}}}},
+	}
+	for name, cfg := range cases {
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+	ok := Config{
+		Steps: map[string][]StepName{"pre_push": {"intent", "review", "security-scan"}},
+		Rules: []Rule{{Then: Then{AutoFix: map[StepName]int{"lint": 1}, Agent: map[StepName]string{"review": "codex"}}}},
+	}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("valid config rejected: %v", err)
+	}
+}

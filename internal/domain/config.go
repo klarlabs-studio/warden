@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // Config is the parsed .warden.yaml (§5.1). Field tags mirror the documented
 // YAML surface exactly. Zero values are meaningful: an omitted section falls
 // back to the documented defaults during policy resolution, not here.
@@ -65,6 +67,51 @@ type Config struct {
 	PR PRConfig `yaml:"pr"`
 
 	Rules []Rule `yaml:"rules"`
+}
+
+// Validate rejects a parsed config that carries an unsafe step name. Every
+// StepName that can enter the resolved pipeline — the per-hook `steps:` lists
+// and the step names named by rules (auto_fix, per-step agent, add/skip/
+// insert_after) — must pass StepName.Valid so a custom step cannot smuggle a
+// path separator or shell metacharacter into the custom-step binary lookup. It
+// is called by the config loader after parsing so an invalid name fails the
+// load rather than reaching exec.LookPath. Built-in names always pass.
+func (c Config) Validate() error {
+	for hook, names := range c.Steps {
+		for _, n := range names {
+			if !n.Valid() {
+				return fmt.Errorf("invalid step name %q in steps.%s: names must match [a-zA-Z0-9][a-zA-Z0-9_-]*", string(n), hook)
+			}
+		}
+	}
+	for i, r := range c.Rules {
+		for n := range r.Then.AutoFix {
+			if !n.Valid() {
+				return fmt.Errorf("invalid step name %q in rules[%d].then.auto_fix", string(n), i)
+			}
+		}
+		for n := range r.Then.Agent {
+			if !n.Valid() {
+				return fmt.Errorf("invalid step name %q in rules[%d].then.agent", string(n), i)
+			}
+		}
+		for hook, edit := range r.Then.Steps {
+			for _, n := range edit.Add {
+				if !n.Valid() {
+					return fmt.Errorf("invalid step name %q in rules[%d].then.steps.%s.add", string(n), i, hook)
+				}
+			}
+			for _, n := range edit.Skip {
+				if !n.Valid() {
+					return fmt.Errorf("invalid step name %q in rules[%d].then.steps.%s.skip", string(n), i, hook)
+				}
+			}
+			if edit.InsertAfter != "" && !edit.InsertAfter.Valid() {
+				return fmt.Errorf("invalid step name %q in rules[%d].then.steps.%s.insert_after", string(edit.InsertAfter), i, hook)
+			}
+		}
+	}
+	return nil
 }
 
 // HookConfig records which hooks are installed (§4.1).

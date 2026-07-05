@@ -7,10 +7,12 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -19,6 +21,11 @@ import (
 
 // FileName is the repo-root config file Warden reads.
 const FileName = ".warden.yaml"
+
+// maxConfigBytes caps a single config file (the root .warden.yaml or any
+// extends target). A real Warden policy is a few KiB; the cap defends the
+// loader against an accidentally or maliciously huge file exhausting memory.
+const maxConfigBytes = 1 << 20 // 1 MiB
 
 // Repository loads and saves the domain Config for a single repository root. It
 // satisfies the application's ConfigRepository port.
@@ -33,26 +40,30 @@ func NewRepository(root string) *Repository { return &Repository{root: root} }
 // file is not an error: it yields a zero Config so callers fall back to
 // documented defaults.
 func (r *Repository) Load() (domain.Config, error) {
-	return loadFrom(filepath.Join(r.root, FileName), nil)
+	return loadFrom(r.root, filepath.Join(r.root, FileName), nil)
 }
 
 // maxExtends bounds the extends chain so a misconfiguration can't loop forever.
 const maxExtends = 10
 
 // loadFrom parses the config at path and, if it extends a base, loads that base
-// and overlays this config on top. seen carries the chain so far to detect
-// cycles and cap depth.
-func loadFrom(path string, seen []string) (domain.Config, error) {
-	data, err := os.ReadFile(path)
+// and overlays this config on top. root is the repository root every config in
+// the chain must stay within; seen carries the chain so far to detect cycles
+// and cap depth.
+func loadFrom(root, path string, seen []string) (domain.Config, error) {
+	data, err := readConfigFile(path)
 	if os.IsNotExist(err) {
 		return domain.Config{}, nil
 	}
 	if err != nil {
-		return domain.Config{}, fmt.Errorf("read %s: %w", path, err)
+		return domain.Config{}, err
 	}
 	cfg, err := Parse(data)
 	if err != nil {
 		return domain.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return domain.Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if cfg.Extends == "" {
 		return cfg, nil
@@ -66,17 +77,63 @@ func loadFrom(path string, seen []string) (domain.Config, error) {
 		basePath = filepath.Join(filepath.Dir(path), basePath)
 	}
 	basePath = filepath.Clean(basePath)
+	// Containment: an extends target — relative or absolute — must resolve
+	// inside the repo root. Otherwise a repo .warden.yaml could inherit
+	// commands: (which later run via `sh -c`) from an un-versioned file such as
+	// `extends: /etc/x.yaml` or `../../shared.yaml`, or read an arbitrary file.
+	// Inherited policy must be committed to the repo, not pulled from outside.
+	if !within(root, basePath) {
+		return domain.Config{}, fmt.Errorf("extends target %s escapes repo root %s", basePath, root)
+	}
 	chain := make([]string, 0, len(seen)+1)
 	chain = append(chain, seen...)
 	chain = append(chain, filepath.Clean(path))
 	if slices.Contains(chain, basePath) {
 		return domain.Config{}, fmt.Errorf("extends cycle: %s already in the chain", basePath)
 	}
-	base, err := loadFrom(basePath, chain)
+	base, err := loadFrom(root, basePath, chain)
 	if err != nil {
 		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
 	}
 	return cfg.OverlayOnto(base), nil
+}
+
+// within reports whether target is contained within root (root itself or a
+// descendant). Both are resolved to absolute, cleaned form first so a lexical
+// ".." escape or an absolute path outside the repo is rejected.
+func within(root, target string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// readConfigFile reads a config file, capping the read at maxConfigBytes so an
+// oversized file can't exhaust memory. A missing file surfaces os.ErrNotExist
+// unchanged so the caller can treat it as "no config".
+func readConfigFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(data) > maxConfigBytes {
+		return nil, fmt.Errorf("read %s: config exceeds %d bytes", path, maxConfigBytes)
+	}
+	return data, nil
 }
 
 // Save serializes cfg to .warden.yaml.
