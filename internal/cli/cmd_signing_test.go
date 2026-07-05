@@ -130,6 +130,7 @@ func TestWhy_WithNote(t *testing.T) {
 	}
 	rec := domain.RunRecord{
 		RunID:             "run_why",
+		CommitSHA:         head,
 		WardenVersion:     "9.9.9",
 		StepsRun:          []domain.StepName{"test", "lint"},
 		Agent:             map[domain.StepName]string{"test": "claude"},
