@@ -31,6 +31,10 @@ func (c Config) OverlayOnto(base Config) Config {
 	if len(c.MaterializeDeps) > 0 {
 		out.MaterializeDeps = c.MaterializeDeps
 	}
+	// Writes unions: it is a safety declaration ("this step mutates the tree"), so
+	// a child must not be able to silently drop a base's writer marking and let a
+	// tree-mutating step race a concurrent check.
+	out.Writes = unionStrings(base.Writes, c.Writes)
 
 	// Risk merges field-by-field: a child that sets only one threshold must not
 	// discard the base's other threshold (a whole-struct replace would zero the
@@ -110,6 +114,23 @@ func unionSteps(base, child []StepName) []StepName {
 		}
 	}
 	for _, n := range child {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// unionStrings returns base followed by every child entry not already present,
+// preserving order and dropping duplicates.
+func unionStrings(base, child []string) []string {
+	if len(base) == 0 && len(child) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(base)+len(child))
+	out := make([]string, 0, len(base)+len(child))
+	for _, n := range append(append([]string(nil), base...), child...) {
 		if !seen[n] {
 			seen[n] = true
 			out = append(out, n)

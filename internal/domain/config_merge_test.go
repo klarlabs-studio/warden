@@ -71,6 +71,19 @@ func TestOverlayOnto_StepsUnionKeepsBaseStep(t *testing.T) {
 	}
 }
 
+// TestOverlayOnto_WritesUnion guards that a child cannot silently drop a base's
+// `writes:` declaration — a step the base marked tree-mutating must stay a
+// barrier even if the child re-declares its own writers.
+func TestOverlayOnto_WritesUnion(t *testing.T) {
+	base := Config{Writes: []string{"codegen"}}
+	child := Config{Writes: []string{"format"}}
+	got := child.OverlayOnto(base)
+	want := []string{"codegen", "format"}
+	if !reflect.DeepEqual(got.Writes, want) {
+		t.Errorf("writes union = %v, want %v (base 'codegen' must survive)", got.Writes, want)
+	}
+}
+
 // TestOverlayOnto_RiskFieldLevel guards that a child setting only one threshold
 // does not zero the base's other threshold.
 func TestOverlayOnto_RiskFieldLevel(t *testing.T) {

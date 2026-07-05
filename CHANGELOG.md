@@ -6,6 +6,23 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **Parallel steps no longer share a worktree with a writer.** Coding-agent
+  steps (`review`, `document`, `intent`, or any step a rule assigns an agent to)
+  edit files, but were scheduled to run concurrently with `test`/`lint` in the
+  same directory — a data race that could corrupt what the checks read. They now
+  run as sequential barriers. New `writes: [step…]` config marks a custom step
+  (codegen, formatter) as a tree-writer so it also runs alone. See
+  `docs/adr/0001-parallel-step-worktree-isolation.md`.
+
+### Changed
+
+- The default **pre-push step order** is now `intent, rebase, review, document,
+  test, lint` (was `…review, test, document, lint`), grouping the writing agents
+  ahead of the read-only checks so `test`‖`lint` still share one parallel batch.
+  Repos with an explicit `steps:` list are unaffected.
+
 ## [0.10.0] — 2026-07-05
 
 A security-hardening release closing every finding from a deep multi-agent

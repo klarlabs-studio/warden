@@ -37,6 +37,10 @@ type ResolvedPolicy struct {
 	// dependency dirs materialized as real files in the worktree rather than
 	// symlinked (see Config.MaterializeDeps). Resolved from the run's step set.
 	MaterializeDeps bool
+	// WriteSteps are steps the config declared as tree-mutating (Config.Writes).
+	// They run as sequential barriers, never in a parallel batch — the escape
+	// hatch for a custom step (codegen, formatter) that writes the worktree.
+	WriteSteps map[StepName]bool
 }
 
 // CachePaths returns the declared input globs for a step, or nil.
@@ -90,15 +94,27 @@ func (p ResolvedPolicy) Batches() [][]StepName {
 }
 
 // Concurrent reports whether step is safe to run alongside other steps in the
-// shared worktree. It must not rewrite history (rebase), must not be the
-// terminal push, and must not apply auto-fixes — a non-zero budget writes to the
-// tree. Read-only checks (lint, test, custom commands, advisory agents) qualify;
-// anything that mutates the tree stays a sequential barrier.
+// shared worktree. A step qualifies only when Warden can be confident it does
+// not mutate the tracked tree: it must not rewrite history (rebase), be the
+// terminal push, carry an auto-fix budget (a non-zero budget writes), be a
+// coding-agent step (agents routinely edit files — see writesTree), or be
+// declared tree-writing in config (Config.Writes). Everything else — shell
+// checks like lint/test and custom commands the author owns — runs concurrently.
 func (p ResolvedPolicy) Concurrent(s StepName) bool {
 	if s == StepRebase || s == StepPush {
 		return false
 	}
+	if p.writesTree(s) {
+		return false
+	}
 	return p.AutoFixBudget(s) == 0
+}
+
+// writesTree reports whether Warden knows step mutates the worktree and so must
+// not share a parallel batch: a built-in agent step, a custom step a rule
+// assigned an agent to, or a step the config declared under `writes:`.
+func (p ResolvedPolicy) writesTree(s StepName) bool {
+	return s.IsAgentStep() || p.AgentFor(s) != "" || p.WriteSteps[s]
 }
 
 // AgentFor returns the resolved agent for a step, or "" if the default applies.
