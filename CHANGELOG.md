@@ -6,20 +6,71 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-05
+
+A security-hardening release closing every finding from a deep multi-agent
+review, plus the Next.js/Turbopack worktree fix. Several changes tighten
+behavior (fail-closed) — see **Changed** before upgrading.
+
+### Security
+
+- **Provenance is now bound to the commit it attests.** The signed `RunRecord`
+  gained a `CommitSHA` (covered by the signature), and `warden verify` requires
+  `record.CommitSHA == <commit>`. Previously a validly-signed note could be
+  transplanted onto — or replayed against — any other commit and still pass
+  `verify --key <trusted>`, letting CI provenance-skip skip checks on
+  attacker-controlled code.
+- **`warden verify` fails closed.** It no longer treats an empty `{}` (or any
+  no-evidence) note as validated, and `audit`/`doctor` only call a note "intact"
+  when it actually attests its commit.
+- **The self-fetched warden binary is verified before it runs.** The generated
+  git hook, `install.sh`, and `install.ps1` now check the downloaded archive's
+  SHA-256 against `checksums.txt` (from the pinned release tag) **before**
+  `chmod +x`/extraction, re-verify the `~/.warden/bin/<ver>` cache on every run
+  (dir created `0700`), and fail closed on mismatch. Releases now publish a
+  **cosign-signed** `checksums.txt`. (Residual: the fetch verifies the checksum
+  but not yet the cosign signature over the same channel — see `SECURITY.md`.)
+- **`extends:` is contained to the repo.** A `.warden.yaml` can no longer inherit
+  its `commands:`/rules from an absolute or `../`-escaping path outside the
+  repository (which also read arbitrary files).
+- **MCP `run_trigger` refuses by default.** The MCP/`axi` surface auto-approves,
+  so running a possibly-untrusted repo's `.warden.yaml` commands now requires an
+  explicit opt-in (`WARDEN_MCP_ALLOW_RUN=1`, or `--trust` for `axi run-trigger`).
+  Read-only tools (`policy_explain`, `steps_list`) are unaffected.
+- **Custom step names are validated** (`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`), closing a
+  path-traversal where a name like `x/evil` resolved `warden-step-x/evil` to a
+  repo-relative executable.
+- **Auto-fixes are only written back when a step was authorized to fix.** A
+  passing pre-commit no longer re-applies arbitrary tree mutations made by
+  read-only steps to your working tree — capture happens only when a step holds
+  an `auto_fix` budget.
+- **Runs are cancellable and crash-safe.** Ctrl-C/SIGTERM now cancels a run
+  (and can no longer auto-approve a push after you abort); a panic in a parallel
+  step becomes a step error instead of crashing the gate and leaking the
+  worktree; timed-out steps are killed by process group so children don't orphan.
+- **Glob matching is linear-time**, closing a ReDoS where a crafted
+  `paths:`/`cache:` pattern against a long path could hang the gate on push.
+
 ### Added
 
 - **`materialize_deps:` — real (not symlinked) dependency dirs for build steps.**
-  warden exposes gitignored dependency directories (`node_modules`) to steps by
-  symlinking them from the live checkout into the disposable worktree — fast, and
-  fine for `tsc`/`eslint`/`vitest`/Node. But Next.js 16 / Turbopack rejects a
-  `node_modules` symlink whose target resolves outside the worktree root
-  (`TurbopackInternalError: Symlink node_modules is invalid, it points out of the
-  filesystem root`), so a `build` step failed as a false positive. List the
-  affected steps under `materialize_deps` (e.g. `materialize_deps: [build]`) and
-  warden hardlink-copies the deps into the worktree as real files for any run
-  that includes one of them — Turbopack accepts it, and other runs keep the fast
-  symlink. Hardlinks fall back to a byte copy across filesystems; internal
-  symlinks (`.bin`) are preserved.
+  warden symlinks gitignored `node_modules` into the disposable worktree (fast,
+  fine for `tsc`/`eslint`/`vitest`/Node), but Next.js 16 / Turbopack rejects a
+  `node_modules` symlink resolving outside the worktree root
+  (`TurbopackInternalError: Symlink node_modules is invalid…`). List the affected
+  steps under `materialize_deps` (e.g. `[build]`) and warden hardlink-copies the
+  deps as real files for runs that include one of them; other runs keep the fast
+  symlink. Hardlinks fall back to a byte copy across filesystems; internal `.bin`
+  symlinks are preserved.
+
+### Changed
+
+- **Legacy provenance notes (written before this release) fail `verify`** — they
+  carry no `CommitSHA` binding, so they must be re-validated. Correct fail-closed
+  behavior, but re-run warden on affected commits.
+- Inherited (`extends`) step lists now **merge** (union) rather than being
+  replaced, so a base can't silently have a required step dropped; partial
+  `risk:` overrides now merge field-by-field.
 
 ## [0.9.0] — 2026-07-04
 
