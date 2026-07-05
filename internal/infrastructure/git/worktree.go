@@ -95,14 +95,15 @@ var depDirNames = map[string]bool{"node_modules": true}
 // still exposed; a naive "only real directories" walk would skip it and leave
 // the disposable worktree with no node_modules, failing every JS step.
 //
-// By default it SYMLINKS the resolved directory (fast, O(1)) — enough for tsc,
-// eslint, vitest, and Node's own resolver, which all follow the symlink happily.
-// Some build tools reject a node_modules symlink whose real target resolves
-// outside the worktree's filesystem root: Next.js 16 / Turbopack fails with
-// "Symlink node_modules is invalid, it points out of the filesystem root". When
-// materialize is true, the directory is instead hardlink-copied so the deps are
-// REAL files inside the worktree root, which those tools accept. See
-// domain.Config.MaterializeDeps for the per-step opt-in that drives this.
+// When materialize is true (the product default — see domain.Config.SymlinkDeps),
+// the directory is hardlink-copied so the deps are REAL files inside the worktree
+// root, which every tool accepts — including Next.js 16 / Turbopack, which
+// rejects a node_modules symlink whose real target resolves outside the
+// worktree's filesystem root ("Symlink node_modules is invalid, it points out of
+// the filesystem root"). Hardlinks are near-instant on the same filesystem and
+// fall back to a byte copy across filesystems. When materialize is false
+// (symlink_deps: true) it instead SYMLINKS the resolved directory — fast, O(1),
+// and enough for tsc/eslint/vitest and Node's own resolver, which follow it.
 func (w *Worktree) exposeGitignoredDeps(materialize bool) {
 	root := w.repo.Dir
 	// skipDeps stops the walk descending into a real dependency dir (its contents

@@ -81,7 +81,8 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)
-	res.MaterializeDeps = needsMaterializedDeps(cfg.MaterializeDeps, res.Steps)
+	// Materialize gitignored deps by default; symlink_deps: true opts out.
+	res.MaterializeDeps = cfg.SymlinkDeps == nil || !*cfg.SymlinkDeps
 	res.WriteSteps = stepSet(cfg.Writes)
 	resolveOverlays(&res, matches)
 
@@ -102,25 +103,6 @@ func stepSet(names []string) map[domain.StepName]bool {
 		set[domain.StepName(n)] = true
 	}
 	return set
-}
-
-// needsMaterializedDeps reports whether any step in this run's resolved step
-// list is named in the config's materialize_deps set — i.e. whether the
-// worktree must hardlink-copy gitignored deps rather than symlink them.
-func needsMaterializedDeps(materialize []string, steps []domain.StepName) bool {
-	if len(materialize) == 0 {
-		return false
-	}
-	want := make(map[domain.StepName]bool, len(materialize))
-	for _, s := range materialize {
-		want[domain.StepName(s)] = true
-	}
-	for _, s := range steps {
-		if want[s] {
-			return true
-		}
-	}
-	return false
 }
 
 // matchingRules returns the rules whose every set condition is satisfied, in
