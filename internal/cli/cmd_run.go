@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/mattn/go-isatty"
 
@@ -30,10 +32,16 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// Derive the run's context from the interrupt signals so a Ctrl-C or
+	// SIGTERM cancels the pipeline and, critically, aborts the push gate before
+	// it can auto-approve (see Runner.resolvePushGate).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// A pre-push run on a real terminal gets the live TUI; the fast pre-commit
 	// path and non-interactive streams (CI, agents) print inline (§4.4).
 	if hook == domain.PrePush && isInteractive() {
-		return runWithTUI(hook, stdout, stderr)
+		return runWithTUI(ctx, hook, stdout, stderr)
 	}
 
 	svc, err := newService(newTerminalApprover(os.Stdin, stdout))
@@ -51,7 +59,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	res, err := svc.Run(context.Background(), hook)
+	res, err := svc.Run(ctx, hook)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -83,7 +91,7 @@ func isInteractive() bool {
 }
 
 // runWithTUI drives a pre-push run under the live TUI.
-func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
+func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer) int {
 	br := tui.NewApprover()
 	svc, err := newService(br)
 	if err != nil {
@@ -97,7 +105,7 @@ func runWithTUI(hook domain.Hook, stdout, stderr io.Writer) int {
 	// be watched from another terminal.
 	server := startAttach(svc)
 	defer server.Close()
-	res, err := tui.Run(svc, br, hook, resolved.Steps, server)
+	res, err := tui.Run(ctx, svc, br, hook, resolved.Steps, server)
 	if err != nil {
 		return fail(stderr, err)
 	}

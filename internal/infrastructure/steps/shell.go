@@ -12,6 +12,7 @@ import (
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 // ShellStep runs a configured shell command (lint, test) in the worktree. A
@@ -47,6 +48,9 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = sc.WorktreeDir
 	cmd.Env = stepEnv(sc)
+	// Run in its own process group so a timeout/cancel kills the command's
+	// children (go test, tsc, …), not just the wrapping shell.
+	proc.Isolate(cmd)
 	out, err := runCaptured(cmd, sc)
 	if err != nil {
 		msg := strings.TrimSpace(string(out))

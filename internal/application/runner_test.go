@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -560,6 +561,64 @@ func TestRunner_RejectedGateDoesNotPush(t *testing.T) {
 	}
 	if git.pushed {
 		t.Error("a declined gate must not push")
+	}
+}
+
+// TestRunner_CancelledContextAbortsWithoutPushing proves a run whose context is
+// already cancelled (Ctrl-C / SIGTERM at the CLI boundary) aborts at the push
+// gate instead of falling through to auto-approval and pushing. prePushCfg does
+// NOT require approval, so without the guard the gate would silently auto-approve
+// and push even though the developer interrupted the run.
+func TestRunner_CancelledContextAbortsWithoutPushing(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	res, err := r.Run(ctx, domain.PrePush)
+	if err != nil {
+		t.Fatalf("a cancelled run should abort cleanly, not error: %v", err)
+	}
+	if res.Outcome != domain.OutcomeAborted {
+		t.Fatalf("outcome = %s, want aborted", res.Outcome)
+	}
+	if git.pushed {
+		t.Error("a cancelled run must not push")
+	}
+	if kernel.approved {
+		t.Error("a cancelled run must not reach the approve/push step")
+	}
+	if !git.wt.removed {
+		t.Error("worktree must be torn down even on a cancelled run")
+	}
+}
+
+// TestRunner_BatchStepErrorStillRemovesWorktree proves that when a parallel
+// batch step fails operationally — the shape a recovered panic takes, since
+// ExecuteBatch converts a worker panic into a per-step error — the run surfaces
+// the error, does not push, and still tears down its worktree via the deferred
+// cleanup (the leak the panic guard prevents).
+func TestRunner_BatchStepErrorStillRemovesWorktree(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{
+		outcomes: map[domain.StepName]domain.StepStatus{},
+		execErr:  errors.New("step lint panicked: boom"),
+	}
+	cfg := prePushCfg() // steps: test, lint
+	par := true
+	cfg.Parallel = &par // run them as one parallel batch through ExecuteBatch
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err == nil {
+		t.Fatal("a batch step error must propagate as a run error")
+	}
+	if git.pushed {
+		t.Error("a batch step error must block the push")
+	}
+	if !git.wt.removed {
+		t.Error("worktree must be torn down even when a batch step errors")
 	}
 }
 

@@ -341,6 +341,12 @@ func (r *Runner) withStream(sc StepContext) StepContext {
 // and a push failure aborts the run. On success the push executor has already
 // performed the real push.
 func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Kernel) error {
+	// A run cancelled before the gate (Ctrl-C / SIGTERM) must never fall through
+	// to the auto-approval path and push. Abort cleanly instead of pushing.
+	if err := ctx.Err(); err != nil {
+		return run.Abort("run cancelled before push")
+	}
+
 	gate, err := kernel.Execute(ctx, domain.StepPush)
 	if err != nil {
 		return err
@@ -361,6 +367,15 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 	if !decision.Approved {
 		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)
 		return run.Reject("approval declined")
+	}
+
+	// Re-check cancellation right before the irreversible push: on the
+	// auto-approval path there is no approver interaction to surface a
+	// cancellation, so a Ctrl-C between the gate opening and here would
+	// otherwise still push. Reject the pending gate and abort.
+	if err := ctx.Err(); err != nil {
+		_, _ = kernel.Reject(ctx, gate.SessionID, "warden-cancelled", "run cancelled before push")
+		return run.Abort("run cancelled before push")
 	}
 
 	if _, err := kernel.Approve(ctx, gate.SessionID, decision.Principal, decision.Rationale); err != nil {

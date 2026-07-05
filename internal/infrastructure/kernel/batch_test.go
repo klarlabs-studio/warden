@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,6 +39,41 @@ func (s *concurrentStep) Run(_ context.Context, _ application.StepContext) (doma
 		Findings: []domain.Finding{{Severity: domain.SeverityLow, Message: string(s.name)}},
 		Summary:  "ran",
 	}, nil
+}
+
+// panicStep panics inside Run, standing in for a step (or the executor it
+// drives) that blows up while running in a parallel batch worker.
+type panicStep struct{ name domain.StepName }
+
+func (s panicStep) Name() domain.StepName { return s.name }
+func (s panicStep) Run(context.Context, application.StepContext) (domain.StepResult, error) {
+	panic("boom in a parallel step")
+}
+
+// TestExecuteBatch_RecoversStepPanic proves a panicking step in a parallel batch
+// is turned into a per-step error rather than an unrecovered goroutine panic —
+// which would crash the whole gate and skip the runner's deferred worktree
+// teardown (leaking the isolated worktree).
+func TestExecuteBatch_RecoversStepPanic(t *testing.T) {
+	names := []domain.StepName{domain.StepTest, domain.StepLint}
+	reg := application.Registry{
+		domain.StepTest: &fakeStep{name: domain.StepTest, status: domain.StepPass},
+		domain.StepLint: panicStep{name: domain.StepLint},
+	}
+	p := policyFor(names...)
+	p.Commands = map[string]string{}
+	k, err := NewFactory(reg).New(p, application.StepContext{}, new([]domain.Finding), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = k.ExecuteBatch(context.Background(), names, nil)
+	if err == nil {
+		t.Fatal("a panicking step must surface as an error, not crash the process")
+	}
+	if !strings.Contains(err.Error(), "panicked") || !strings.Contains(err.Error(), string(domain.StepLint)) {
+		t.Errorf("error should name the panicking step, got: %v", err)
+	}
 }
 
 func TestExecuteBatch_RunsConcurrentlyAndFoldsEvidenceInOrder(t *testing.T) {
