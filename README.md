@@ -158,7 +158,7 @@ steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
 parallel: true   # default — run independent checks concurrently (see below)
-writes: [codegen]   # steps that edit the tree — run as barriers, never in a parallel batch
+writes: [codegen]   # steps whose tree writes must be KEPT — run as sequential barriers (not isolated/discarded)
 symlink_deps: false   # default false = hardlink-copy node_modules into the worktree (works with Turbopack); true = fast symlink
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
 notify: true     # default — desktop notification when an interactive pre-push finishes
@@ -183,19 +183,25 @@ gate — including a `schedule:` line that shows exactly which steps run at once
 
 ### Parallel steps
 
-By default Warden runs independent, read-only checks concurrently, so the gate
-is as slow as the slowest check, not the sum of all of them:
+By default Warden runs independent steps concurrently, so the gate is as slow as
+the slowest step, not the sum of all of them:
 
 ```
-schedule:  intent → rebase → [review ∥ test ∥ document ∥ lint]
+schedule:  intent → rebase → [review ∥ document ∥ test ∥ lint]
 ```
 
-A step stays a **sequential barrier** (runs alone, in order) when it writes to
-the worktree: `rebase` (rewrites history) and any step given an `auto_fix`
-budget. Steps around a barrier still parallelize. Like `lefthook`'s parallel
-mode, a step that runs concurrently must not modify tracked files — give it an
-`auto_fix` budget (which serializes it) if it needs to. Set `parallel: false` to
-force the classic one-step-at-a-time pipeline.
+Every concurrent step runs in its **own ephemeral worktree** cloned from the
+run's worktree, so steps can't race each other — even a coding-agent step
+(`review`/`document`/`intent`) that edits files runs isolated, and its writes are
+discarded when the batch finishes (only its findings are kept).
+
+A step is instead a **sequential barrier** — it runs alone, in order, in the
+shared worktree with its writes preserved — when its changes must be *kept*:
+`rebase` (rewrites history), any step given an `auto_fix` budget (its fixes are
+folded back into the tree), or a step you list under `writes:`. So to have a step
+persist tracked-file changes — a codegen command, or a `document` agent that must
+keep its docs — give it an `auto_fix` budget or add it to `writes:`. Set
+`parallel: false` to force the classic one-step-at-a-time pipeline.
 
 On an interactive terminal the pre-push run shows a live TUI: a spinner and a
 counting-up timer per step, a tail of each running step's output as it streams,
