@@ -1,9 +1,27 @@
 package domain
 
+import "regexp"
+
 // StepName identifies a pipeline step. Built-in steps have reserved names;
 // custom steps supplied by a repo author use any other name and run through
 // the subprocess adapter.
 type StepName string
+
+// stepNameRe is the allowlist for a syntactically safe step name: an
+// alphanumeric start followed by alphanumerics, '-' or '_'. It deliberately
+// excludes path separators, '.', whitespace and shell metacharacters.
+var stepNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+// Valid reports whether s is a syntactically safe step name. This is the
+// security allowlist that keeps a repo-authored custom step name from smuggling
+// a path separator or shell metacharacter into
+// exec.LookPath("warden-step-"+name): a name like "x/evil" or "../../bin/sh"
+// would otherwise be treated by LookPath as a relative path and execute a
+// repo-committed binary instead of resolving a trusted step off PATH. All
+// built-in step names satisfy this pattern.
+func (s StepName) Valid() bool {
+	return stepNameRe.MatchString(string(s))
+}
 
 // Built-in steps. The default pre-push order is the sequence below.
 const (
