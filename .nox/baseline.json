@@ -79,48 +79,6 @@
       "created_at": "2026-07-02T07:38:12.199936Z"
     },
     {
-      "fingerprint": "a53b03782c08e98a25b89ca8b2fce6a6281cc3da9f2d5756ba6daba114025b3a",
-      "rule_id": "SEC-163",
-      "file_path": "internal/infrastructure/importer/importer_test.go",
-      "severity": "medium",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
-      "fingerprint": "2301150688926a9041b5e86a4836dc3b8ad110fe60b7d3c0b6d6b80c5293669b",
-      "rule_id": "SEC-659",
-      "file_path": "internal/cli/cli_extra_test.go",
-      "severity": "high",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
-      "fingerprint": "e896b893ce03f49b0a28bc1e9e311eebf36e944b2d9bf522eff3bf9c66ea5ea1",
-      "rule_id": "SEC-697",
-      "file_path": "internal/policy/resolve_test.go",
-      "severity": "high",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
-      "fingerprint": "639ab77bc603367a07e1bb261f3da1c1fab4d6ec089a665f04dc26e68e5077e4",
-      "rule_id": "SEC-697",
-      "file_path": "internal/policy/resolve_test.go",
-      "severity": "high",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
-      "fingerprint": "0b5bbb96dc204724cd3f8f94ee40518cf048ca5f96d70f4924b308bcd355d793",
-      "rule_id": "VULN-001",
-      "file_path": "go.sum",
-      "severity": "medium",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
-      "fingerprint": "114e0dcc4d2e02d8ff7827bf44b6d86e7e778cc29a4c56761b5ba115fff56530",
-      "rule_id": "VULN-001",
-      "file_path": "go.sum",
-      "severity": "medium",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
       "fingerprint": "e4bfe5d0e0587f22b90f3414dccab424009373e6e328d3174aee171a92d7775f",
       "rule_id": "VULN-001",
       "file_path": "go.sum",
@@ -144,84 +102,12 @@
       "created_at": "2026-07-02T18:46:19.746484Z"
     },
     {
-      "fingerprint": "c438237c3f5bff51a54307e7fdbbfca964c31b033de04ed070d42845d7f6755e",
-      "rule_id": "SEC-163",
-      "file_path": "internal/application/runner_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "39594d9662b481a7843813f368b6add6e998f82e045819e60ca40441cded1956",
-      "rule_id": "SEC-163",
-      "file_path": "internal/cli/cmd_key.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "a83b1b7b319864f7792b5d2f8df4c9c682d2d6366f2568b0450fade270da88b1",
-      "rule_id": "SEC-163",
-      "file_path": "internal/cli/cmd_verify.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
       "fingerprint": "293870333c5f9c0b66ff26d99ef76e268ebe0e2ccde126540d51f8f8b6e8afa9",
       "rule_id": "SEC-163",
       "file_path": "internal/domain/signature_test.go",
       "severity": "medium",
       "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
       "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "969d3cd3fc551380c99262d78d03498c998f237a65f3271fcee6dfa2ea340822",
-      "rule_id": "SEC-163",
-      "file_path": "internal/domain/signature_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "055e96bac14f39d7a3d50eb67b81cee6607bfbb894c4929581b82cc06a87232d",
-      "rule_id": "SEC-163",
-      "file_path": "internal/infrastructure/signing/signer_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "abb60f60a183c73cc5f5664b6dc2dc62ed388925f9631c9771a0563b65e2b75f",
-      "rule_id": "SEC-163",
-      "file_path": "internal/infrastructure/signing/signer_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
-    },
-    {
-      "fingerprint": "ec1fefc1c3185f6aced6ea3c32832b3d2f91451f016bcb7979d926f16cb81617",
-      "rule_id": "SEC-163",
-      "file_path": "internal/cli/cmd_signing_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections in signing test files (assertion strings / fake fingerprint fixtures, no real secrets).",
-      "created_at": "2026-07-02T19:11:56.185931Z"
-    },
-    {
-      "fingerprint": "3654c949467617109baaab1b051429243a963950e1d79a0b81ce4d9f2e2f817b",
-      "rule_id": "SEC-163",
-      "file_path": "internal/service/signing_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections in signing test files (assertion strings / fake fingerprint fixtures, no real secrets).",
-      "created_at": "2026-07-02T19:11:56.185931Z"
-    },
-    {
-      "fingerprint": "cffb8626b7d4b602b8bdf45ebe3320f454f61e6fa14c753c9eaf957c8347ffa2",
-      "rule_id": "SEC-659",
-      "file_path": "internal/infrastructure/steps/stream_test.go",
-      "severity": "high",
-      "reason": "False-positive \"split API key\" on a test assertion string in stream_test.go (no real secret).",
-      "created_at": "2026-07-02T19:20:26.535032Z"
     },
     {
       "fingerprint": "bc8d51248f7156d8a1a5e352a5320e49d273c948c2c398b5ff7d6ff5ad601200",
@@ -248,174 +134,6 @@
       "created_at": "2026-07-02T19:26:35.649907Z"
     },
     {
-      "fingerprint": "6f39cc8f986f8e9a5fcdc6ec04d94411270bdb81d0dcb6f0ac5cb29c98cd09ad",
-      "rule_id": "SEC-384",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "7a1f5cbd2e44155c44f32e2a78d8345ec8c4839988401182c23ec6fa94c703e3",
-      "rule_id": "SEC-384",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "3612b90c4fca3a5ecbfb4f1f7d924fa6099a4ac6483b6d3445edc5cd72126ada",
-      "rule_id": "SEC-505",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "665c9af5be402e3c995a1e8c8caa131316b2ef940046ef596fafa3ac3ecc1ace",
-      "rule_id": "SEC-505",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "24f6cb5f160ad2d2c20dada14f18ea81a8933f23bb52927413de857d76c7d55c",
-      "rule_id": "SEC-506",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "04ef256e7cbb7030e036c2e054d5bd4666697747bdb641b0f18854dbaf3b8461",
-      "rule_id": "SEC-506",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "93900296b50f195093c76c3231780686edef4f7bfb36a26c39fe153ee4020437",
-      "rule_id": "SEC-525",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "6930c36f424486ab2c833441529a84de6aaccd37961b719faa40054c59f862a2",
-      "rule_id": "SEC-525",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "58271b5e48e25219aa26f40732bc0f94503d97569330da6916be900930a46bdc",
-      "rule_id": "SEC-543",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "d8f8fb039f0aaa86aec94dcc4aa0e2f792ecb633c50358b02499e973965ca3a1",
-      "rule_id": "SEC-543",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "9387669fb27074dece11b3362784e54db865f0b8e54b29e2c3278ca783eb1102",
-      "rule_id": "SEC-621",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "0cec925652e266857bede0c607e5d7c32cdb6aa40aed9228ef4d0f37f50d2926",
-      "rule_id": "SEC-621",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "904113f832ef710a47d303daceeae90f63d524826782d90f4911e9e2f4472cd1",
-      "rule_id": "SEC-678",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "3803fcae0179d36bdcbf60433425ac8176769208d325cfb22d82e9d585d6f730",
-      "rule_id": "SEC-678",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "076e7b859c1d3bdbd6a143bb9a9b6e4b5f191e754544bcc22fd8529b7a6707b4",
-      "rule_id": "SEC-679",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "f9bf80aa4a711726c43fcacc7b94bd01c51ba2a3282c2840fc6a32be033569fd",
-      "rule_id": "SEC-679",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-03T08:10:00Z"
-    },
-    {
-      "fingerprint": "497a79668b769db60cb7b3789b9552dc03aed05aa9cb0eaf6ca31084d58d219e",
-      "rule_id": "SEC-384",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "4928506223648f2ab2c5dfd3842c6a368f73858f34b3d7ff2994b8fd69f2672b",
-      "rule_id": "SEC-505",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "974b86e80553490642d223906df511c5a0c89ce008e700705d6c22168d21f11a",
-      "rule_id": "SEC-506",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "6214238e534c7b770adaef77db30eee27f615f0b3632ebd0bce0b170777cf087",
-      "rule_id": "SEC-525",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "049d7c58725daaa668565ac26ea2d5fe0bbd7f6f7fac8d2360c1fbefbde7a29d",
-      "rule_id": "SEC-543",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "b45e70bea150e9cb270759d812843e71f2d78fb0cac96984da70ca3bad76ec50",
-      "rule_id": "SEC-621",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "ced1aa8866ebf02e7be88cfcc1e73f8bcce0341b4ed7d81d7a26b4cfd646f59c",
-      "rule_id": "SEC-678",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
-      "fingerprint": "b9763617020250ac18ea18cf24031f508d9cdea8f4180721909b721ae75be325",
-      "rule_id": "SEC-679",
-      "file_path": "README.md",
-      "severity": "high",
-      "created_at": "2026-07-05T00:00:00Z"
-    },
-    {
       "fingerprint": "4da2ab2e8a1568ed77c34c43d4300b9832edda20314f01fae4569a227612fbb8",
       "rule_id": "IAC-351",
       "file_path": ".github/workflows/release.yml",
@@ -428,6 +146,55 @@
       "file_path": ".goreleaser.yaml",
       "severity": "critical",
       "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "be245a4499fe01a73e9664baf0ed8c855e243ef4da2b278bd541e113a9dfae2e",
+      "rule_id": "IAC-306",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "medium",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "e1554234f2648e228852b17f658105d9b0412eb846c77eeb346bc59f1bf71fa3",
+      "rule_id": "IAC-306",
+      "file_path": ".goreleaser.yaml",
+      "severity": "medium",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "52922952e40b8c5ebd4fef0969dd782d57266e9ecccc4e9bddc9be74f0f6daa2",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/nox-remediate.yml",
+      "severity": "low",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "8378df7a1d4adb5806616a668bc89e456b48fe9b7212ca5799b5b8eddbe0ae9c",
+      "rule_id": "IAC-314",
+      "file_path": ".github/workflows/nox-remediate.yml",
+      "severity": "medium",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "c9e50a4cce742cbc5831005695c97808279cafa996b44400d4fa75c12bef2148",
+      "rule_id": "TAINT-006",
+      "file_path": "scripts/install.ps1",
+      "severity": "high",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "0b5bbb96dc204724cd3f8f94ee40518cf048ca5f96d70f4924b308bcd355d793",
+      "rule_id": "VULN-001",
+      "file_path": "go.sum",
+      "severity": "medium",
+      "created_at": "2026-07-06T11:00:32.671126Z"
+    },
+    {
+      "fingerprint": "114e0dcc4d2e02d8ff7827bf44b6d86e7e778cc29a4c56761b5ba115fff56530",
+      "rule_id": "VULN-001",
+      "file_path": "go.sum",
+      "severity": "medium",
+      "created_at": "2026-07-06T11:00:32.671126Z"
     }
   ]
 }
