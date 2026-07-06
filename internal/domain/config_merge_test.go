@@ -115,9 +115,13 @@ func TestStepNameValid(t *testing.T) {
 
 func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 	cases := map[string]Config{
-		"steps":        {Steps: map[string][]StepName{"pre_push": {"lint", "x/evil"}}},
-		"rule-add":     {Rules: []Rule{{Then: Then{Steps: map[string]StepEdit{"pre_push": {Add: []StepName{"../evil"}}}}}}},
-		"rule-autofix": {Rules: []Rule{{Then: Then{AutoFix: map[StepName]int{"a;b": 1}}}}},
+		"steps":                  {Steps: map[string][]StepName{"pre_push": {"lint", "x/evil"}}},
+		"rule-add":               {Rules: []Rule{{Then: Then{Steps: map[string]StepEdit{"pre_push": {Add: []StepName{"../evil"}}}}}}},
+		"rule-autofix":           {Rules: []Rule{{Then: Then{AutoFix: map[StepName]int{"a;b": 1}}}}},
+		"notify_after-nounit":    {NotifyAfter: "10"},
+		"notify_after-garbage":   {NotifyAfter: "soon"},
+		"notify_after-negative":  {NotifyAfter: "-5s"},
+		"notify_after-typo-unit": {NotifyAfter: "10ss"},
 	}
 	for name, cfg := range cases {
 		if err := cfg.Validate(); err == nil {
@@ -125,8 +129,9 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		}
 	}
 	ok := Config{
-		Steps: map[string][]StepName{"pre_push": {"intent", "review", "security-scan"}},
-		Rules: []Rule{{Then: Then{AutoFix: map[StepName]int{"lint": 1}, Agent: map[StepName]string{"review": "codex"}}}},
+		Steps:       map[string][]StepName{"pre_push": {"intent", "review", "security-scan"}},
+		Rules:       []Rule{{Then: Then{AutoFix: map[StepName]int{"lint": 1}, Agent: map[StepName]string{"review": "codex"}}}},
+		NotifyAfter: "45s",
 	}
 	if err := ok.Validate(); err != nil {
 		t.Errorf("valid config rejected: %v", err)

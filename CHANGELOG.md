@@ -14,7 +14,9 @@ All notable changes to warden are documented here. The format follows
   on every push (previously it fired after every run, despite the docs saying it
   was for long ones). A *failed/blocked* push always notifies regardless of
   duration, so a stopped push is never missed. `notify: false` still silences
-  everything.
+  everything. A malformed or negative `notify_after` (e.g. `10` with no unit) is
+  now rejected at config load with a clear error, instead of silently reverting
+  to the default and leaving the threshold mysteriously ineffective.
 
 ## [0.12.0] — 2026-07-05
 

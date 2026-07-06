@@ -14,7 +14,8 @@ import (
 //     green gate stays quiet (the over-firing bug this fixes);
 //   - a FAILED/blocked push always notifies, however fast, so a stopped push is
 //     never missed;
-//   - a malformed notify_after falls back to the default rather than erroring.
+//   - a malformed notify_after is rejected at config load (Config.Validate); the
+//     helper still falls back defensively should one reach it programmatically.
 func TestShouldNotify(t *testing.T) {
 	on, off := true, false
 	pass, fail := domain.OutcomePassed, domain.OutcomeFailed
@@ -39,7 +40,8 @@ func TestShouldNotify(t *testing.T) {
 		{"notify_after=1m: 60s pass notifies", domain.Config{NotifyAfter: "1m"}, pass, time.Minute, true},
 		{"notify_after=2s: 3s pass notifies", domain.Config{NotifyAfter: "2s"}, pass, 3 * time.Second, true},
 
-		// Malformed notify_after → default 10s threshold.
+		// Defense-in-depth: a malformed value is rejected by Config.Validate at
+		// load, but if one is constructed past it the helper falls back to 10s.
 		{"bad notify_after falls back: 5s pass quiet", domain.Config{NotifyAfter: "nonsense"}, pass, 5 * time.Second, false},
 		{"bad notify_after falls back: 10s pass notifies", domain.Config{NotifyAfter: "nonsense"}, pass, notifyAfter, true},
 	}
@@ -52,8 +54,10 @@ func TestShouldNotify(t *testing.T) {
 	}
 }
 
-// TestNotifyThreshold checks the notify_after resolution: configured value wins,
-// empty and malformed both fall back to the default.
+// TestNotifyThreshold checks the notify_after resolution: a configured value
+// wins; empty falls back to the default. Malformed/negative inputs are rejected
+// upstream by Config.Validate, but the helper stays defensive and also falls
+// back on them, which these cases pin.
 func TestNotifyThreshold(t *testing.T) {
 	cases := []struct {
 		notifyAfterCfg string
