@@ -52,6 +52,9 @@ func (c Config) OverlayOnto(base Config) Config {
 	if c.Notify != nil {
 		out.Notify = c.Notify
 	}
+	if c.NotifyAfter != "" {
+		out.NotifyAfter = c.NotifyAfter
+	}
 	// Rules stack: base first (broad), then the child's (repo-specific).
 	if len(c.Rules) > 0 {
 		out.Rules = append(append([]Rule(nil), base.Rules...), c.Rules...)

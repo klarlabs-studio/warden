@@ -74,6 +74,12 @@ type Config struct {
 	// finishes. Unset (nil) defaults to enabled; set `notify: false` to silence.
 	Notify *bool `yaml:"notify"`
 
+	// NotifyAfter is the minimum run duration before a PASSING interactive
+	// pre-push fires a desktop notification (e.g. "30s", "2m"). Empty defaults
+	// to 10s. A failed/blocked push always notifies regardless of duration.
+	// Ignored when notify is false. A malformed value falls back to the default.
+	NotifyAfter string `yaml:"notify_after"`
+
 	Risk RiskConfig `yaml:"risk"`
 
 	// PR configures optional pull-request creation after a passing push.

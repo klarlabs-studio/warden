@@ -161,7 +161,8 @@ parallel: true   # default — run independent checks concurrently (see below)
 writes: [codegen]   # steps whose tree writes must be KEPT — run as sequential barriers (not isolated/discarded)
 symlink_deps: false   # default false = hardlink-copy node_modules into the worktree (works with Turbopack); true = fast symlink
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this
-notify: true     # default — desktop notification when an interactive pre-push finishes
+notify: true     # default — desktop notification after a slow interactive pre-push (a failed/blocked push always notifies)
+notify_after: 10s   # default — a *passing* run only notifies once it ran at least this long (fast green gates stay silent)
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
