@@ -122,6 +122,10 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		"notify_after-garbage":   {NotifyAfter: "soon"},
 		"notify_after-negative":  {NotifyAfter: "-5s"},
 		"notify_after-typo-unit": {NotifyAfter: "10ss"},
+		"timeout-nounit":         {Timeouts: map[string]string{"test": "30"}},
+		"timeout-garbage":        {Timeouts: map[string]string{"test": "soon"}},
+		"timeout-negative":       {Timeouts: map[string]string{"lint": "-5s"}},
+		"timeout-typo-unit":      {Timeouts: map[string]string{"review": "5mm"}},
 	}
 	for name, cfg := range cases {
 		if err := cfg.Validate(); err == nil {
@@ -132,6 +136,8 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		Steps:       map[string][]StepName{"pre_push": {"intent", "review", "security-scan"}},
 		Rules:       []Rule{{Then: Then{AutoFix: map[StepName]int{"lint": 1}, Agent: map[StepName]string{"review": "codex"}}}},
 		NotifyAfter: "45s",
+		// "5m" is a real limit; "0" is the explicit no-limit marker — both valid.
+		Timeouts: map[string]string{"test": "5m", "review": "0"},
 	}
 	if err := ok.Validate(); err != nil {
 		t.Errorf("valid config rejected: %v", err)
