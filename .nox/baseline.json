@@ -428,6 +428,14 @@
       "file_path": ".goreleaser.yaml",
       "severity": "critical",
       "created_at": "2026-07-05T00:00:00Z"
+    },
+    {
+      "fingerprint": "c9e50a4cce742cbc5831005695c97808279cafa996b44400d4fa75c12bef2148",
+      "rule_id": "TAINT-006",
+      "file_path": "scripts/install.ps1",
+      "severity": "high",
+      "reason": "install.ps1: 'archive' flows from an operator-set env var (the user running the installer picks the archive/version), not attacker-controlled input; SSRF sink accepted as an install-time override, not a live vulnerability.",
+      "created_at": "2026-07-06T11:42:16.332959Z"
     }
   ]
 }
