@@ -115,7 +115,22 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	maybeNotify(svc, res, time.Since(start))
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.
+	noteGitPushError(stdout, res)
 	return 1
+}
+
+// noteGitPushError, on a SUCCESSFUL pre-push, prints a heads-up that git is
+// about to print "error: failed to push some refs". Warden already pushed the
+// gated commit itself and then fails the hook on purpose so git's own redundant
+// push can't proceed (see cmdRun) — that non-zero exit is exactly what makes git
+// emit the error. Without this line a normal successful push ends on a red
+// "error:" and reads as a failure. On a real failure (push blocked) git's error
+// is correct, so we stay silent and let it stand.
+func noteGitPushError(w io.Writer, res application.RunResult) {
+	if res.Outcome != domain.OutcomePassed {
+		return
+	}
+	fmt.Fprintln(w, `warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit.`)
 }
 
 // notifyAfter is the DEFAULT run duration above which a passing interactive
@@ -194,6 +209,7 @@ func runPreCommitExit(svc interface{ ApplyFixPatch(string) error }, res applicat
 // runPrePushExit reports the outcome and always returns non-zero (see cmdRun).
 func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	fmt.Fprintf(stdout, "warden: %s\n", res.Message)
+	noteGitPushError(stdout, res)
 	return 1
 }
 

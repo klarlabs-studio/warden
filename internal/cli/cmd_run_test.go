@@ -1,11 +1,40 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
+	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 )
+
+// TestNoteGitPushError pins the pre-push heads-up: on a passing run warden warns
+// that git's imminent "failed to push some refs" is expected (warden already
+// pushed the gated commit and fails the hook on purpose), and on any non-pass it
+// stays silent so git's genuinely-correct error stands on its own.
+func TestNoteGitPushError(t *testing.T) {
+	cases := []struct {
+		outcome domain.Outcome
+		wantOut bool
+	}{
+		{domain.OutcomePassed, true},
+		{domain.OutcomeFailed, false},
+		{domain.OutcomeRejected, false},
+		{domain.OutcomeAborted, false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.outcome), func(t *testing.T) {
+			var buf bytes.Buffer
+			noteGitPushError(&buf, application.RunResult{Outcome: tc.outcome})
+			got := strings.Contains(buf.String(), "failed to push some refs")
+			if got != tc.wantOut {
+				t.Errorf("outcome %s: printed=%v, want %v (output %q)", tc.outcome, got, tc.wantOut, buf.String())
+			}
+		})
+	}
+}
 
 // TestShouldNotify pins the desktop-notification policy:
 //   - on by default, silenced only by `notify: false`;
