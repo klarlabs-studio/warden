@@ -121,6 +121,31 @@ func (r *Repo) CommitsSince(ref, adoptionSHA string) ([]string, error) {
 	return splitLines(out), nil
 }
 
+// TreeSHA returns a commit's tree object SHA — its content fingerprint,
+// independent of history or commit metadata. Two commits with the same TreeSHA
+// have byte-identical working trees, which is what lets a squash-merge commit be
+// re-attested from the already-validated commit it reproduces.
+func (r *Repo) TreeSHA(commit string) (string, error) {
+	return r.run("rev-parse", commit+"^{tree}")
+}
+
+// NotedCommits returns the commits that carry a refs/notes/warden record — the
+// search space a re-attestation draws its already-validated source from.
+func (r *Repo) NotedCommits() ([]string, error) {
+	out, err := r.run("notes", "--ref", NotesRef, "list")
+	if err != nil {
+		return nil, err
+	}
+	var commits []string
+	for _, line := range splitLines(out) {
+		// each line is "<note-blob-sha> <annotated-commit-sha>"
+		if f := strings.Fields(line); len(f) == 2 {
+			commits = append(commits, f[1])
+		}
+	}
+	return commits, nil
+}
+
 // CommitsInRange returns the SHAs reachable from head back to (but excluding)
 // base — the `base..head` set, newest first — for an arbitrary two-endpoint
 // range gate (`warden verify --range`). When skipMerges is set, merge commits

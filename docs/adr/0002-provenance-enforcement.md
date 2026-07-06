@@ -1,7 +1,8 @@
 # ADR 0002 — Closing the provenance enforcement loop
 
-- Status: **Accepted** (Phases 1–2 done; Phase 3 trusted-key roster done,
-  re-attestation + SLSA output deferred)
+- Status: **Accepted** (Phases 1–3 implemented: `verify --range` gate, the
+  `warden-gate` action, the `trusted_keys` roster, `warden reattest`, and
+  `warden attest` in-toto output)
 - Date: 2026-07-06
 
 ## Context
@@ -105,18 +106,23 @@ security-critical production side is untouched.
   cryptographic self-signature was considered and deferred: it only moves the
   trust root (who signs the roster?) without adding assurance over a reviewed,
   gated, version-controlled file. `warden key list` shows the effective roster.
-- **Merge-time re-attestation (deferred — needs hosted infra).** Re-signing the
-  squash commit `Y` requires a GitHub App with write access and a bot signing
-  key — a hosted component and a new credential to secure, out of scope for the
-  CLI. Interim mitigation: the Phase-2 gate already proves the *source* commits
-  were validated before the merge; a post-squash `doctor` on the base branch
-  will show squash commits as unverified, which teams scope out or accept until
-  this lands as its own service.
-- **in-toto / SLSA source attestations (deferred — no consumer yet).** A
-  `warden attest` that projects a `RunRecord` into an in-toto statement is pure
-  CLI work and worth doing once a concrete downstream (sigstore / GUAC / a policy
-  engine) is wired up to consume it. Building the format before the consumer
-  risks guessing the shape wrong.
+- **Post-merge re-attestation (done — `warden reattest`, no hosted infra).** The
+  original sketch was a GitHub App with a bot signing key; a cleaner design
+  replaced it. A squash commit `Y` reproduces the gated PR head `X`'s tree
+  *exactly* (`git rev-parse Y^{tree} == X^{tree}`), so `warden reattest` — run
+  **locally** by a maintainer whose key is already trusted — finds the
+  tree-identical, intact, validly-signed source note, carries its evidence onto
+  `Y`, marks it `ReattestedFrom: X`, and re-signs locally. This needs **no new
+  trusted CI key and no hosted component** — it's a local vouch over
+  byte-identical content, and it fails safe: with no tree-identical validated
+  source, it writes nothing (never asserts validation that didn't happen). Closes
+  the squash-merge gap so `doctor`/`audit` on the base branch stay green.
+- **in-toto / SLSA source attestations (done — `warden attest`).** Projects a
+  commit's `RunRecord` into an in-toto Statement v1 with a warden-specific
+  predicate type (`https://warden.klarlabs.de/provenance/v1`) — deliberately not
+  `slsa.dev/provenance`, since warden attests *source* review/test provenance,
+  not *build* provenance. Read-only; wrap in a DSSE envelope / `cosign attest` to
+  sign the statement. Feeds sigstore / GUAC / policy engines.
 
 ## Consequences
 
@@ -135,7 +141,7 @@ security-critical production side is untouched.
 Phase 1 landed as `warden verify --range` with `--require-signed`, `--key`,
 `--json`, `--skip-merges`. Phase 2 landed as the `warden-gate` composite action
 (`.github/actions/warden-gate`) plus a self-hosted pre-receive recipe — see
-[docs/ci-provenance-gate.md](../ci-provenance-gate.md). Phase 3's trusted-signer
-roster landed as `.warden.yaml` `trusted_keys` (+ `warden key list`); squash
-re-attestation and in-toto/SLSA output
-follows.
+[docs/ci-provenance-gate.md](../ci-provenance-gate.md). Phase 3 landed in full: the
+trusted-signer roster (`.warden.yaml` `trusted_keys` + `warden key list`),
+post-merge re-attestation (`warden reattest`), and in-toto output (`warden
+attest`). The enforcement loop is closed end to end.
