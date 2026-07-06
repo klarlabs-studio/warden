@@ -1,7 +1,9 @@
 agent: auto
 hooks:
   pre_commit: true
-  pre_push: false
+  # pre-push writes + pushes the refs/notes/warden provenance the required
+  # `gate` check depends on; keep it enabled so a hooks-sync can't drop the shim.
+  pre_push: true
 commands:
   # Mirror CI stage 1: golangci-lint runs gofmt/goimports formatters + govet +
   # staticcheck + gocritic, so one command is the whole quality gate.
