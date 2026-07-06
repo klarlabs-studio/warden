@@ -25,7 +25,8 @@ type Config struct {
 
 	// Timeouts maps a step to a max duration (e.g. "5m", "30s"). A step that
 	// exceeds it is killed and fails, so a wedged test or agent can't hang the
-	// gate. Unset or unparseable = no timeout.
+	// gate. Unset or "0" = no timeout; a malformed or negative value is rejected
+	// at config load (see Validate) rather than silently meaning "no limit".
 	Timeouts map[string]string `yaml:"timeouts"`
 
 	// Cache maps a step to the input path globs it depends on. When every matched
@@ -145,13 +146,33 @@ func (c Config) Validate() error {
 	// snapping back to the 10s default and leaving the operator to wonder why
 	// their threshold never took effect.
 	if c.NotifyAfter != "" {
-		d, err := time.ParseDuration(c.NotifyAfter)
-		if err != nil {
-			return fmt.Errorf("invalid notify_after %q: must be a Go duration such as \"30s\" or \"2m\": %w", c.NotifyAfter, err)
+		if err := validateDuration("notify_after", c.NotifyAfter); err != nil {
+			return err
 		}
-		if d < 0 {
-			return fmt.Errorf("invalid notify_after %q: must not be negative", c.NotifyAfter)
+	}
+	// Each timeout, when set, must likewise be a valid non-negative Go duration.
+	// The stakes are higher than notify_after: a malformed value ("30" with no
+	// unit, "5mm") parses to nothing downstream and silently means "no limit", so
+	// a wedged step would hang the gate unbounded — the exact opposite of what a
+	// safety timeout is for. "0" is allowed as the explicit no-limit marker.
+	for step, s := range c.Timeouts {
+		if err := validateDuration(fmt.Sprintf("timeout for step %q", step), s); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// validateDuration reports why a config duration string is unusable, or nil if
+// it is a valid non-negative Go duration. field names the setting for the error
+// (e.g. "notify_after"). Empty is the caller's to allow or reject before calling.
+func validateDuration(field, value string) error {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("invalid %s %q: must be a Go duration such as \"30s\" or \"5m\": %w", field, value, err)
+	}
+	if d < 0 {
+		return fmt.Errorf("invalid %s %q: must not be negative", field, value)
 	}
 	return nil
 }

@@ -17,6 +17,12 @@ All notable changes to warden are documented here. The format follows
   everything. A malformed or negative `notify_after` (e.g. `10` with no unit) is
   now rejected at config load with a clear error, instead of silently reverting
   to the default and leaving the threshold mysteriously ineffective.
+- **A malformed `timeouts` value now fails config load** instead of silently
+  meaning "no limit". A typo'd step timeout (`30` with no unit, `5mm`, or a
+  negative duration) used to parse to nothing and leave the step with no limit at
+  all — so a wedged test or agent could hang the gate unbounded, the exact
+  opposite of what the timeout is for. `Validate` now rejects it at load with a
+  clear error; `"0"` remains the explicit no-limit marker.
 
 ## [0.12.0] — 2026-07-05
 

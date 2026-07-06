@@ -14,8 +14,10 @@ import (
 )
 
 // parseTimeouts converts the config's step→duration-string map into parsed
-// durations, silently dropping any unparseable entry (a bad value means no
-// limit rather than a hard config error, matching the rest of resolution).
+// durations, treating a non-positive value as "no limit" ("0" is the explicit
+// no-limit marker). Unparseable and negative values are rejected upstream at
+// config load (see domain.Config.Validate), so the err/positivity guards here
+// are defense-in-depth for a config built programmatically past Validate.
 func parseTimeouts(raw map[string]string) map[domain.StepName]time.Duration {
 	if len(raw) == 0 {
 		return nil
