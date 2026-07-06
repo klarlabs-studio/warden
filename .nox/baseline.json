@@ -436,6 +436,46 @@
       "severity": "high",
       "reason": "install.ps1: 'archive' flows from an operator-set env var (the user running the installer picks the archive/version), not attacker-controlled input; SSRF sink accepted as an install-time override, not a live vulnerability.",
       "created_at": "2026-07-06T11:42:16.332959Z"
+    },
+    {
+      "fingerprint": "467016718eafce00cd231a402e18bcf976555fe4fd421a4a9e794aed224a1b91",
+      "rule_id": "",
+      "file_path": "",
+      "severity": "",
+      "reason": "nox 1.7.1 baseline (fingerprints from CI scan; README-prose/IAC-351/install.ps1 false-positives)",
+      "created_at": "2026-07-06T11:46:27.978056Z"
+    },
+    {
+      "fingerprint": "be245a4499fe01a73e9664baf0ed8c855e243ef4da2b278bd541e113a9dfae2e",
+      "rule_id": "",
+      "file_path": "",
+      "severity": "",
+      "reason": "nox 1.7.1 baseline (fingerprints from CI scan; README-prose/IAC-351/install.ps1 false-positives)",
+      "created_at": "2026-07-06T11:46:27.978056Z"
+    },
+    {
+      "fingerprint": "e1554234f2648e228852b17f658105d9b0412eb846c77eeb346bc59f1bf71fa3",
+      "rule_id": "",
+      "file_path": "",
+      "severity": "",
+      "reason": "nox 1.7.1 baseline (fingerprints from CI scan; README-prose/IAC-351/install.ps1 false-positives)",
+      "created_at": "2026-07-06T11:46:27.978057Z"
+    },
+    {
+      "fingerprint": "52922952e40b8c5ebd4fef0969dd782d57266e9ecccc4e9bddc9be74f0f6daa2",
+      "rule_id": "",
+      "file_path": "",
+      "severity": "",
+      "reason": "nox 1.7.1 baseline (fingerprints from CI scan; README-prose/IAC-351/install.ps1 false-positives)",
+      "created_at": "2026-07-06T11:46:27.978057Z"
+    },
+    {
+      "fingerprint": "8378df7a1d4adb5806616a668bc89e456b48fe9b7212ca5799b5b8eddbe0ae9c",
+      "rule_id": "",
+      "file_path": "",
+      "severity": "",
+      "reason": "nox 1.7.1 baseline (fingerprints from CI scan; README-prose/IAC-351/install.ps1 false-positives)",
+      "created_at": "2026-07-06T11:46:27.978057Z"
     }
   ]
 }
