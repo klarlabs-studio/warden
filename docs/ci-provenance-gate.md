@@ -90,8 +90,39 @@ whose commits still carry their notes, and gates the **merge itself**: the check
 must pass *before* the platform rewrites history. Enforce before the squash, not
 after.
 
-(Closing the loop for the post-squash base branch — re-attesting the squash
-commit — is ADR-0002 Phase 3.)
+### Keeping the base branch green after a squash (`warden reattest`)
+
+The gate assures every merge, but the *squash commit itself* on the base branch
+has no note, so `warden doctor`/`audit` on `main` will flag it. Because a squash
+commit reproduces the gated PR head's tree **exactly**, a maintainer can carry
+the provenance across locally — no bot, no CI signing key:
+
+```bash
+git checkout main && git pull
+warden reattest --push          # re-attest HEAD from its tree-identical validated source
+```
+
+`reattest` finds a commit whose tree SHA matches HEAD and whose note is intact,
+commit-bound, and validly signed, then carries that evidence onto the squash
+commit, marks it `reattested_from: <source>`, and re-signs with your (trusted)
+key. It **fails safe**: if nothing content-identical is validated, it writes
+nothing — a re-attestation only relocates a real validation onto byte-identical
+content, it never manufactures one.
+
+### Interop: export provenance as an in-toto attestation (`warden attest`)
+
+To feed warden provenance into the wider supply-chain ecosystem (sigstore,
+GUAC, policy engines), project a commit's note into an in-toto Statement:
+
+```bash
+warden attest --commit HEAD | cosign attest-blob --predicate - …   # sign + publish
+```
+
+It emits an in-toto `Statement/v1` with a warden predicate
+(`https://warden.klarlabs.de/provenance/v1`) carrying the steps run, evidence
+chain, SBOM, signer, and verification status. It is a read-only projection —
+warden attests *source* provenance (reviewed/tested under policy), which is why
+the predicate is warden's own and not `slsa.dev/provenance` (build provenance).
 
 ## Self-hosted: a pre-receive gate
 

@@ -278,6 +278,8 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
+| `warden attest [--commit c]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop) |
+| `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |

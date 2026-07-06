@@ -40,7 +40,13 @@ type RunRecord struct {
 	// signed note cannot be transplanted onto (or replayed against) a different
 	// commit. Empty only on legacy pre-binding notes, which then bind to nothing
 	// and fail verification (fail-closed). See RunRecord.BindsTo and Service.Verify.
-	CommitSHA         string              `json:"commit_sha,omitempty"`
+	CommitSHA string `json:"commit_sha,omitempty"`
+	// ReattestedFrom, when set, is the SHA of an already-validated commit whose
+	// tree this commit exactly reproduces (e.g. the gated PR head a squash-merge
+	// collapsed). The evidence below is carried over from that run and this record
+	// is re-signed locally, so a re-attestation is transparent: it asserts "the
+	// same validated content, under a new commit id" — never a fresh validation.
+	ReattestedFrom    string              `json:"reattested_from,omitempty"`
 	Agent             map[StepName]string `json:"agent"`
 	StepsRun          []StepName          `json:"steps_run"`
 	MatchedRules      []string            `json:"matched_rules"`

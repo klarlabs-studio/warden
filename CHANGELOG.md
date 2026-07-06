@@ -4,6 +4,26 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`warden attest` — export provenance as an in-toto attestation** (ADR-0002
+  Phase 3). Projects a commit's `refs/notes/warden` record into an in-toto
+  `Statement/v1` with a warden predicate type, so provenance can feed sigstore /
+  GUAC / policy engines instead of staying a warden-only note. Read-only; pipe it
+  to `cosign attest` to sign the statement. Uses a warden predicate (not
+  `slsa.dev/provenance`) because warden attests *source*, not *build*, provenance.
+- **`warden reattest` — close the squash-merge provenance gap** (ADR-0002
+  Phase 3). A squash-merge commit reproduces the gated PR head's tree exactly but
+  has no note, so `doctor`/`audit` on the base branch flag it. `warden reattest`
+  (run locally by a maintainer whose key is trusted) finds the tree-identical,
+  intact, validly-signed source note, carries its evidence onto the squash commit
+  marked `reattested_from`, and re-signs locally — **no hosted bot or CI signing
+  key**, a materially simpler design than originally sketched. It fails safe:
+  with no content-identical validated source it writes nothing, never asserting a
+  validation that didn't happen.
+
 ## [0.15.0] — 2026-07-06
 
 ### Added
