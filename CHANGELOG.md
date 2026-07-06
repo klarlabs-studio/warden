@@ -4,6 +4,22 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`warden-gate` action — provenance enforcement as a required check**
+  (ADR-0002 Phase 2). The enforcement counterpart to the `warden-verify`
+  (provenance-skip) reporter: it runs `warden verify --range` on a PR and
+  **fails the check** when any commit lacks trustworthy provenance, so un-gated
+  commits can't merge. It runs on the PR *head* — whose commits still carry
+  their notes — gating the merge *before* GitHub's squash rewrites history (the
+  pragmatic answer to the squash-merge break). Inputs: `key` (trusted roster),
+  `require-signed`, `skip-merges`, `base`/`head` (auto from the PR/push event),
+  `remote`, `warden-version`. Also ships a self-hosted **pre-receive** recipe
+  that rejects the push at the remote. See
+  [docs/ci-provenance-gate.md](docs/ci-provenance-gate.md).
+
 ## [0.14.0] — 2026-07-06
 
 ### Added

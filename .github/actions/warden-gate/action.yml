@@ -1,0 +1,112 @@
+name: "Warden Provenance Gate"
+description: >-
+  Fail a check unless EVERY commit in the range carries trustworthy warden
+  provenance — an intact, commit-bound refs/notes/warden record, and (with
+  `key`) a valid signature from a trusted signer. The enforcement counterpart to
+  warden-verify's provenance-skip: wire it as a required status check so
+  un-gated commits cannot merge. Runs on the PR *head*, so it gates the merge
+  before a squash rewrites history. See ADR-0002.
+
+inputs:
+  base:
+    description: >-
+      Range base, exclusive. Defaults to the PR base commit on pull_request
+      events, or the push's `before` SHA on push events.
+    required: false
+    default: ""
+  head:
+    description: >-
+      Range head, inclusive. Defaults to the PR head commit on pull_request
+      events, or the pushed SHA on push events.
+    required: false
+    default: ""
+  key:
+    description: >-
+      Trusted signer key(s)/fingerprint(s), comma-separated. When set, every
+      commit's note must carry a valid signature from one of these keys —
+      raising the gate from "a warden ran" to "a warden I trust ran". Get a
+      fingerprint with `warden key show`.
+    required: false
+    default: ""
+  require-signed:
+    description: "Require each note to carry a signature that verifies (implied by `key`)."
+    required: false
+    default: "false"
+  skip-merges:
+    description: "Skip merge commits (their parents are gated individually)."
+    required: false
+    default: "true"
+  remote:
+    description: "Remote holding refs/notes/warden."
+    required: false
+    default: origin
+  warden-version:
+    description: "warden version to install (a module version like v0.14.0, or 'latest')."
+    required: false
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    # warden is a Go install; the caller must have run actions/setup-go first,
+    # and checkout with fetch-depth: 0 so the range's history and notes exist.
+    # GOTOOLCHAIN=auto lets `go install` fetch the toolchain warden requires.
+    - name: Install warden
+      shell: bash
+      run: GOTOOLCHAIN=auto go install "go.klarlabs.de/warden@${{ inputs.warden-version }}"
+
+    - name: Fetch warden notes
+      shell: bash
+      run: git fetch "${{ inputs.remote }}" 'refs/notes/warden:refs/notes/warden' || true
+
+    - name: Gate the range
+      shell: bash
+      env:
+        IN_BASE: ${{ inputs.base }}
+        IN_HEAD: ${{ inputs.head }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        PUSH_HEAD: ${{ github.sha }}
+        KEY: ${{ inputs.key }}
+        REQUIRE_SIGNED: ${{ inputs.require-signed }}
+        SKIP_MERGES: ${{ inputs.skip-merges }}
+      run: |
+        set -euo pipefail
+        BASE="${IN_BASE:-${PR_BASE:-$PUSH_BEFORE}}"
+        HEAD="${IN_HEAD:-${PR_HEAD:-$PUSH_HEAD}}"
+        if [ -z "$BASE" ] || [ -z "$HEAD" ]; then
+          echo "warden-gate: could not determine the range (base='$BASE' head='$HEAD'); set the 'base'/'head' inputs." >&2
+          exit 2
+        fi
+        # A brand-new branch push carries an all-zero 'before' — there is no base
+        # to gate against, so there is nothing to enforce yet.
+        if printf '%s' "$BASE" | grep -qE '^0+$'; then
+          echo "warden-gate: no base commit (new branch); nothing to gate."
+          exit 0
+        fi
+        ARGS=(verify --range "$BASE..$HEAD")
+        [ "$REQUIRE_SIGNED" = "true" ] && ARGS+=(--require-signed)
+        [ "$SKIP_MERGES" != "true" ] && ARGS+=(--skip-merges=false)
+        [ -n "$KEY" ] && ARGS+=(--key "$KEY")
+        echo "+ warden ${ARGS[*]}"
+        if warden "${ARGS[@]}"; then
+          {
+            echo "### ✓ Warden provenance gate passed"
+            echo ""
+            echo "Every commit in \`$BASE..$HEAD\` carries trustworthy provenance."
+          } >> "$GITHUB_STEP_SUMMARY"
+        else
+          code=$?
+          {
+            echo "### ✗ Warden provenance gate FAILED"
+            echo ""
+            echo "One or more commits in \`$BASE..$HEAD\` lack trustworthy provenance."
+            echo "Reproduce locally with:"
+            echo ""
+            echo "\`\`\`"
+            echo "warden verify --range $BASE..$HEAD"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+        fi
