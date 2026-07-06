@@ -25,7 +25,8 @@ inputs:
       Trusted signer key(s)/fingerprint(s), comma-separated. When set, every
       commit's note must carry a valid signature from one of these keys —
       raising the gate from "a warden ran" to "a warden I trust ran". Get a
-      fingerprint with `warden key show`.
+      fingerprint with `warden key show`. Leave empty to use the repo's committed
+      roster (`.warden.yaml` `trusted_keys`), which also inherits via `extends:`.
     required: false
     default: ""
   require-signed:

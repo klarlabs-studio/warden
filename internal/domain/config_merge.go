@@ -55,6 +55,11 @@ func (c Config) OverlayOnto(base Config) Config {
 	if c.NotifyAfter != "" {
 		out.NotifyAfter = c.NotifyAfter
 	}
+	// TrustedKeys union: like Writes/Steps, a child must not be able to silently
+	// DROP a key the org base trusts (which would quietly widen what provenance is
+	// accepted). A child adding its own signer is fine — it is a visible, reviewed
+	// diff in the child's committed .warden.yaml.
+	out.TrustedKeys = unionStrings(base.TrustedKeys, c.TrustedKeys)
 	// Rules stack: base first (broad), then the child's (repo-specific).
 	if len(c.Rules) > 0 {
 		out.Rules = append(append([]Rule(nil), base.Rules...), c.Rules...)

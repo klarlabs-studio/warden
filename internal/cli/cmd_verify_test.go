@@ -3,13 +3,79 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/service"
 )
+
+// repoWithConfig builds a temp git repo containing .warden.yaml (or none when
+// yaml is ""), chdirs into it, and returns the dir. git is required.
+func repoWithConfig(t *testing.T, yaml string) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	for _, a := range [][]string{{"init"}, {"config", "user.email", "t@t.co"}, {"config", "user.name", "t"}, {"commit", "--allow-empty", "-m", "x"}} {
+		c := exec.Command("git", a...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", a, err, out)
+		}
+	}
+	if yaml != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".warden.yaml"), []byte(yaml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chdir(t, dir)
+	return dir
+}
+
+// TestResolveTrustedKeys pins the precedence: an explicit --key wins; with no
+// flag the committed roster supplies the keys; with neither, none are required.
+func TestResolveTrustedKeys(t *testing.T) {
+	t.Run("explicit --key wins over the roster", func(t *testing.T) {
+		repoWithConfig(t, "trusted_keys:\n  - 0123456789abcdef\n")
+		svc, err := newService(autoApprover{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys, fromRoster := resolveTrustedKeys(svc, "aa,bb")
+		if fromRoster || len(keys) != 2 {
+			t.Errorf("explicit --key must win: keys=%v fromRoster=%v", keys, fromRoster)
+		}
+	})
+
+	t.Run("no flag falls back to the roster", func(t *testing.T) {
+		repoWithConfig(t, "trusted_keys:\n  - 0123456789abcdef\n")
+		svc, err := newService(autoApprover{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys, fromRoster := resolveTrustedKeys(svc, "")
+		if !fromRoster || len(keys) != 1 || keys[0] != "0123456789abcdef" {
+			t.Errorf("empty --key must use the roster: keys=%v fromRoster=%v", keys, fromRoster)
+		}
+	})
+
+	t.Run("no flag and no roster requires nothing", func(t *testing.T) {
+		repoWithConfig(t, "")
+		svc, err := newService(autoApprover{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys, fromRoster := resolveTrustedKeys(svc, "")
+		if fromRoster || len(keys) != 0 {
+			t.Errorf("no roster must require nothing: keys=%v fromRoster=%v", keys, fromRoster)
+		}
+	})
+}
 
 // TestParseRange pins the --range parser: it accepts a two-dot BASE..HEAD with
 // both endpoints present, and rejects git's three-dot symmetric-difference form

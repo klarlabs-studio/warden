@@ -26,8 +26,8 @@ func TestKeyShow(t *testing.T) {
 	if !strings.Contains(out, "fingerprint:") || !strings.Contains(out, "public key:") {
 		t.Errorf("key show output missing key material:\n%s", out)
 	}
-	if !strings.Contains(out, "warden verify --key") {
-		t.Errorf("key show should suggest the pinning command:\n%s", out)
+	if !strings.Contains(out, "trusted_keys:") {
+		t.Errorf("key show should point at the .warden.yaml roster:\n%s", out)
 	}
 
 	// Wrong subcommand → usage, exit 2.

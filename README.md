@@ -136,6 +136,17 @@ trust** ran here" — pass `key:` to the bundled `warden-verify` action. Notes
 stay verifiable (chain + signature) without pinning; `--key` just adds the trust
 gate.
 
+Rather than pass fingerprints on every call, commit a **trusted-signer roster**
+to `.warden.yaml` — a bare `warden verify` / `--range` then requires a trusted
+signer automatically, and it inherits through `extends:` so an org names its
+signers once:
+
+```yaml
+# .warden.yaml
+trusted_keys:
+  - 3a76a2b850d0e957   # add yours with `warden key show`; inspect with `warden key list`
+```
+
 ### Enforcing provenance across a range
 
 `warden verify` checks one commit (the provenance-*skip* primitive). To **gate**

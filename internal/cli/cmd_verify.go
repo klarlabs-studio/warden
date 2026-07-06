@@ -36,21 +36,28 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
+	// roster, so a repo enforces trusted provenance without passing fingerprints.
+	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
+
 	if *rangeSpec != "" {
 		return runVerifyRange(svc, *rangeSpec, service.RangeVerifyOptions{
 			RequireSigned: *requireSigned,
-			TrustedKeys:   splitList(*keys),
+			TrustedKeys:   trusted,
 			SkipMerges:    *skipMerges,
-		}, *jsonOut, *quiet, stdout, stderr)
+		}, *jsonOut, *quiet, fromRoster, stdout, stderr)
 	}
 
-	res, err := svc.Verify(*commit, splitList(*keys)...)
+	res, err := svc.Verify(*commit, trusted...)
 	if err != nil {
 		return fail(stderr, err)
 	}
 
 	if !*quiet {
-		printVerify(stdout, res, *keys != "")
+		if fromRoster {
+			fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
+		}
+		printVerify(stdout, res, len(trusted) > 0)
 	}
 	if res.Validated {
 		return 0
@@ -58,11 +65,27 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
+// resolveTrustedKeys returns the effective trusted-signer set and whether it
+// came from the committed roster. An explicit --key list wins outright;
+// otherwise the .warden.yaml `trusted_keys` roster supplies it, so committing a
+// roster turns on trusted-signed enforcement without a flag on every call. A
+// config-load error degrades to "no roster" — verify never hard-fails on it.
+func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fromRoster bool) {
+	if strings.TrimSpace(keyFlag) != "" {
+		return splitList(keyFlag), false
+	}
+	cfg, err := svc.Config()
+	if err != nil || len(cfg.TrustedKeys) == 0 {
+		return nil, false
+	}
+	return cfg.TrustedKeys, true
+}
+
 // runVerifyRange gates a BASE..HEAD range: it exits 0 only when every commit
 // carries provenance to the required depth, and non-zero (with per-commit
 // reasons) otherwise. This is the primitive a PR required-check or a
 // pre-receive hook wraps — see docs/adr/0002.
-func runVerifyRange(svc *service.Service, spec string, opts service.RangeVerifyOptions, jsonOut, quiet bool, stdout, stderr io.Writer) int {
+func runVerifyRange(svc *service.Service, spec string, opts service.RangeVerifyOptions, jsonOut, quiet, fromRoster bool, stdout, stderr io.Writer) int {
 	base, head, ok := parseRange(spec)
 	if !ok {
 		fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
@@ -73,6 +96,9 @@ func runVerifyRange(svc *service.Service, spec string, opts service.RangeVerifyO
 		return fail(stderr, err)
 	}
 	if !quiet {
+		if fromRoster && !jsonOut {
+			fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(opts.TrustedKeys))
+		}
 		if jsonOut {
 			if code := printRangeJSON(stdout, stderr, res, opts); code != 0 {
 				return code

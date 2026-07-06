@@ -8,6 +8,16 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **Committed trusted-signer roster: `trusted_keys` in `.warden.yaml`**
+  (ADR-0002 Phase 3). Instead of hand-passing `--key <fingerprint>` on every
+  call, list your trusted signers once — a bare `warden verify` / `verify
+  --range` (and so `warden-gate`) then requires a trusted signer automatically.
+  Because it rides on config it **inherits through `extends:`**: an org base
+  policy names its signers once and every repo unions them in (a repo may add
+  its own in a reviewed diff; it can't silently drop the org's). An explicit
+  `--key` still overrides. Malformed entries are rejected at config load. New
+  `warden key list` shows the effective roster and flags whether this machine is
+  in it; `warden key show` now points at the roster.
 - **`warden-gate` action — provenance enforcement as a required check**
   (ADR-0002 Phase 2). The enforcement counterpart to the `warden-verify`
   (provenance-skip) reporter: it runs `warden verify --range` on a PR and
