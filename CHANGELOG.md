@@ -4,6 +4,20 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **A successful push no longer looks like a failure.** On every successful
+  pre-push, git prints `error: failed to push some refs` — Warden already pushed
+  your gated commit and then fails the hook on purpose to stop git's own
+  now-redundant push from racing it (that non-zero exit is what makes git emit
+  the error). Warden now pre-empts it with a plain-language line so you know the
+  push already succeeded. The underlying behavior is unchanged — it is
+  load-bearing for the "only gated commits reach the remote" guarantee — this
+  just stops the expected git error from reading as a real one. Documented in
+  the README's "How it works".
+
 ## [0.13.0] — 2026-07-06
 
 ### Changed

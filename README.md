@@ -112,7 +112,11 @@ From then on `git commit` / `git push` are gated. Warden's own push runs with
   fast-forward is aborted, never forced.
 
 The pre-push hook always exits non-zero on success — Warden already performed
-the push, so git's own (now-stale) push must be stopped from racing it.
+the push, so git's own (now-stale) push must be stopped from racing it. As a
+result git prints `error: failed to push some refs` on **every successful
+push** — this is expected, not a failure: your gated commit is already on the
+remote. Warden pre-empts it with a `warden: git will now print '…' — that's
+expected` line so you know to ignore git's error.
 
 ### Signed provenance
 
