@@ -157,9 +157,14 @@ It exits non-zero with a per-commit reason — `missing` (no note),
 transplanted), `unsigned`, or `untrusted`. Unlike `warden doctor`, which flags
 only *missing* notes since adoption, `--range` also fails a tampered or
 untrusted note, over an arbitrary `BASE..HEAD`. Merge commits are skipped by
-default (`--skip-merges`); their parents are gated individually. This is the
-primitive a PR required-check or a server-side pre-receive hook wraps — see
-[ADR-0002](docs/adr/0002-provenance-enforcement.md).
+default (`--skip-merges`); their parents are gated individually.
+
+To turn this into a **required check** that blocks un-gated PRs from merging,
+use the bundled `warden-gate` action — it runs `verify --range` on the PR head
+(gating the merge before a squash rewrites history). See
+[CI provenance gate](docs/ci-provenance-gate.md) for the workflow and a
+self-hosted pre-receive recipe, and [ADR-0002](docs/adr/0002-provenance-enforcement.md)
+for the design.
 
 Each note also carries a small **SBOM**: a SHA-256 digest of every dependency
 lockfile present at validation (`go.sum`, `package-lock.json`, `Cargo.lock`, …).

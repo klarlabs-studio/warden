@@ -1,6 +1,6 @@
 # ADR 0002 — Closing the provenance enforcement loop
 
-- Status: **Proposed** (Phase 1 in progress)
+- Status: **Accepted** (Phases 1–2 implemented; Phase 3 planned)
 - Date: 2026-07-06
 
 ## Context
@@ -115,6 +115,9 @@ security-critical production side is untouched.
 
 ## Status / rollout
 
-Phase 1 lands first as `warden verify --range` with `--require-signed`,
-`--key`, `--json`, `--skip-merges`. Phases 2–3 follow as separate deliverables
-once the primitive is proven.
+Phase 1 landed as `warden verify --range` with `--require-signed`, `--key`,
+`--json`, `--skip-merges`. Phase 2 landed as the `warden-gate` composite action
+(`.github/actions/warden-gate`) plus a self-hosted pre-receive recipe — see
+[docs/ci-provenance-gate.md](../ci-provenance-gate.md). Phase 3 (managed
+`.warden/trusted-keys` roster, squash re-attestation, in-toto/SLSA output)
+follows.
