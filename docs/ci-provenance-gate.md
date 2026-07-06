@@ -56,6 +56,27 @@ Each commit in the range is classified, and the gate fails on the first problem:
   signers — "a warden *I trust* ran here". Publish each machine's fingerprint
   with `warden key show`.
 
+### The committed roster (recommended over passing `key:`)
+
+Instead of hand-passing fingerprints to every workflow, commit them once to
+`.warden.yaml`:
+
+```yaml
+# .warden.yaml
+trusted_keys:
+  - 3a76a2b850d0e957   # alice's laptop
+  - fedcba9876543210   # ci signer
+```
+
+Then omit `key:` — the gate (and a bare `warden verify --range`) reads the
+roster automatically, so committing `trusted_keys` turns on trusted-signed
+enforcement repo-wide. Because the roster rides on config, it **inherits through
+`extends:`**: an org base policy names its signers once and every repo unions
+them in (a repo can add its own in a reviewed diff; it cannot silently drop the
+org's). Inspect the effective roster with `warden key list`. The roster is
+protected the same way as the rest of `.warden.yaml` — a PR-reviewed change,
+itself gated by warden.
+
 Merge commits are skipped by default (`skip-merges: "true"`) — a merge
 introduces no tree change warden authored and its parents are gated on their
 own. Set `skip-merges: "false"` to require a note on merges too.

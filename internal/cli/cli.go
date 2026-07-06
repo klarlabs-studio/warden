@@ -84,6 +84,7 @@ Usage:
   warden verify [--commit c] [--key fp] [--quiet]  exit 0 if the commit is warden-validated (CI skip)
   warden verify --range base..head [--require-signed] [--key fp] [--json]  gate every commit in a range
   warden key show                             print this machine's provenance signing key
+  warden key list                             print the repo's trusted-signer roster (.warden.yaml trusted_keys)
   warden why [commit]                         explain what the gate did for a commit (from its note)
   warden recipes [name]                        list / print paste-able check recipes (gitleaks, semgrep, …)
   warden watch                                 re-run the fast checks on save (dev feedback loop)

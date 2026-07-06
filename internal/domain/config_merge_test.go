@@ -84,6 +84,34 @@ func TestOverlayOnto_WritesUnion(t *testing.T) {
 	}
 }
 
+// TestOverlayOnto_TrustedKeysUnion guards that an org base's trusted signers are
+// inherited via extends and cannot be silently dropped by a child re-declaring
+// its own — a child may add (visibly), never remove.
+func TestOverlayOnto_TrustedKeysUnion(t *testing.T) {
+	base := Config{TrustedKeys: []string{"0123456789abcdef"}}
+	child := Config{TrustedKeys: []string{"fedcba9876543210"}}
+	got := child.OverlayOnto(base)
+	want := []string{"0123456789abcdef", "fedcba9876543210"}
+	if !reflect.DeepEqual(got.TrustedKeys, want) {
+		t.Errorf("trusted_keys union = %v, want %v (org key must survive)", got.TrustedKeys, want)
+	}
+}
+
+func TestValidTrustedKey(t *testing.T) {
+	good := []string{"0123456789abcdef", "fedcba9876543210"} // 16-hex fingerprints
+	for _, k := range good {
+		if !ValidTrustedKey(k) {
+			t.Errorf("%q should be a valid fingerprint", k)
+		}
+	}
+	bad := []string{"", "short", "0123456789abcdeg", "0123456789ABCDEF", "not-a-key"} // 'g' non-hex; uppercase not our format
+	for _, k := range bad {
+		if ValidTrustedKey(k) {
+			t.Errorf("%q should be rejected", k)
+		}
+	}
+}
+
 // TestOverlayOnto_RiskFieldLevel guards that a child setting only one threshold
 // does not zero the base's other threshold.
 func TestOverlayOnto_RiskFieldLevel(t *testing.T) {
@@ -126,6 +154,9 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		"timeout-garbage":        {Timeouts: map[string]string{"test": "soon"}},
 		"timeout-negative":       {Timeouts: map[string]string{"lint": "-5s"}},
 		"timeout-typo-unit":      {Timeouts: map[string]string{"review": "5mm"}},
+		"trusted-key-garbage":    {TrustedKeys: []string{"not-a-key"}},
+		"trusted-key-badhex":     {TrustedKeys: []string{"0123456789abcdeg"}},
+		"trusted-key-empty":      {TrustedKeys: []string{""}},
 	}
 	for name, cfg := range cases {
 		if err := cfg.Validate(); err == nil {
@@ -137,7 +168,8 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		Rules:       []Rule{{Then: Then{AutoFix: map[StepName]int{"lint": 1}, Agent: map[StepName]string{"review": "codex"}}}},
 		NotifyAfter: "45s",
 		// "5m" is a real limit; "0" is the explicit no-limit marker — both valid.
-		Timeouts: map[string]string{"test": "5m", "review": "0"},
+		Timeouts:    map[string]string{"test": "5m", "review": "0"},
+		TrustedKeys: []string{"0123456789abcdef"},
 	}
 	if err := ok.Validate(); err != nil {
 		t.Errorf("valid config rejected: %v", err)

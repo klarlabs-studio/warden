@@ -90,7 +90,43 @@ type Config struct {
 	// PR configures optional pull-request creation after a passing push.
 	PR PRConfig `yaml:"pr"`
 
+	// TrustedKeys is the committed roster of signer fingerprints (or full base64
+	// public keys) whose provenance the repo trusts. When non-empty, a bare
+	// `warden verify` / `verify --range` (no `--key` flag) escalates from
+	// "attested" to "trusted-signed" against this set — so committing a roster
+	// turns on trust enforcement repo-wide, and `warden-gate` needs no hand-passed
+	// fingerprints. Because it rides on Config, it inherits through `extends:`: an
+	// org base policy names its signers once and every repo unions them in (a repo
+	// can add its own, visibly, in a reviewed diff; it cannot silently drop the
+	// org's). Get a fingerprint with `warden key show`; list the roster with
+	// `warden key list`.
+	TrustedKeys []string `yaml:"trusted_keys"`
+
 	Rules []Rule `yaml:"rules"`
+}
+
+// ValidTrustedKey reports whether s is a usable trusted-key roster entry: a
+// 16-hex-char fingerprint (as `warden key show` prints) or a full base64 ed25519
+// public key. Rejecting anything else at config load stops a typo'd entry from
+// silently trusting no one (or, worse, reading as a match it isn't).
+func ValidTrustedKey(s string) bool {
+	if isFingerprint(s) {
+		return true
+	}
+	return KeyFingerprint(s) != "" // a full base64 ed25519 public key
+}
+
+func isFingerprint(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	for _, c := range s {
+		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+		if !isHex {
+			return false
+		}
+	}
+	return true
 }
 
 // Validate rejects a parsed config that carries an unsafe step name. Every
@@ -158,6 +194,13 @@ func (c Config) Validate() error {
 	for step, s := range c.Timeouts {
 		if err := validateDuration(fmt.Sprintf("timeout for step %q", step), s); err != nil {
 			return err
+		}
+	}
+	// Each trusted-key entry must be a real fingerprint or public key — a bad one
+	// would silently trust nobody, quietly disabling the very gate it configures.
+	for i, k := range c.TrustedKeys {
+		if !ValidTrustedKey(k) {
+			return fmt.Errorf("invalid trusted_keys[%d] %q: expected a 16-hex fingerprint (see `warden key show`) or a base64 ed25519 public key", i, k)
 		}
 	}
 	return nil

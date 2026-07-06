@@ -1,6 +1,7 @@
 # ADR 0002 — Closing the provenance enforcement loop
 
-- Status: **Accepted** (Phases 1–2 implemented; Phase 3 planned)
+- Status: **Accepted** (Phases 1–2 done; Phase 3 trusted-key roster done,
+  re-attestation + SLSA output deferred)
 - Date: 2026-07-06
 
 ## Context
@@ -92,14 +93,30 @@ security-critical production side is untouched.
 
 ### Phase 3 — managed trust + post-merge closure
 
-- A committed, itself-signed `.warden/trusted-keys` roster so `--key` is a repo
-  fact with a rotation story, not a hand-passed CLI argument.
-- Optional **merge-time re-attestation**: a bot that, after the Phase-2 check
-  passes, re-signs the squash commit `Y` so `main` is provenanced end-to-end and
-  `doctor` on `main` stays green.
-- Emit **in-toto / SLSA source attestations** as an interop format, so warden
-  provenance feeds sigstore / GUAC / policy engines instead of being a
-  warden-only note shape.
+- **Trusted-signer roster (done).** A committed `trusted_keys` list in
+  `.warden.yaml` (not a separate `.warden/trusted-keys` file as first sketched —
+  riding on `Config` was chosen so it reuses the load/validate/merge machinery
+  and, crucially, **inherits through `extends:`**: an org base policy names its
+  signers once and every repo unions them in). A bare `warden verify` /
+  `verify --range` with no `--key` now requires a trusted signer from the roster,
+  so `warden-gate` needs no hand-passed fingerprints. Merge is a union (a child
+  may add a signer, visibly, but cannot silently drop an org's). The roster's
+  trust anchor is **PR review plus warden's own gate on `.warden.yaml`** — a
+  cryptographic self-signature was considered and deferred: it only moves the
+  trust root (who signs the roster?) without adding assurance over a reviewed,
+  gated, version-controlled file. `warden key list` shows the effective roster.
+- **Merge-time re-attestation (deferred — needs hosted infra).** Re-signing the
+  squash commit `Y` requires a GitHub App with write access and a bot signing
+  key — a hosted component and a new credential to secure, out of scope for the
+  CLI. Interim mitigation: the Phase-2 gate already proves the *source* commits
+  were validated before the merge; a post-squash `doctor` on the base branch
+  will show squash commits as unverified, which teams scope out or accept until
+  this lands as its own service.
+- **in-toto / SLSA source attestations (deferred — no consumer yet).** A
+  `warden attest` that projects a `RunRecord` into an in-toto statement is pure
+  CLI work and worth doing once a concrete downstream (sigstore / GUAC / a policy
+  engine) is wired up to consume it. Building the format before the consumer
+  risks guessing the shape wrong.
 
 ## Consequences
 
@@ -118,6 +135,7 @@ security-critical production side is untouched.
 Phase 1 landed as `warden verify --range` with `--require-signed`, `--key`,
 `--json`, `--skip-merges`. Phase 2 landed as the `warden-gate` composite action
 (`.github/actions/warden-gate`) plus a self-hosted pre-receive recipe — see
-[docs/ci-provenance-gate.md](../ci-provenance-gate.md). Phase 3 (managed
-`.warden/trusted-keys` roster, squash re-attestation, in-toto/SLSA output)
+[docs/ci-provenance-gate.md](../ci-provenance-gate.md). Phase 3's trusted-signer
+roster landed as `.warden.yaml` `trusted_keys` (+ `warden key list`); squash
+re-attestation and in-toto/SLSA output
 follows.
