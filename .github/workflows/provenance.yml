@@ -1,0 +1,28 @@
+name: provenance
+
+# Advisory dogfood of the warden-gate action on warden's own PRs (ADR-0002).
+# It reports whether every commit on the branch carries trusted-signed
+# provenance — a note bound to the commit, its evidence chain intact, and signed
+# by a key in .warden.yaml `trusted_keys`. It is NOT (yet) a required check:
+# promote it in branch-protection settings once we trust the signal. It runs on
+# the PR head, whose commits still carry their notes, so a squash-merge on main
+# never trips it.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # notes + the full PR range ride on history
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - uses: ./.github/actions/warden-gate
+        # No `key:` input — the committed .warden.yaml `trusted_keys` roster
+        # supplies the trusted signer(s), so this runs at trusted-signed depth.

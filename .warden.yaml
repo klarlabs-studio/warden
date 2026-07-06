@@ -20,6 +20,12 @@ steps:
 risk:
   diff_lines_high: 400
   files_touched_high: 15
+# Trusted provenance signers (ADR-0002 Phase 3). The warden-gate action (see
+# .github/workflows/provenance.yml) and a bare `warden verify --range` require a
+# note signed by one of these. Add yours with `warden key show`; list with
+# `warden key list`.
+trusted_keys:
+  - 139e6eb9e2611c76   # felix — primary dev machine
 rules:
   # Large changes on main get a human approval gate at push time.
   - match:
