@@ -121,6 +121,25 @@ func (r *Repo) CommitsSince(ref, adoptionSHA string) ([]string, error) {
 	return splitLines(out), nil
 }
 
+// CommitsInRange returns the SHAs reachable from head back to (but excluding)
+// base — the `base..head` set, newest first — for an arbitrary two-endpoint
+// range gate (`warden verify --range`). When skipMerges is set, merge commits
+// are omitted: a true merge introduces no tree change warden authored and its
+// parents are each gated on their own, so requiring a note on the merge itself
+// would false-positive.
+func (r *Repo) CommitsInRange(base, head string, skipMerges bool) ([]string, error) {
+	args := []string{"rev-list"}
+	if skipMerges {
+		args = append(args, "--no-merges")
+	}
+	args = append(args, base+".."+head)
+	out, err := r.run(args...)
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
 // CommitMeta returns the author, ISO-8601 commit date, and subject line for a
 // commit, formatted for human-readable doctor output. A NUL separator keeps
 // the fields unambiguous even when a value contains other whitespace.

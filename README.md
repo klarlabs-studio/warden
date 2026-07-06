@@ -136,6 +136,31 @@ trust** ran here" — pass `key:` to the bundled `warden-verify` action. Notes
 stay verifiable (chain + signature) without pinning; `--key` just adds the trust
 gate.
 
+### Enforcing provenance across a range
+
+`warden verify` checks one commit (the provenance-*skip* primitive). To **gate**
+a whole branch or PR — fail if *any* commit lacks trustworthy provenance — use
+`--range`:
+
+```bash
+# fail unless every commit origin/main..HEAD is warden-validated
+warden verify --range origin/main..HEAD
+
+# escalate: each must be signed, and by a key in the trusted set
+warden verify --range origin/main..HEAD --require-signed --key <fp1>,<fp2>
+
+warden verify --range origin/main..HEAD --json   # per-commit verdicts for CI
+```
+
+It exits non-zero with a per-commit reason — `missing` (no note),
+`broken-chain` (a note that doesn't attest the commit — tampered or
+transplanted), `unsigned`, or `untrusted`. Unlike `warden doctor`, which flags
+only *missing* notes since adoption, `--range` also fails a tampered or
+untrusted note, over an arbitrary `BASE..HEAD`. Merge commits are skipped by
+default (`--skip-merges`); their parents are gated individually. This is the
+primitive a PR required-check or a server-side pre-receive hook wraps — see
+[ADR-0002](docs/adr/0002-provenance-enforcement.md).
+
 Each note also carries a small **SBOM**: a SHA-256 digest of every dependency
 lockfile present at validation (`go.sum`, `package-lock.json`, `Cargo.lock`, …).
 Because it's part of the signed, hash-chained record, a validated commit ships a
@@ -236,6 +261,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
+| `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
