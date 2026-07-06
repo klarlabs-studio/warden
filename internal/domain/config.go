@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Config is the parsed .warden.yaml (§5.1). Field tags mirror the documented
 // YAML surface exactly. Zero values are meaningful: an omitted section falls
@@ -77,7 +80,8 @@ type Config struct {
 	// NotifyAfter is the minimum run duration before a PASSING interactive
 	// pre-push fires a desktop notification (e.g. "30s", "2m"). Empty defaults
 	// to 10s. A failed/blocked push always notifies regardless of duration.
-	// Ignored when notify is false. A malformed value falls back to the default.
+	// Ignored when notify is false. A malformed or negative value is rejected at
+	// config load (see Validate) rather than silently ignored.
 	NotifyAfter string `yaml:"notify_after"`
 
 	Risk RiskConfig `yaml:"risk"`
@@ -133,6 +137,20 @@ func (c Config) Validate() error {
 			if edit.InsertAfter != "" && !edit.InsertAfter.Valid() {
 				return fmt.Errorf("invalid step name %q in rules[%d].then.steps.%s.insert_after", string(edit.InsertAfter), i, hook)
 			}
+		}
+	}
+	// notify_after, when set, must be a valid non-negative Go duration. Rejecting
+	// it here — at load, next to the other field checks — surfaces a typo (e.g.
+	// "10" with no unit, or "10ss") as a clear config error instead of silently
+	// snapping back to the 10s default and leaving the operator to wonder why
+	// their threshold never took effect.
+	if c.NotifyAfter != "" {
+		d, err := time.ParseDuration(c.NotifyAfter)
+		if err != nil {
+			return fmt.Errorf("invalid notify_after %q: must be a Go duration such as \"30s\" or \"2m\": %w", c.NotifyAfter, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid notify_after %q: must not be negative", c.NotifyAfter)
 		}
 	}
 	return nil

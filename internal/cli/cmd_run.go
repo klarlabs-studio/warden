@@ -126,9 +126,10 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 const notifyAfter = 10 * time.Second
 
 // notifyThreshold resolves the passing-run notification threshold: the repo's
-// `notify_after` (e.g. "30s", "2m") when set and parseable, otherwise the
-// notifyAfter default. A malformed value falls back rather than erroring — a
-// bad duration should never wedge a push.
+// `notify_after` (e.g. "30s", "2m") when set, otherwise the notifyAfter default.
+// A malformed or negative value is rejected earlier at config load (see
+// Config.Validate), so a loaded config always parses here; the fallback remains
+// only as defense for a Config constructed programmatically past Validate.
 func notifyThreshold(cfg domain.Config) time.Duration {
 	if cfg.NotifyAfter != "" {
 		if d, err := time.ParseDuration(cfg.NotifyAfter); err == nil && d >= 0 {
