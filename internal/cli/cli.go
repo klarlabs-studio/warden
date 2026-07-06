@@ -82,6 +82,7 @@ Usage:
   warden doctor [--branch b]                  audit provenance since adoption
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
   warden verify [--commit c] [--key fp] [--quiet]  exit 0 if the commit is warden-validated (CI skip)
+  warden verify --range base..head [--require-signed] [--key fp] [--json]  gate every commit in a range
   warden key show                             print this machine's provenance signing key
   warden why [commit]                         explain what the gate did for a commit (from its note)
   warden recipes [name]                        list / print paste-able check recipes (gitleaks, semgrep, …)

@@ -6,6 +6,20 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`warden verify --range BASE..HEAD` — a true provenance gate.** Verifies
+  *every* commit in a range and exits non-zero if any lacks trustworthy
+  provenance, with a per-commit reason (`missing` / `broken-chain` / `unsigned`
+  / `untrusted`) and `--json` for CI. Unlike `doctor` — which flags only
+  *missing* notes — this fails a **tampered or transplanted** note too, and
+  `--require-signed` / `--key <roster>` escalate the bar from "a warden ran" to
+  "a *trusted* warden ran and the note is intact." `--skip-merges` (default on)
+  omits merge commits, whose parents are gated individually. This is the
+  primitive a PR required-check or a pre-receive hook wraps — see
+  [ADR-0002](docs/adr/0002-provenance-enforcement.md). Read-only: the push and
+  signing paths are untouched.
+
 ### Changed
 
 - **A successful push no longer looks like a failure.** On every successful
