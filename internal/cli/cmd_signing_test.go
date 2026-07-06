@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
@@ -165,13 +166,16 @@ func TestMaybeNotify_RespectsConfigAndVerdict(t *testing.T) {
 	// These calls exercise the gating logic; notify.Send is a best-effort no-op
 	// on the test host, so we assert no panic and the right branches run.
 	off := false
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{Notify: &off}}, application.RunResult{Outcome: domain.OutcomePassed})
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{Notify: &off}}, application.RunResult{Outcome: domain.OutcomePassed}, notifyAfter)
 
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"})
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"})
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"}, notifyAfter)
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"}, notifyAfter)
+
+	// A fast run stays quiet even when enabled (duration gate).
+	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "quick"}, notifyAfter-time.Millisecond)
 
 	// A config load error must not panic.
-	maybeNotify(fakeCfgSvc{err: errSentinel}, application.RunResult{})
+	maybeNotify(fakeCfgSvc{err: errSentinel}, application.RunResult{}, notifyAfter)
 }
 
 var errSentinel = fmt.Errorf("boom")

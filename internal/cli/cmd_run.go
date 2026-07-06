@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/mattn/go-isatty"
 
@@ -105,26 +106,64 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	// be watched from another terminal.
 	server := startAttach(svc)
 	defer server.Close()
+	start := time.Now()
 	res, err := tui.Run(ctx, svc, br, hook, resolved.Steps, server)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	server.PublishDone(res)
-	maybeNotify(svc, res)
+	maybeNotify(svc, res, time.Since(start))
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.
 	return 1
 }
 
-// maybeNotify fires a desktop notification with the run's verdict unless the
-// repo disabled it, so a developer who tabbed away during a long pre-push
-// learns the outcome.
-func maybeNotify(svc interface{ Config() (domain.Config, error) }, res application.RunResult) {
+// notifyAfter is the DEFAULT run duration above which a passing interactive
+// pre-push is worth a desktop notification, used when the repo doesn't set
+// `notify_after`. Shorter passing runs finish while the developer is still
+// watching the terminal, so a notification then is pure noise — the point is to
+// reach someone who tabbed away during a *long* gate.
+const notifyAfter = 10 * time.Second
+
+// notifyThreshold resolves the passing-run notification threshold: the repo's
+// `notify_after` (e.g. "30s", "2m") when set and parseable, otherwise the
+// notifyAfter default. A malformed value falls back rather than erroring — a
+// bad duration should never wedge a push.
+func notifyThreshold(cfg domain.Config) time.Duration {
+	if cfg.NotifyAfter != "" {
+		if d, err := time.ParseDuration(cfg.NotifyAfter); err == nil && d >= 0 {
+			return d
+		}
+	}
+	return notifyAfter
+}
+
+// shouldNotify reports whether a finished run warrants a desktop notification.
+// Notifications are on unless the repo set `notify: false`. A failed/blocked
+// push ALWAYS notifies — you never want to miss a gate that stopped your push,
+// however fast it failed. A passing run notifies only once it ran long enough
+// (notifyThreshold) that the developer may have looked away, so fast green gates
+// stay silent. Pure and side-effect-free so the policy is unit-testable.
+func shouldNotify(cfg domain.Config, outcome domain.Outcome, elapsed time.Duration) bool {
+	if cfg.Notify != nil && !*cfg.Notify {
+		return false
+	}
+	if outcome != domain.OutcomePassed {
+		return true
+	}
+	return elapsed >= notifyThreshold(cfg)
+}
+
+// maybeNotify fires a desktop notification with the run's verdict when the run
+// was long enough to have lost the developer's attention (see shouldNotify), so
+// someone who tabbed away during a long pre-push learns the outcome — without
+// spamming a notification after every fast gate.
+func maybeNotify(svc interface{ Config() (domain.Config, error) }, res application.RunResult, elapsed time.Duration) {
 	cfg, err := svc.Config()
 	if err != nil {
 		return
 	}
-	if cfg.Notify != nil && !*cfg.Notify {
+	if !shouldNotify(cfg, res.Outcome, elapsed) {
 		return
 	}
 	title := "warden: passed"

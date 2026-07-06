@@ -6,6 +6,16 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Desktop pre-push notifications now fire only when useful.** A *passing*
+  interactive pre-push notifies only once it has run at least `notify_after`
+  (new config, default `10s`) — a fast green gate no longer pops a notification
+  on every push (previously it fired after every run, despite the docs saying it
+  was for long ones). A *failed/blocked* push always notifies regardless of
+  duration, so a stopped push is never missed. `notify: false` still silences
+  everything.
+
 ## [0.12.0] — 2026-07-05
 
 ### Changed
