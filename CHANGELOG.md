@@ -4,7 +4,7 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] — 2026-07-06
 
 ### Added
 
@@ -23,6 +23,12 @@ All notable changes to warden are documented here. The format follows
   key**, a materially simpler design than originally sketched. It fails safe:
   with no content-identical validated source it writes nothing, never asserting a
   validation that didn't happen.
+
+### Fixed
+
+- The CI-provenance docs referenced the bundled actions at a `@v1` tag that does
+  not exist; they now pin to a real release tag (`@v0.16.0`), matching warden's
+  pin-actions-to-a-version convention.
 
 ## [0.15.0] — 2026-07-06
 

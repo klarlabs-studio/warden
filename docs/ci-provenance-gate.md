@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
-      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v1
+      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0.16.0
         with:
           require-signed: "true"
           key: "<fingerprint1>,<fingerprint2>" # your org's trusted signers

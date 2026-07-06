@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: stable
       - id: warden
-        uses: ./.github/actions/warden-verify # or klarlabs-studio/warden/.github/actions/warden-verify@v1
+        uses: ./.github/actions/warden-verify # or klarlabs-studio/warden/.github/actions/warden-verify@v0.16.0
 
   test:
     needs: gate
