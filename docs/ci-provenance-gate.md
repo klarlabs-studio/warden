@@ -91,9 +91,20 @@ roster automatically, so committing `trusted_keys` turns on trusted-signed
 enforcement repo-wide. Because the roster rides on config, it **inherits through
 `extends:`**: an org base policy names its signers once and every repo unions
 them in (a repo can add its own in a reviewed diff; it cannot silently drop the
-org's). Inspect the effective roster with `warden key list`. The roster is
-protected the same way as the rest of `.warden.yaml` — a PR-reviewed change,
-itself gated by warden.
+org's). Inspect the effective roster with `warden key list`.
+
+**The roster is read from the range's base, not its head.** A range gate
+(`warden verify --range base..head`) resolves `trusted_keys` from the **base**
+ref's committed `.warden.yaml` — the trusted side of the range — not from the
+working tree it is checking. So a PR that edits `trusted_keys` to add its own
+signer **cannot use that edit to pass its own gate**: the widened roster only
+takes effect once merged, judging the *next* PR, on the trusted base. This
+closes the self-certification gap where a change supplies its own trust anchor.
+An explicit `key:` (pinned in the workflow, which lives on the protected base)
+is stronger still and worth setting for a required gate. A single-commit
+`warden verify` (provenance-skip) has no base to read from, so it uses the
+working-tree roster — pin `--key` there when the commit being skipped isn't
+already on trusted history.
 
 Merge commits are skipped by default (`skip-merges: "true"`) — a merge
 introduces no tree change warden authored and its parents are gated on their
@@ -121,11 +132,15 @@ warden reattest --push          # re-attest HEAD from its tree-identical validat
 ```
 
 `reattest` finds a commit whose tree SHA matches HEAD and whose note is intact,
-commit-bound, and validly signed, then carries that evidence onto the squash
+commit-bound, validly signed, **and signed by a trusted key** (a key in the
+roster, or your own machine's), then carries that evidence onto the squash
 commit, marks it `reattested_from: <source>`, and re-signs with your (trusted)
-key. It **fails safe**: if nothing content-identical is validated, it writes
-nothing — a re-attestation only relocates a real validation onto byte-identical
-content, it never manufactures one.
+key. Requiring a *trusted* source — not merely any self-verifying signature —
+stops an untrusted note (one an attacker could push to `refs/notes/warden` for a
+tree-identical commit) from being laundered into a locally-trusted
+re-attestation. It **fails safe**: if nothing content-identical is validated by
+a trusted signer, it writes nothing — a re-attestation only relocates a real,
+trusted validation onto byte-identical content, it never manufactures one.
 
 ### Interop: export provenance as an in-toto attestation (`warden attest`)
 
