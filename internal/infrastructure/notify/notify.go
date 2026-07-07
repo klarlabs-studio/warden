@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+// runNotifier shells out to the platform notifier. It is a package var so tests
+// can stub it — otherwise exercising Send on a machine WITH a notifier (a dev's
+// macOS box) pops a real desktop notification on every `go test` run.
+var runNotifier = func(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
 // Send posts a desktop notification with title and body. It is best-effort and
 // returns nothing: an unsupported platform or missing tool is a silent no-op.
 // A short timeout keeps a wedged notifier from blocking the caller.
@@ -24,7 +31,7 @@ func Send(title, body string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, name, args...).Run()
+	_ = runNotifier(ctx, name, args...)
 }
 
 // command returns the notifier binary and args for goos, or ("", nil) when the

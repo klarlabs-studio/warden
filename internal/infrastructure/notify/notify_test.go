@@ -1,6 +1,8 @@
 package notify
 
 import (
+	"context"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -42,7 +44,23 @@ func TestQuote(t *testing.T) {
 	}
 }
 
-func TestSend_UnsupportedPlatformDoesNotPanic(t *testing.T) {
-	// Send must never panic or error regardless of environment.
-	Send("title", "body")
+func TestSend_IsBestEffortAndNeverPanics(t *testing.T) {
+	// Stub the shell-out so the test never pops a real desktop notification on a
+	// machine that has a notifier (a dev's macOS box). On a platform WITHOUT one,
+	// Send no-ops before reaching the stub — either way it must not panic.
+	orig := runNotifier
+	t.Cleanup(func() { runNotifier = orig })
+	called := false
+	runNotifier = func(context.Context, string, ...string) error {
+		called = true
+		return nil
+	}
+
+	Send("warden: passed", `pushed "main"`)
+
+	// When this platform has a notifier, Send must route through the stub (not the
+	// real notifier); when it doesn't, called stays false and that is fine too.
+	if name, _ := command(runtime.GOOS, "t", "b"); name != "" && !called {
+		t.Errorf("Send did not route through the notifier seam on a supported platform")
+	}
 }
