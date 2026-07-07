@@ -264,7 +264,7 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 		return nil, err
 	}
 	for _, batch := range resolved.Batches() {
-		if err := r.runBatch(ctx, run, kernel, batch, wt, reg, resolved.MaterializeDeps); err != nil {
+		if err := r.runBatch(ctx, run, kernel, batch, wt, reg, resolved); err != nil {
 			return nil, err
 		}
 		if run.IsTerminal() {
@@ -279,7 +279,7 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 // batch runs concurrently through ExecuteBatch, emitting a start event for every
 // step up front so the UI shows them running together, and a finish event per
 // step as it completes.
-func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName, wt Worktree, reg *worktreeRegistry, materialize bool) error {
+func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName, wt Worktree, reg *worktreeRegistry, resolved domain.ResolvedPolicy) error {
 	if len(batch) == 1 {
 		step := batch[0]
 		r.notify(StepEvent{Step: step, Phase: StepStarted})
@@ -294,11 +294,17 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 		return nil
 	}
 
-	// Isolate each concurrent step in its own ephemeral worktree cloned from the
-	// canonical one. A clone failure is best-effort: the step falls back to the
-	// canonical worktree (parallel-batch steps are read-only by scheduling, so a
-	// shared fallback is safe). All clones are torn down and the registry cleared
-	// after the batch, discarding the steps' side-effects.
+	// Isolate only the steps that mutate the tree (tree-writing agents) in their
+	// own ephemeral worktree cloned from the canonical one, so a writer can't race
+	// a sibling writer or leak mid-write state to a concurrent reader — the
+	// v0.10.1 write-race fix. Read-only steps (lint/test/scan) can't race: the
+	// policy contract makes Concurrent ⇒ non-mutating, so they share the canonical
+	// worktree (an unregistered step falls back to it) and skip the per-step clone
+	// plus its dep materialization entirely — the dominant cost on large JS repos,
+	// one node_modules copy per step. An all-read-only batch clones nothing. A
+	// clone failure is best-effort: the writer falls back to the canonical
+	// worktree. All clones are torn down and the registry cleared after the batch,
+	// discarding the steps' side-effects.
 	if wt != nil {
 		var clones []Worktree
 		defer func() {
@@ -308,7 +314,10 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 			reg.reset()
 		}()
 		for _, step := range batch {
-			clone, err := wt.Clone(materialize)
+			if !resolved.WritesTree(step) {
+				continue // read-only: share the canonical worktree, no clone
+			}
+			clone, err := wt.Clone(resolved.MaterializeDeps)
 			if err != nil {
 				continue // best-effort; this step uses the canonical worktree
 			}

@@ -123,9 +123,23 @@ have shaped it.
      agent that must persist docs needs a budget. This also *scopes the pre-commit
      auto-fix capture* correctly: only barrier steps touch the canonical worktree,
      so `DiffSince` no longer sweeps up an isolatable step's incidental writes.
-  2. **Cost:** N ephemeral worktrees per batch × materialize-by-default = N
-     dependency copies. Cheap on the same filesystem (hardlinks); set
-     `symlink_deps: true` to make the per-clone dependency exposure O(1).
+  2. **Cost:** originally N ephemeral worktrees per batch × materialize-by-default
+     = N dependency copies. Cheap on the same filesystem (hardlinks); set
+     `symlink_deps: true` to make the per-clone dependency exposure O(1). Now
+     bounded to the batch's *writers* only — see Phase 4.
 
   `WritesTree` (kept as the kernel's effect signal = `KeepsWrites` + agents) and
   `KeepsWrites` (scheduling) are both derived from one place, so they can't drift.
+
+- **Phase 4 — isolate only writers — DONE.** Isolation exists solely to keep a
+  tree-writer from racing a sibling, but Phase 3 cloned a worktree for *every*
+  step in a batch — including read-only checks (`test`/`lint`/scan), which the
+  policy contract already guarantees do not mutate the tree (`Concurrent` ⇒
+  non-mutating). `runBatch` now clones only the steps where `WritesTree` holds
+  (agents); read-only steps stay unregistered and fall back to the canonical
+  worktree. The v0.10.1 write-race fix is untouched (writers are still isolated,
+  torn down after the batch), but the per-batch clone count drops from N to the
+  number of writers — usually **zero**, so the common `test`‖`lint` batch now
+  materializes no extra dependency copies at all. The win is largest exactly where
+  Phase 3's cost bit hardest: large cross-filesystem JS repos running several
+  read-only checks in parallel.
