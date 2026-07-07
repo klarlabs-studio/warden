@@ -120,6 +120,22 @@ func (s *Service) GitDir() (string, error) { return s.repo.GitDir() }
 // Config loads the repo's parsed .warden.yaml.
 func (s *Service) Config() (domain.Config, error) { return s.configs.Load() }
 
+// TrustedKeysAt returns the trusted_keys roster as committed at ref, resolving
+// any extends chain against that same ref. A range gate calls this with its BASE
+// so the trusted-signer roster comes from the trusted side of base..head, never
+// the head being checked — otherwise a PR could add its own key to .warden.yaml
+// and self-certify. A ref with no committed roster yields nil, leaving the gate
+// at attested/signed depth (it never fails closed on a missing roster).
+func (s *Service) TrustedKeysAt(ref string) ([]string, error) {
+	cfg, err := config.ResolveAtRef(func(rel string) ([]byte, bool, error) {
+		return s.repo.FileAtRef(ref, rel)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cfg.TrustedKeys, nil
+}
+
 // Explain resolves the effective policy for a hypothetical invocation, using
 // real diff stats when the invocation matches the current worktree and a
 // zero-diff otherwise (so `policy explain --branch other` still works).

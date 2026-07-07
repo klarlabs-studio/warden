@@ -42,7 +42,7 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	if err != nil {
 		return ReattestResult{}, fmt.Errorf("tree of %s: %w", target, err)
 	}
-	source, srcRec, err := s.treeEqualSource(target, targetTree)
+	source, srcRec, err := s.treeEqualSource(target, targetTree, s.reattestTrustSet())
 	if err != nil {
 		return ReattestResult{}, err
 	}
@@ -74,11 +74,30 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	return ReattestResult{Target: target, Source: source, Wrote: true}, nil
 }
 
+// reattestTrustSet is the set of signers a re-attestation may carry provenance
+// from: the committed roster plus this machine's own key. Carrying over only
+// from a trusted (or our own) source stops an untrusted self-signed note — one
+// an attacker could push to refs/notes/warden for a tree-identical commit — from
+// being laundered into a locally-trusted re-attestation. Our own key is always
+// included so the canonical case (re-attesting a squash-merge of a PR head we
+// ourselves validated) works even in a repo that pins no roster.
+func (s *Service) reattestTrustSet() []string {
+	var set []string
+	if cfg, err := s.Config(); err == nil {
+		set = append(set, cfg.TrustedKeys...)
+	}
+	if s.signer != nil {
+		set = append(set, s.signer.Fingerprint())
+	}
+	return set
+}
+
 // treeEqualSource finds a commit (other than target) whose tree SHA equals
-// targetTree and whose warden note is intact, commit-bound, and validly signed —
-// i.e. a genuinely-validated commit with byte-identical content. It returns the
-// first such match, or ("", nil, nil) when none exists.
-func (s *Service) treeEqualSource(target, targetTree string) (string, *domain.RunRecord, error) {
+// targetTree and whose warden note is intact, commit-bound, validly signed, AND
+// signed by a trusted key — i.e. a genuinely-validated commit with
+// byte-identical content whose signer we already trust. It returns the first
+// such match, or ("", nil, nil) when none exists.
+func (s *Service) treeEqualSource(target, targetTree string, trusted []string) (string, *domain.RunRecord, error) {
 	noted, err := s.repo.NotedCommits()
 	if err != nil {
 		return "", nil, fmt.Errorf("list noted commits: %w", err)
@@ -95,10 +114,11 @@ func (s *Service) treeEqualSource(target, targetTree string) (string, *domain.Ru
 		if err != nil || rec == nil {
 			continue
 		}
-		// The source must genuinely attest itself AND carry a signature that
-		// verifies — otherwise a forged/unsigned note could be laundered into a
-		// locally-trusted re-attestation.
-		if rec.Attests(c) && rec.VerifySignature() {
+		// The source must genuinely attest itself, carry a signature that verifies,
+		// AND be signed by a trusted key — otherwise a forged, unsigned, or merely
+		// self-signed-but-untrusted note could be laundered into a locally-trusted
+		// re-attestation.
+		if rec.Attests(c) && rec.VerifySignature() && keyTrusted(rec, trusted) {
 			return c, rec, nil
 		}
 	}

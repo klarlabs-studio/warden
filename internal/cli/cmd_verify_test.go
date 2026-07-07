@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -137,13 +139,12 @@ func TestReasonHint(t *testing.T) {
 }
 
 func TestPrintRange(t *testing.T) {
-	opts := service.RangeVerifyOptions{}
 	base, head := "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"
 
 	// All-pass renders a "verified N" line and no failure marks.
 	pass := service.RangeVerifyResult{Base: base, Head: head, Commits: []domain.CommitVerdict{{SHA: "1111111111111111"}, {SHA: "2222222222222222"}}}
 	var buf bytes.Buffer
-	printRange(&buf, pass, opts)
+	printRange(&buf, pass)
 	if out := buf.String(); !strings.Contains(out, "verified 2 commit") || strings.Contains(out, "✗") {
 		t.Errorf("pass render wrong:\n%s", out)
 	}
@@ -154,7 +155,7 @@ func TestPrintRange(t *testing.T) {
 		{SHA: "3333333333333333", Reason: domain.ReasonMissing},
 	}}
 	buf.Reset()
-	printRange(&buf, fail, opts)
+	printRange(&buf, fail)
 	out := buf.String()
 	if !strings.Contains(out, "✗ 333333333333") || !strings.Contains(out, "no warden note") {
 		t.Errorf("fail render missing per-commit reason:\n%s", out)
@@ -168,9 +169,9 @@ func TestPrintRangeJSON(t *testing.T) {
 	res := service.RangeVerifyResult{Base: "abc", Head: "def", Commits: []domain.CommitVerdict{
 		{SHA: "1111"},
 		{SHA: "2222", Reason: domain.ReasonUntrusted},
-	}}
+	}, Effective: service.RangeVerifyOptions{TrustedKeys: []string{"fp"}}}
 	var out, errb bytes.Buffer
-	if code := printRangeJSON(&out, &errb, res, service.RangeVerifyOptions{TrustedKeys: []string{"fp"}}); code != 0 {
+	if code := printRangeJSON(&out, &errb, res); code != 0 {
 		t.Fatalf("printRangeJSON code=%d err=%q", code, errb.String())
 	}
 	var got rangeExport
@@ -239,5 +240,88 @@ func TestCmdVerifyRange_EndToEnd(t *testing.T) {
 	errb.Reset()
 	if code := cmdVerify([]string{"--range", "HEAD"}, &out, &errb); code != 2 {
 		t.Errorf("bad range: expected exit 2, got %d", code)
+	}
+}
+
+// TestCmdVerifyRange_RosterFromBase is the Finding-1 end-to-end guard: a range
+// gate reads its trusted_keys roster from the BASE ref, so a PR that adds its own
+// signer to .warden.yaml AND signs its commits with that key still FAILS — the
+// widened roster on the head is never consulted. Had the gate read the roster
+// from the working tree (the head), this would pass, which is the vulnerability.
+func TestCmdVerifyRange_RosterFromBase(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init")
+	git("config", "user.email", "t@t.co")
+	git("config", "user.name", "t")
+
+	// The trusted signer pinned by the base, and the attacker's key.
+	trustedPub, _, _ := ed25519.GenerateKey(nil)
+	trustedFP := domain.KeyFingerprint(base64.StdEncoding.EncodeToString(trustedPub))
+	attackerPub, attackerPriv, _ := ed25519.GenerateKey(nil)
+
+	writeRoster := func(keys ...string) {
+		var body strings.Builder
+		body.WriteString("trusted_keys:\n")
+		for _, k := range keys {
+			body.WriteString("  - " + k + "\n")
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".warden.yaml"), []byte(body.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", ".warden.yaml")
+	}
+
+	// BASE: pins only the trusted signer.
+	writeRoster(trustedFP)
+	git("commit", "--no-verify", "-m", "base roster")
+	base := git("rev-parse", "HEAD")
+
+	// HEAD (the attack): the PR both widens the roster to include the attacker key
+	// and is authored under it.
+	writeRoster(trustedFP, domain.KeyFingerprint(base64.StdEncoding.EncodeToString(attackerPub)))
+	git("commit", "--no-verify", "-m", "widen roster + attacker change")
+	head := git("rev-parse", "HEAD")
+
+	chdir(t, dir)
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The attacker self-signs a valid, commit-bound note for the head commit.
+	rec := domain.RunRecord{
+		RunID: "atk", CommitSHA: head, StepsRun: []domain.StepName{"lint"},
+		EvidenceChainRoot: "h0", Evidence: []domain.EvidenceEntry{{Hash: "h0"}},
+		PublicKey: base64.StdEncoding.EncodeToString(attackerPub),
+	}
+	p, _ := rec.SigningPayload()
+	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(attackerPriv, p))
+	if err := svc.Repo().WriteNote(head, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := cmdVerify([]string{"--range", base + ".." + head}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("gate must FAIL when the head's own roster is the only thing trusting the signer; got exit %d\nout=%s", code, out.String())
+	}
+	// The roster came from the base ref, and the reason is untrusted (not merely
+	// missing/unsigned) — the note verifies, just not against a base-trusted key.
+	if !strings.Contains(out.String(), base+":.warden.yaml") {
+		t.Errorf("expected the summary to name the base roster source, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "outside the trusted set") {
+		t.Errorf("expected an untrusted-signer reason, got:\n%s", out.String())
 	}
 }
