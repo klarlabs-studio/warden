@@ -150,6 +150,42 @@ The warden binary must be on the server's `PATH` and `refs/notes/warden` must be
 fetched/received alongside the branch (configure note replication for your
 host).
 
+## Choosing a posture: advisory vs. required
+
+Making the gate a **required** status check is right for a **shared repo with
+contributors you can't fully trust**, a **regulated / high-assurance** project,
+or an **org rolling warden across many repos** (where the roster + `extends:`
+inheritance earns its keep). It is often *too much* for a **solo or small repo**
+that already has branch protection (required signatures, required CI checks):
+the marginal security is small, and a required trusted-signed gate blocks
+**Dependabot/Renovate** (no warden note), **web-UI edits**, and any machine whose
+key isn't in the roster — so you end up reaching for the admin override, and a
+check you routinely override isn't really enforcing.
+
+**Advisory** (run the workflow, but don't add `gate` to branch protection's
+required checks) keeps the visibility and the trusted-signed signal without the
+lock-in. Start there; promote to required once the trust model (below) is solid
+and the friction is acceptable.
+
+## Operating the roster: keys, backup, automation
+
+- **Back up your signer.** warden's key is per-machine (`signing.key` in the
+  config dir). With a single-key roster, losing that machine means you can no
+  longer produce trusted provenance — and adding a new key needs a gated commit
+  signed by a key you no longer have. Avoid the chicken-and-egg: generate a
+  **recovery key now** (point `WARDEN_CONFIG_DIR` at a scratch dir, run
+  `warden key show`), add its fingerprint to `trusted_keys` while your primary
+  still works, and store its seed **offline** (a password manager) — not on the
+  same machine as the primary. To recover, drop the seed into a new machine's
+  `WARDEN_CONFIG_DIR`.
+- **Don't stand up a bot/CI signing key.** A key in a CI secret that can mint
+  *trusted* provenance moves the trust boundary from "a human ran warden on their
+  machine" to "anything that can trigger CI or read the secret" — a much larger
+  attack surface that dilutes exactly what the gate asserts. For automation like
+  Dependabot under a required gate, prefer re-pushing the bot's branch **through
+  warden locally** (warden validates and signs it with *your* trusted key), or
+  run the gate advisory. Keep the trust boundary at a human.
+
 ## Gate vs. skip
 
 They are complements, not alternatives:

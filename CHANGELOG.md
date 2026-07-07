@@ -4,6 +4,16 @@ All notable changes to warden are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and warden adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Docs: guidance on choosing a gate posture and operating the roster.** The CI
+  provenance gate doc now covers advisory-vs-required (required suits shared /
+  high-assurance / org repos; advisory is usually right for a solo repo), backing
+  up your signer against single-key lock-in, and why a bot/CI signing key is best
+  avoided (it moves the trust boundary off a human). No code change.
+
 ## [0.16.0] — 2026-07-06
 
 ### Added
