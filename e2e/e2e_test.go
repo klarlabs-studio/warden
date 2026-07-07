@@ -69,9 +69,18 @@ func (h *harness) git(args ...string) string {
 
 // warden runs the binary and returns (stdout+stderr, exitCode).
 func (h *harness) warden(args ...string) (string, int) {
+	return h.wardenIn("", args...)
+}
+
+// wardenIn runs the binary with stdin fed from a string — used to replay the
+// pushed-ref list git hands a pre-push hook on stdin.
+func (h *harness) wardenIn(stdin string, args ...string) (string, int) {
 	h.t.Helper()
 	cmd := exec.Command(wardenBin, args...)
 	cmd.Dir = h.dir
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -193,6 +202,37 @@ func TestE2E_PrePushPushesWithProvenance(t *testing.T) {
 	}
 	if !strings.Contains(dout, "1 verified") || !strings.Contains(dout, "chain-intact") {
 		t.Errorf("doctor did not report the verified commit: %s", dout)
+	}
+}
+
+// TestE2E_PrePushSkipsNonBranchPush pins the fix for a notes/tag push needlessly
+// re-running the gate: when git's pre-push stdin advances no branch (here a
+// refs/notes/warden push), warden exits 0 without running the pipeline, letting
+// git complete the push itself.
+func TestE2E_PrePushSkipsNonBranchPush(t *testing.T) {
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v %s", err, out)
+	}
+	h := newHarness(t)
+	h.git("remote", "add", "origin", remote)
+	h.write("a.txt", "hello\n")
+	h.git("add", "a.txt")
+	h.git("commit", "--no-verify", "-m", "init")
+	h.git("branch", "-M", "main")
+	h.write(".warden.yaml", cfgLintTestPass)
+	h.warden("init")
+
+	// A notes-only push: git would feed a pre-push hook a single ref line whose
+	// remote ref is refs/notes/warden — no branch is advanced.
+	const zero = "0000000000000000000000000000000000000000"
+	stdin := "refs/notes/warden abc123 refs/notes/warden " + zero + "\n"
+	out, code := h.wardenIn(stdin, "run", "pre-push")
+	if code != 0 {
+		t.Fatalf("notes-only push must not gate; got exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "nothing to gate") {
+		t.Fatalf("expected the skip message, got: %s", out)
 	}
 }
 

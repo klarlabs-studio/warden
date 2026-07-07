@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +33,21 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	hook, err := domain.ParseHook(args[0])
 	if err != nil {
 		return fail(stderr, err)
+	}
+
+	// Git feeds a pre-push hook the refs being pushed on stdin; when the push
+	// advances no branch — a notes-only push (e.g. refs/notes/warden), a tag, a
+	// lone branch deletion, an unrelated ref — there is nothing to gate, so let
+	// git complete the push instead of re-running the whole pipeline (and firing a
+	// spurious notification). Only read when stdin is not a terminal: a real push
+	// pipes the ref list, whereas a manual `warden run pre-push` has an interactive
+	// stdin we must not block on — there we gate as before. A parse error or empty
+	// payload falls through to gating (fail safe toward enforcement).
+	if hook == domain.PrePush && !isatty.IsTerminal(os.Stdin.Fd()) {
+		if gatable, err := pushGatable(os.Stdin); err == nil && !gatable {
+			fmt.Fprintln(stdout, "warden: push advances no branch; nothing to gate.")
+			return 0
+		}
 	}
 
 	// Derive the run's context from the interrupt signals so a Ctrl-C or
@@ -89,6 +106,50 @@ func startAttach(svc interface{ GitDir() (string, error) }) *attach.Server {
 // TUI has something to attach to.
 func isInteractive() bool {
 	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+}
+
+// pushGatable reports whether a git pre-push stdin payload gives warden something
+// to gate. It does when at least one branch (refs/heads/*) is being created or
+// updated. Git feeds a pre-push hook one line per pushed ref:
+//
+//	<local ref> SP <local sha> SP <remote ref> SP <remote sha>
+//
+// A deletion carries an all-zero local sha, so it advances nothing. A push that
+// advances no branch (notes, tags, deletions, unrelated refs) has nothing to
+// gate — return false so the caller lets git complete it. Fail safe toward
+// enforcement: an EMPTY or unreadable payload (a manual `warden run pre-push`, a
+// test) returns true, so warden never skips a push it merely failed to parse;
+// only an affirmatively-parsed, branchless ref set is skipped. Short/blank lines
+// are ignored so a stray line can't wedge the hook.
+func pushGatable(r io.Reader) (bool, error) {
+	sc := bufio.NewScanner(r)
+	sawRef := false
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		sawRef = true
+		localSHA, remoteRef := fields[1], fields[2]
+		if strings.HasPrefix(remoteRef, "refs/heads/") && !isZeroSHA(localSHA) {
+			return true, nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return true, err // unreadable payload: fail safe toward gating
+	}
+	// Refs seen but none advanced a branch → nothing to gate. No refs at all →
+	// not a real push we can reason about → gate.
+	return !sawRef, nil
+}
+
+// isZeroSHA reports whether s is a git null object id (all zeros), which a
+// pre-push line uses for the local sha of a branch deletion.
+func isZeroSHA(s string) bool {
+	if s == "" {
+		return false
+	}
+	return strings.Trim(s, "0") == ""
 }
 
 // runWithTUI drives a pre-push run under the live TUI.
