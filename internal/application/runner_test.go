@@ -230,24 +230,48 @@ func (s *fakeSigner) Sign(payload []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(s.priv, payload)), nil
 }
 
-func TestRunner_ParallelBatchIsolatesWorktrees(t *testing.T) {
+// TestRunner_ReadOnlyBatchSharesCanonical is the cost heuristic: a parallel batch
+// of purely read-only steps (test, lint) needs no per-step isolation — the policy
+// contract guarantees Concurrent ⇒ non-mutating — so the runner clones nothing and
+// every step runs in the canonical worktree, skipping one dep materialization per
+// step (the dominant cost on large JS repos).
+func TestRunner_ReadOnlyBatchSharesCanonical(t *testing.T) {
 	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1"}
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: wt}
 	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-	// prePushCfg runs [test, lint] — both read-only, so they form one parallel
-	// batch. Each must get its own ephemeral worktree, torn down after the batch.
+	// prePushCfg runs [test, lint] — both read-only, so they form one parallel batch.
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
 
 	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
 		t.Fatal(err)
 	}
-	if len(wt.clones) != 2 {
-		t.Fatalf("expected 2 per-step clones for the [test, lint] batch, got %d", len(wt.clones))
+	if len(wt.clones) != 0 {
+		t.Fatalf("read-only batch must not clone; got %d clones", len(wt.clones))
 	}
-	for _, c := range wt.clones {
-		if !c.removed {
-			t.Errorf("clone %s was not torn down after the batch", c.dir)
-		}
+}
+
+// TestRunner_ParallelBatchIsolatesOnlyWriters guards the v0.10.1 write-race fix
+// while claiming the cost win: in a batch mixing a tree-writing agent (review)
+// with a read-only step (test), only the writer is isolated in its own ephemeral
+// worktree (torn down after the batch); the reader shares the canonical one.
+func TestRunner_ParallelBatchIsolatesOnlyWriters(t *testing.T) {
+	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1"}
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: wt}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg()
+	// review is a built-in agent step (writes the tree); test is read-only. Both
+	// are Concurrent, so they schedule into one parallel batch.
+	cfg.Steps["pre_push"] = []domain.StepName{"review", "test"}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if len(wt.clones) != 1 {
+		t.Fatalf("expected only the writer (review) to be isolated, got %d clones", len(wt.clones))
+	}
+	if !wt.clones[0].removed {
+		t.Errorf("writer clone was not torn down after the batch")
 	}
 }
 

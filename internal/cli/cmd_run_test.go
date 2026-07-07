@@ -36,6 +36,42 @@ func TestNoteGitPushError(t *testing.T) {
 	}
 }
 
+// TestPushGatable pins which git pre-push payloads warden gates. Git feeds a
+// pre-push hook one line per pushed ref — "<local ref> <local sha> <remote ref>
+// <remote sha>" — so warden gates only when a branch (refs/heads/*) is being
+// created or updated. A notes-only push, a tag, a lone branch deletion (all-zero
+// local sha), or an unrelated ref advances no branch: nothing to gate, let git
+// complete it. It fails safe toward gating: an empty payload or a set with no
+// well-formed ref line (a manual run, a test) is gated, never silently skipped.
+func TestPushGatable(t *testing.T) {
+	const zero = "0000000000000000000000000000000000000000"
+	cases := []struct {
+		name  string
+		stdin string
+		want  bool
+	}{
+		{"branch update", "refs/heads/main abc123 refs/heads/main def456", true},
+		{"branch create", "refs/heads/feat abc123 refs/heads/feat " + zero, true},
+		{"branch delete", "(delete) " + zero + " refs/heads/old " + zero, false},
+		{"notes ref only", "refs/notes/warden abc123 refs/notes/warden def456", false},
+		{"tag only", "refs/tags/v0.16.0 abc123 refs/tags/v0.16.0 " + zero, false},
+		{"notes plus branch", "refs/notes/warden a1 refs/notes/warden a2\nrefs/heads/main b1 refs/heads/main b2", true},
+		{"empty fails safe to gating", "", true},
+		{"no well-formed ref line fails safe to gating", "\n   \nrefs/heads/main\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := pushGatable(strings.NewReader(tc.stdin))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("pushGatable(%q) = %v, want %v", tc.stdin, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestShouldNotify pins the desktop-notification policy:
 //   - on by default, silenced only by `notify: false`;
 //   - a PASSING run notifies only after it ran long enough (default 10s, or the

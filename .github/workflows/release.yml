@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    # Full semver tags only (v0.16.0, v0.17.0-rc1). The floating major tag the
+    # major-tag job maintains (v0) has no dots, so moving it never re-triggers a
+    # release.
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write # create the GitHub Release
@@ -85,6 +88,32 @@ jobs:
         run: npm publish --access public npm/
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Move a floating major-version tag (v0, v1, …) onto this release so consumers
+  # can pin the reusable action as `warden-gate@v0` and track the latest release
+  # within the major line. Runs only after both delivery channels publish, so the
+  # tag never advances to a half-released version. Its own tag push is filtered
+  # out of this workflow's trigger (v*.*.* — the bare major has no dots), so it
+  # can't re-trigger a release. Prereleases don't move it. Consumers wanting an
+  # immutable ref pin an exact version or commit SHA (see docs/ci-provenance-gate.md).
+  major-tag:
+    needs: [goreleaser, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # force-push the floating major tag
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Move floating major tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"    # e.g. v0.16.0
+          case "$tag" in
+            *-*) echo "prerelease $tag: leaving the major tag where it is"; exit 0 ;;
+          esac
+          major="${tag%%.*}"          # e.g. v0
+          git tag -f "$major" "${GITHUB_SHA}"
+          git push -f origin "refs/tags/$major"
+          echo "moved $major -> $tag (${GITHUB_SHA})"
 
 env:
   GO_VERSION: "1.26.x"

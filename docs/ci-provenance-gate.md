@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
-      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0.16.0
+      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0
         with:
           require-signed: "true"
           key: "<fingerprint1>,<fingerprint2>" # your org's trusted signers
@@ -35,6 +35,24 @@ jobs:
 
 Mark the `gate` job a **required status check** (Settings → Branches → branch
 protection) and un-provenanced PRs can no longer be merged.
+
+### Pinning the action version
+
+`@v0` is a **floating** major tag that points at the newest `v0.x` release, so a
+consumer picks up fixes without editing their workflow each time. warden is
+pre-1.0; once it reaches `v1.0.0` the release publishes a `@v1` tag and `@v0` is
+frozen at its last `v0.x`.
+
+Because warden is itself a supply-chain tool, a security-critical gate is better
+served by an **immutable** reference — pin an exact version (`@v0.16.0`) or,
+strongest, the tag's commit SHA and let Dependabot bump it:
+
+```yaml
+      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0.16.0 # or a commit SHA
+```
+
+Both forms are supported. The trade-off is convenience — `@v0` tracks new
+releases — versus an audited, unchanging reference (`@v0.16.0` or a SHA).
 
 ## What "trustworthy" means, and how to tune it
 
