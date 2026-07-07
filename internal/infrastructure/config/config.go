@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -96,6 +97,79 @@ func loadFrom(root, path string, seen []string) (domain.Config, error) {
 		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
 	}
 	return cfg.OverlayOnto(base), nil
+}
+
+// FileReaderAtRef reads a repo-relative path as committed at some fixed git ref,
+// returning found=false when the ref has no such file. It is the seam that lets
+// ResolveAtRef walk the same extends chain Load walks, but against committed
+// bytes at a ref rather than the working tree.
+type FileReaderAtRef func(repoRelPath string) (data []byte, found bool, err error)
+
+// ResolveAtRef resolves the config — including its extends chain — as committed
+// at a git ref, using read to fetch each file. It mirrors Load's semantics
+// (extends overlay, cycle and depth caps, repo-root containment, the byte cap)
+// but in ref-relative POSIX path space, so a range gate can read its
+// trusted-signer roster from the trusted base rather than the head it is
+// checking. A ref with no root config yields a zero Config.
+func ResolveAtRef(read FileReaderAtRef) (domain.Config, error) {
+	return resolveAtRef(read, FileName, nil)
+}
+
+func resolveAtRef(read FileReaderAtRef, relPath string, seen []string) (domain.Config, error) {
+	data, found, err := read(relPath)
+	if err != nil {
+		return domain.Config{}, err
+	}
+	if !found {
+		return domain.Config{}, nil
+	}
+	if len(data) > maxConfigBytes {
+		return domain.Config{}, fmt.Errorf("read %s at ref: config exceeds %d bytes", relPath, maxConfigBytes)
+	}
+	cfg, err := Parse(data)
+	if err != nil {
+		return domain.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return domain.Config{}, fmt.Errorf("%s: %w", relPath, err)
+	}
+	if cfg.Extends == "" {
+		return cfg, nil
+	}
+	if len(seen) >= maxExtends {
+		return domain.Config{}, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, relPath)
+	}
+	basePath, ok := resolveRelExtends(relPath, cfg.Extends)
+	if !ok {
+		return domain.Config{}, fmt.Errorf("extends target %q escapes repo root", cfg.Extends)
+	}
+	chain := make([]string, 0, len(seen)+1)
+	chain = append(chain, seen...)
+	chain = append(chain, pathpkg.Clean(relPath))
+	if slices.Contains(chain, basePath) {
+		return domain.Config{}, fmt.Errorf("extends cycle: %s already in the chain", basePath)
+	}
+	base, err := resolveAtRef(read, basePath, chain)
+	if err != nil {
+		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
+	}
+	return cfg.OverlayOnto(base), nil
+}
+
+// resolveRelExtends joins a repo-relative extends target against the directory
+// of the file that declared it, staying in POSIX repo-relative space. It rejects
+// an absolute target or one that escapes the repo root (a leading ".." after
+// cleaning) — inherited policy must be committed inside the repo, matching Load's
+// containment rule but expressed in ref-path space.
+func resolveRelExtends(fromRel, extends string) (string, bool) {
+	if pathpkg.IsAbs(extends) {
+		return "", false
+	}
+	joined := pathpkg.Clean(pathpkg.Join(pathpkg.Dir(fromRel), extends))
+	if joined == ".." || strings.HasPrefix(joined, "../") {
+		return "", false
+	}
+	return joined, true
 }
 
 // within reports whether target is contained within root (root itself or a

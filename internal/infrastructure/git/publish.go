@@ -129,6 +129,20 @@ func (r *Repo) TreeSHA(commit string) (string, error) {
 	return r.run("rev-parse", commit+"^{tree}")
 }
 
+// FileAtRef returns the bytes of the repo-relative path as committed at ref.
+// found is false when ref carries no such file (git show exits non-zero), which
+// callers treat as "no committed policy there" rather than an error — a bad ref
+// surfaces earlier, where the range is resolved. path uses forward slashes,
+// matching git's object namespace. This reads committed bytes at a trusted ref
+// (a range gate's base), never the working tree it is checking.
+func (r *Repo) FileAtRef(ref, path string) (data []byte, found bool, err error) {
+	out, err := runRawIn(r.Dir, "show", ref+":"+path)
+	if err != nil {
+		return nil, false, nil
+	}
+	return []byte(out), true, nil
+}
+
 // NotedCommits returns the commits that carry a refs/notes/warden record — the
 // search space a re-attestation draws its already-validated source from.
 func (r *Repo) NotedCommits() ([]string, error) {
