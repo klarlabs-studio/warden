@@ -25,8 +25,13 @@ inputs:
       Trusted signer key(s)/fingerprint(s), comma-separated. When set, every
       commit's note must carry a valid signature from one of these keys —
       raising the gate from "a warden ran" to "a warden I trust ran". Get a
-      fingerprint with `warden key show`. Leave empty to use the repo's committed
-      roster (`.warden.yaml` `trusted_keys`), which also inherits via `extends:`.
+      fingerprint with `warden key show`. Leave empty to use the committed roster
+      (`.warden.yaml` `trusted_keys`), which also inherits via `extends:`. The
+      roster is read from the range's BASE ref (the trusted side, e.g. the PR
+      base), never the head being checked — so a PR cannot add its own key to
+      `.warden.yaml` and self-certify. An explicit `key:` (pinned in this
+      workflow, which lives on the protected base) is the strongest anchor and
+      is worth setting when this gate is a required check.
     required: false
     default: ""
   require-signed:

@@ -44,3 +44,24 @@ Locally, the same primitive is one command:
 ```bash
 warden verify && echo "already validated" || make ci
 ```
+
+## Trust depth: pin `--key` when skipping is a security decision
+
+A bare `warden verify` reports a commit **validated** when it carries an intact,
+commit-bound note — proof a warden *ran*, but not proof of *who* ran it. An
+unsigned note's evidence chain is internally consistent by construction, so
+anyone who can write the note can produce a `validated: true` verdict. That is
+fine for local convenience (`warden verify || make ci` on your own checkout),
+but if a CI job **skips real checks** on the strength of the verdict, require a
+trusted signature:
+
+```bash
+warden verify --key "<fp1>,<fp2>"      # skip only what a trusted key validated
+```
+
+Pass `--key` explicitly (pinned in the workflow, on the protected branch) rather
+than relying on the working-tree roster: single-commit verify has no base ref to
+read a roster from, so an in-tree `trusted_keys` is only as trustworthy as the
+commit you are about to skip. The range gate (`--range`) does read its roster
+from the trusted base automatically — see
+[provenance-gate](ci-provenance-gate.md).
