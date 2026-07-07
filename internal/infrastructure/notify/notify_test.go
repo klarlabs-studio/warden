@@ -46,21 +46,23 @@ func TestQuote(t *testing.T) {
 
 func TestSend_IsBestEffortAndNeverPanics(t *testing.T) {
 	// Stub the shell-out so the test never pops a real desktop notification on a
-	// machine that has a notifier (a dev's macOS box). On a platform WITHOUT one,
-	// Send no-ops before reaching the stub — either way it must not panic.
+	// machine that has a notifier (a dev's macOS box).
 	orig := runNotifier
 	t.Cleanup(func() { runNotifier = orig })
-	called := false
-	runNotifier = func(context.Context, string, ...string) error {
-		called = true
+	var gotName string
+	runNotifier = func(_ context.Context, name string, _ ...string) error {
+		gotName = name
 		return nil
 	}
 
 	Send("warden: passed", `pushed "main"`)
 
-	// When this platform has a notifier, Send must route through the stub (not the
-	// real notifier); when it doesn't, called stays false and that is fine too.
-	if name, _ := command(runtime.GOOS, "t", "b"); name != "" && !called {
-		t.Errorf("Send did not route through the notifier seam on a supported platform")
+	// Send is best-effort: on a platform whose notifier is installed it routes the
+	// platform command through the seam (never the real binary); on a platform
+	// without one — an unsupported OS, or CI with no notify-send — it silently
+	// no-ops before the seam. Either way it must not panic, and must never invoke
+	// anything but the platform notifier.
+	if want, _ := command(runtime.GOOS, "x", "y"); gotName != "" && gotName != want {
+		t.Errorf("Send invoked %q, want the platform notifier %q", gotName, want)
 	}
 }
