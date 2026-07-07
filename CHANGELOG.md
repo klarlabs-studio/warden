@@ -6,13 +6,46 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-07
+
+### Added
+
+- **Floating `v0` action tag.** The reusable `warden-gate` / `warden-verify`
+  actions can be referenced as `@v0`, a major-version tag that tracks the latest
+  `v0.x` release (a `major-tag` release job keeps it current; it becomes `@v1`
+  once warden reaches 1.0.0). Docs recommend `@v0` for convenience and an exact
+  version or commit SHA for a security-critical, immutable gate.
+
 ### Changed
 
+- **Parallel batches isolate only tree-writers.** Per-step worktree isolation now
+  clones an ephemeral worktree only for steps that write the tree (agents);
+  read-only checks (`test`/`lint`/scan) share the canonical worktree, which the
+  policy contract already guarantees they don't mutate. The common `test‖lint`
+  batch materializes no extra dependency copies — the per-batch clone count drops
+  from N to the number of writers, usually zero, cutting setup cost most on large
+  cross-filesystem JS repos. The v0.10.1 write-race fix is unchanged (ADR-0001
+  Phase 4).
 - **Docs: guidance on choosing a gate posture and operating the roster.** The CI
   provenance gate doc now covers advisory-vs-required (required suits shared /
   high-assurance / org repos; advisory is usually right for a solo repo), backing
   up your signer against single-key lock-in, and why a bot/CI signing key is best
   avoided (it moves the trust boundary off a human). No code change.
+
+### Fixed
+
+- **A push that advances no branch no longer re-runs the gate.** The pre-push hook
+  ignored git's stdin and always gated the current branch's HEAD, so a notes push
+  (`refs/notes/warden`), a tag, a branch deletion, or an unrelated ref needlessly
+  re-ran the whole validation pipeline and made warden push HEAD. warden now reads
+  the pushed-ref list and exits 0 (letting git complete the push) when no
+  `refs/heads/*` ref is created or updated. Fail-safe toward gating: it reads
+  stdin only when it isn't a terminal (a manual run is never blocked), and an
+  empty or unparseable payload still gates. Branch pushes gate exactly as before.
+- **The notification test no longer pops a desktop notification.** A unit test
+  called the real `notify.Send`, which shells out to `osascript`/`notify-send`, so
+  every `go test` run on a machine with a notifier fired a stray "title / body"
+  desktop notification. The shell-out is now behind a seam the test stubs.
 
 ## [0.16.0] — 2026-07-06
 
