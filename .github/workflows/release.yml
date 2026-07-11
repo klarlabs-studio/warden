@@ -69,39 +69,33 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ env.GO_VERSION }}
-      # IMPORTANT: no `registry-url` here. Per npm's trusted-publishing docs, the
-      # registry-url input makes setup-node write an .npmrc that conflicts with
-      # OIDC auth. Trusted publishing needs only npm >= 11.5.1 + id-token + no
-      # token; npm targets the default registry (npmjs) and authenticates via OIDC.
+      # registry-url IS required. The official npm trusted-publishing docs example
+      # sets it, and setup-node's registry-url is what points npm at npmjs and lets
+      # its OIDC detection engage. Omitting it (an earlier misreading) left npm on
+      # no explicit registry → it never entered the trusted-publishing path and
+      # fell back to token auth → ENEEDAUTH. Node 24's bundled npm is >= 11.5.1
+      # (the floor); no force-install needed.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
-      # Use Node 24's bundled npm (already >= 11.5.1, the trusted-publishing
-      # floor) rather than force-installing a pinned npm. This matches the
-      # confirmed-working minimal OIDC setup; earlier force-installs of both
-      # npm 11.x and 12.x still ENEEDAUTH'd, so the version was never the issue.
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
       - name: Report toolchain
         run: echo "node $(node -v) / npm $(npm -v)"
       - name: Build binaries
         run: go run github.com/goreleaser/goreleaser/v2@latest build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
-      # npm trusted publishing (OIDC). Two details make the CLI actually engage
-      # OIDC instead of falling back to token auth (which surfaces as ENEEDAUTH):
-      #   - NODE_AUTH_TOKEN must be EXPLICITLY empty so npm does not treat an
-      #     ambient/default token as "auth present" and skip OIDC;
-      #   - publish from INSIDE each package dir (cd), not by passing a dir arg.
-      # id-token: write is granted at the workflow level; no NPM_TOKEN is used.
+      # npm trusted publishing (OIDC) — matches the official docs example: with
+      # registry-url set and NO NODE_AUTH_TOKEN in the env, the npm CLI auto-detects
+      # the OIDC environment (id-token: write is granted at the workflow level) and
+      # authenticates without a token. Publish from INSIDE each package dir (cd).
       - name: Publish platform packages
-        env:
-          NODE_AUTH_TOKEN: ""
         run: |
           for d in npm/packages/*/; do
             ( cd "$d" && npm publish --provenance --access public )
           done
       - name: Publish wrapper
-        env:
-          NODE_AUTH_TOKEN: ""
         run: cd npm && npm publish --provenance --access public
 
   # Move a floating major-version tag (v0, v1, …) onto this release so consumers
