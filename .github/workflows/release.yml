@@ -72,7 +72,10 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+      # NOTE: deliberately NO registry-url — it makes setup-node write an
+      # .npmrc with an (empty) _authToken line, which makes `npm publish` attempt
+      # token auth and 404 instead of falling back to OIDC trusted publishing.
+      # Without it, npm targets the default registry (npmjs) and uses OIDC.
       # Node 24 ships npm 11.x; ensure >= 11.5.1 for trusted publishing (OIDC).
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
