@@ -76,30 +76,33 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
-      - name: Ensure npm 11.x for trusted publishing
-        # Pin to npm 11.x rather than @latest: npm 12 (12.0.1) is brand-new and
-        # appears not to engage OIDC trusted publishing here (ENEEDAUTH); every
-        # working reference uses npm 11.x. 11.5.1+ is the required floor.
-        run: |
-          corepack enable || true
-          npm install -g 'npm@^11.5.1'
-          hash -r
-          echo "node $(node -v) / npm $(npm -v)"
+      # Use Node 24's bundled npm (already >= 11.5.1, the trusted-publishing
+      # floor) rather than force-installing a pinned npm. This matches the
+      # confirmed-working minimal OIDC setup; earlier force-installs of both
+      # npm 11.x and 12.x still ENEEDAUTH'd, so the version was never the issue.
+      - name: Report toolchain
+        run: echo "node $(node -v) / npm $(npm -v)"
       - name: Build binaries
         run: go run github.com/goreleaser/goreleaser/v2@latest build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
-      # Publish via npm trusted publishing (OIDC). --provenance forces the OIDC
-      # path (and attests provenance) instead of falling back to the token-based
-      # .npmrc that setup-node writes; id-token: write is granted at the workflow
-      # level, so no NPM_TOKEN is needed. Mirrors klarlabs-studio/fortify-ts.
+      # npm trusted publishing (OIDC). Two details make the CLI actually engage
+      # OIDC instead of falling back to token auth (which surfaces as ENEEDAUTH):
+      #   - NODE_AUTH_TOKEN must be EXPLICITLY empty so npm does not treat an
+      #     ambient/default token as "auth present" and skip OIDC;
+      #   - publish from INSIDE each package dir (cd), not by passing a dir arg.
+      # id-token: write is granted at the workflow level; no NPM_TOKEN is used.
       - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ""
         run: |
           for d in npm/packages/*/; do
-            npm publish --provenance --access public "$d"
+            ( cd "$d" && npm publish --provenance --access public )
           done
       - name: Publish wrapper
-        run: npm publish --provenance --access public npm/
+        env:
+          NODE_AUTH_TOKEN: ""
+        run: cd npm && npm publish --provenance --access public
 
   # Move a floating major-version tag (v0, v1, …) onto this release so consumers
   # can pin the reusable action as `warden-gate@v0` and track the latest release
