@@ -73,21 +73,23 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+      # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.x.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
       - name: Build binaries
         run: go run github.com/goreleaser/goreleaser/v2@latest build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
+      # Publish via npm trusted publishing (OIDC) — id-token: write is granted at
+      # the workflow level; no NPM_TOKEN needed. npm attaches provenance
+      # automatically for OIDC publishes.
       - name: Publish platform packages
         run: |
           for d in npm/packages/*/; do
             npm publish --access public "$d"
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish wrapper
         run: npm publish --access public npm/
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # Move a floating major-version tag (v0, v1, …) onto this release so consumers
   # can pin the reusable action as `warden-gate@v0` and track the latest release
