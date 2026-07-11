@@ -76,6 +76,15 @@ for (const t of TARGETS) {
         name,
         version,
         description: `warden binary for ${t.platform}-${t.arch}`,
+        // repository.url must match the GitHub repo exactly, or npm's OIDC
+        // trusted-publishing validation can't match the package to its
+        // configured trusted publisher and publish fails with ENEEDAUTH. The
+        // wrapper already carries this; the per-platform packages did not, which
+        // is why every per-platform publish ENEEDAUTH'd first in the loop.
+        repository: {
+          type: "git",
+          url: "https://github.com/klarlabs-studio/warden.git",
+        },
         os: [t.platform],
         cpu: [t.arch],
         files: [`bin/${exe}`],
