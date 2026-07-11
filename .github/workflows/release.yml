@@ -86,27 +86,20 @@ jobs:
         run: go run github.com/goreleaser/goreleaser/v2@latest build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
-      # npm trusted publishing (OIDC). registry-url (above) engages OIDC — but it
-      # also makes setup-node seed .npmrc with `_authToken=${NODE_AUTH_TOKEN}` and
-      # a PLACEHOLDER NODE_AUTH_TOKEN. npm would use that invalid token for the
-      # publish PUT (→ 404) even though provenance signs via OIDC. Setting
-      # NODE_AUTH_TOKEN="" empties the .npmrc token so the publish itself falls to
-      # OIDC. id-token: write is granted at the workflow level; no real token used.
+      # npm trusted publishing (OIDC). registry-url (above) is what makes the npm
+      # CLI engage OIDC — it signs provenance and authenticates without a real
+      # token. Do NOT override NODE_AUTH_TOKEN with "": that empties the .npmrc
+      # token and npm then ENEEDAUTHs instead of using OIDC (confirmed on v0.18.14).
+      # setup-node's default placeholder token is harmless here. Any remaining 404
+      # is a trusted-publisher authorization match on npmjs (org/repo/workflow/
+      # environment/allowed-action must match exactly), not a workflow issue.
       # Publish from INSIDE each package dir (cd).
       - name: Publish platform packages
-        env:
-          # Clear setup-node's placeholder NODE_AUTH_TOKEN so npm does not use it
-          # (an invalid token) for the publish PUT. registry-url engages OIDC
-          # (provenance signs fine); an empty token forces the publish onto OIDC
-          # too, matching the trusted publisher. Without this the PUT 404s.
-          NODE_AUTH_TOKEN: ""
         run: |
           for d in npm/packages/*/; do
             ( cd "$d" && npm publish --provenance --access public )
           done
       - name: Publish wrapper
-        env:
-          NODE_AUTH_TOKEN: ""
         run: cd npm && npm publish --provenance --access public
 
   # Move a floating major-version tag (v0, v1, …) onto this release so consumers
