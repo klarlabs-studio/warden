@@ -36,18 +36,15 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	// A range gate resolves its roster from the BASE ref (the trusted side), so it
+	// gets its own resolution path — see runVerifyRange.
+	if *rangeSpec != "" {
+		return runVerifyRange(svc, *rangeSpec, *keys, *requireSigned, *skipMerges, *jsonOut, *quiet, stdout, stderr)
+	}
+
 	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
 	// roster, so a repo enforces trusted provenance without passing fingerprints.
 	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
-
-	if *rangeSpec != "" {
-		return runVerifyRange(svc, *rangeSpec, service.RangeVerifyOptions{
-			RequireSigned: *requireSigned,
-			TrustedKeys:   trusted,
-			SkipMerges:    *skipMerges,
-		}, *jsonOut, *quiet, fromRoster, stdout, stderr)
-	}
-
 	res, err := svc.Verify(*commit, trusted...)
 	if err != nil {
 		return fail(stderr, err)
@@ -65,11 +62,18 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-// resolveTrustedKeys returns the effective trusted-signer set and whether it
-// came from the committed roster. An explicit --key list wins outright;
-// otherwise the .warden.yaml `trusted_keys` roster supplies it, so committing a
-// roster turns on trusted-signed enforcement without a flag on every call. A
-// config-load error degrades to "no roster" — verify never hard-fails on it.
+// resolveTrustedKeys returns the effective trusted-signer set for a
+// single-commit `warden verify` and whether it came from the committed roster.
+// An explicit --key list wins outright; otherwise the working-tree .warden.yaml
+// `trusted_keys` roster supplies it, so committing a roster turns on
+// trusted-signed enforcement without a flag on every call. A config-load error
+// degrades to "no roster" — verify never hard-fails on it.
+//
+// Reading the roster from the working tree is safe here because single-commit
+// verify is a local convenience (you trust your own checkout). CI provenance-skip
+// that gates a commit it did not produce should pin --key explicitly rather than
+// trust an in-tree roster; a range gate does this structurally by reading the
+// roster from its base ref (see resolveRangeTrustedKeys).
 func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fromRoster bool) {
 	if strings.TrimSpace(keyFlag) != "" {
 		return splitList(keyFlag), false
@@ -84,27 +88,38 @@ func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fr
 // runVerifyRange gates a BASE..HEAD range: it exits 0 only when every commit
 // carries provenance to the required depth, and non-zero (with per-commit
 // reasons) otherwise. This is the primitive a PR required-check or a
-// pre-receive hook wraps — see docs/adr/0002.
-func runVerifyRange(svc *service.Service, spec string, opts service.RangeVerifyOptions, jsonOut, quiet, fromRoster bool, stdout, stderr io.Writer) int {
+// pre-receive hook wraps — see docs/adr/0002. The CLI passes intent (an explicit
+// --key, or "use the committed roster"); the service resolves the roster from the
+// trusted BASE ref, so the trust invariant lives in the core, not here.
+func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, skipMerges, jsonOut, quiet bool, stdout, stderr io.Writer) int {
 	base, head, ok := parseRange(spec)
 	if !ok {
 		fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
 		return 2
+	}
+	opts := service.RangeVerifyOptions{
+		RequireSigned: requireSigned,
+		SkipMerges:    skipMerges,
+	}
+	if k := strings.TrimSpace(keyFlag); k != "" {
+		opts.TrustedKeys = splitList(k) // explicit pin wins outright
+	} else {
+		opts.UseRoster = true // let the service read the roster from the base ref
 	}
 	res, err := svc.VerifyRange(base, head, opts)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	if !quiet {
-		if fromRoster && !jsonOut {
-			fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(opts.TrustedKeys))
+		if res.RosterFromBase && !jsonOut {
+			fmt.Fprintf(stdout, "warden: requiring a trusted signer from %s:.warden.yaml (%d key(s))\n", base, len(res.Effective.TrustedKeys))
 		}
 		if jsonOut {
-			if code := printRangeJSON(stdout, stderr, res, opts); code != 0 {
+			if code := printRangeJSON(stdout, stderr, res); code != 0 {
 				return code
 			}
 		} else {
-			printRange(stdout, res, opts)
+			printRange(stdout, res)
 		}
 	}
 	if res.OK() {
@@ -156,7 +171,8 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 }
 
 // gateDepth names, for the human summary, how strict this gate was — so a green
-// result is not mistaken for more assurance than it checked.
+// result is not mistaken for more assurance than it checked. It reads the
+// EFFECTIVE options (roster already resolved from the base ref).
 func gateDepth(opts service.RangeVerifyOptions) string {
 	switch {
 	case len(opts.TrustedKeys) > 0:
@@ -187,16 +203,16 @@ func reasonHint(r domain.VerifyReason) string {
 
 // printRange renders the human-readable range-gate result: a per-failure line
 // for anything that did not pass, then a one-line verdict naming the depth.
-func printRange(w io.Writer, res service.RangeVerifyResult, opts service.RangeVerifyOptions) {
+func printRange(w io.Writer, res service.RangeVerifyResult) {
 	fails := res.Failures()
 	for _, v := range fails {
 		fmt.Fprintf(w, "  ✗ %s — %s\n", short(v.SHA), reasonHint(v.Reason))
 	}
 	if len(fails) == 0 {
-		fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(opts))
+		fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
 		return
 	}
-	fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(opts))
+	fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
 }
 
 // rangeExport is the stable JSON shape a CI job or the Phase-2 action consumes.
@@ -213,11 +229,11 @@ type rangeExport struct {
 // printRangeJSON emits the range result as JSON. It returns a non-zero CLI code
 // only on an encode failure; the pass/fail exit is decided by the caller from
 // res.OK so --json and text share one exit contract.
-func printRangeJSON(stdout, stderr io.Writer, res service.RangeVerifyResult, opts service.RangeVerifyOptions) int {
+func printRangeJSON(stdout, stderr io.Writer, res service.RangeVerifyResult) int {
 	out := rangeExport{
 		Base:    res.Base,
 		Head:    res.Head,
-		Depth:   gateDepth(opts),
+		Depth:   gateDepth(res.Effective),
 		OK:      res.OK(),
 		Total:   len(res.Commits),
 		Failed:  len(res.Failures()),

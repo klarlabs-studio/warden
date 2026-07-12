@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -170,6 +171,78 @@ func TestRepository_LoadResolvesExtends(t *testing.T) {
 	if cfg.Commands["test"] != "go test -race ./..." {
 		t.Errorf("child override lost: %q", cfg.Commands["test"])
 	}
+}
+
+func TestResolveAtRef(t *testing.T) {
+	// ResolveAtRef reads committed bytes via a reader keyed on repo-relative path,
+	// standing in for `git show <base>:<path>`. It must mirror Load: overlay the
+	// extends chain, reject an escape, detect a cycle, cap size.
+	reader := func(files map[string]string) FileReaderAtRef {
+		return func(rel string) ([]byte, bool, error) {
+			data, ok := files[rel]
+			return []byte(data), ok, nil
+		}
+	}
+
+	t.Run("resolves the roster as the union of the extends chain", func(t *testing.T) {
+		cfg, err := ResolveAtRef(reader(map[string]string{
+			FileName:           "extends: policy/base.yaml\ntrusted_keys:\n  - 1111111111111111\n",
+			"policy/base.yaml": "agent: claude\ntrusted_keys:\n  - 2222222222222222\n",
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The roster is the UNION of base + child (a child can't silently drop a
+		// base-trusted key), and the base's agent is inherited — same semantics as
+		// Load, now resolved from committed bytes at a ref.
+		if len(cfg.TrustedKeys) != 2 {
+			t.Errorf("roster should union the chain, got %v", cfg.TrustedKeys)
+		}
+		if !slices.Contains(cfg.TrustedKeys, "1111111111111111") || !slices.Contains(cfg.TrustedKeys, "2222222222222222") {
+			t.Errorf("roster union missing a key: %v", cfg.TrustedKeys)
+		}
+		if cfg.Agent != "claude" {
+			t.Errorf("base field not inherited at ref: %q", cfg.Agent)
+		}
+	})
+
+	t.Run("a missing root config yields a zero config", func(t *testing.T) {
+		cfg, err := ResolveAtRef(reader(map[string]string{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.TrustedKeys) != 0 {
+			t.Errorf("expected no roster, got %v", cfg.TrustedKeys)
+		}
+	})
+
+	t.Run("an extends escape is rejected in ref space", func(t *testing.T) {
+		for _, esc := range []string{"../../shared.yaml", "/etc/warden/shared.yaml"} {
+			_, err := ResolveAtRef(reader(map[string]string{FileName: "extends: " + esc + "\n"}))
+			if err == nil {
+				t.Errorf("extends %q must be rejected", esc)
+			}
+		}
+	})
+
+	t.Run("an extends cycle errors", func(t *testing.T) {
+		_, err := ResolveAtRef(reader(map[string]string{
+			FileName: "extends: b.yaml\n",
+			"b.yaml": "extends: .warden.yaml\n",
+		}))
+		if err == nil {
+			t.Error("an extends cycle must error")
+		}
+	})
+
+	t.Run("an oversized config errors", func(t *testing.T) {
+		_, err := ResolveAtRef(func(rel string) ([]byte, bool, error) {
+			return make([]byte, maxConfigBytes+1), true, nil
+		})
+		if err == nil {
+			t.Error("a config over the byte cap must error")
+		}
+	})
 }
 
 func TestRepository_ExtendsEscapeRejected(t *testing.T) {

@@ -15,7 +15,12 @@ import (
 
 func TestCmdReattest(t *testing.T) {
 	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir()) // local signer for the re-attestation
-	dir := repoWithConfig(t, "")
+	// The source note below is signed by this key; pin it in the roster so it is a
+	// trusted re-attestation source (an untrusted source is refused — see the
+	// service-level reattest tests).
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	fp := domain.KeyFingerprint(base64.StdEncoding.EncodeToString(pub))
+	dir := repoWithConfig(t, "trusted_keys:\n  - "+fp+"\n")
 	svc, err := newService(autoApprover{})
 	if err != nil {
 		t.Fatal(err)
@@ -41,8 +46,7 @@ func TestCmdReattest(t *testing.T) {
 	git("commit", "--allow-empty", "--no-verify", "-m", "B")
 	b := head()
 
-	// A carries a valid signed note.
-	pub, priv, _ := ed25519.GenerateKey(nil)
+	// A carries a valid signed note from the pinned (trusted) key.
 	rec := domain.RunRecord{
 		RunID: "rA", CommitSHA: a, StepsRun: []domain.StepName{"lint"},
 		EvidenceChainRoot: "h0", Evidence: []domain.EvidenceEntry{{Hash: "h0"}},
