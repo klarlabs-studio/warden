@@ -49,6 +49,22 @@ func sign(t *testing.T, rec domain.RunRecord, pub ed25519.PublicKey, priv ed2551
 	return rec
 }
 
+// signAs signs rec with the service's own provenance key — the canonical
+// re-attestation source: a commit this very machine validated. Its signer is
+// always trusted for a re-attestation (reattestTrustSet includes our own key).
+func signAs(t *testing.T, svc *Service, rec domain.RunRecord) domain.RunRecord {
+	t.Helper()
+	rec.PublicKey, rec.Signature = svc.signer.PublicKey(), ""
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Signature, err = svc.signer.Sign(payload); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
 func TestService_VerifyRange(t *testing.T) {
 	dir := initRepo(t)
 	svc, err := New(dir, "test", autoApprover{})
