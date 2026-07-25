@@ -66,7 +66,7 @@ func (r *Repo) Push(remote, branch string, force domain.PushForce) error {
 	// pre-push hook is told nothing about the developer's --force flag, so a
 	// plain push here fails as non-fast-forward no matter what they typed.
 	if force == domain.ForceLease {
-		if lease, err := r.remoteTrackingSHA(remote, branch); err == nil && lease != "" {
+		if lease := r.remoteTrackingSHA(remote, branch); lease != "" {
 			// Pin the lease to the REMOTE-TRACKING ref — what this clone last
 			// fetched — not to the remote's live value. Pinning to the live value
 			// would make the lease vacuously true and degrade it to a bare --force,
@@ -81,12 +81,15 @@ func (r *Repo) Push(remote, branch string, force domain.PushForce) error {
 
 // remoteTrackingSHA returns this clone's last-fetched value for remote/branch,
 // or "" when no such ref exists (a branch that has never been pushed).
-func (r *Repo) remoteTrackingSHA(remote, branch string) (string, error) {
+// remoteTrackingSHA returns the tracking ref's commit, or "" if there is none.
+// It cannot fail: an absent ref is a clean miss, not an error, so callers get a
+// plain string rather than an error they would only ever compare against nil.
+func (r *Repo) remoteTrackingSHA(remote, branch string) string {
 	out, err := r.run("rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+branch)
 	if err != nil {
-		return "", nil // absent tracking ref is a clean miss, not a failure
+		return ""
 	}
-	return strings.TrimSpace(out), nil
+	return strings.TrimSpace(out)
 }
 
 // PushSpanBase returns the commit this push starts from: the newest commit
@@ -141,9 +144,9 @@ func (r *Repo) CommitsInSpan(base, head string) ([]string, error) {
 // never sees. A branch with no remote-tracking ref (never pushed) rewrites
 // nothing. Errors resolve to false: warden must not force on a guess.
 func (r *Repo) PushRewritesHistory(remote, branch string) (bool, error) {
-	remoteTip, err := r.remoteTrackingSHA(remote, branch)
-	if err != nil || remoteTip == "" {
-		return false, err
+	remoteTip := r.remoteTrackingSHA(remote, branch)
+	if remoteTip == "" {
+		return false, nil
 	}
 	local, err := r.run("rev-parse", "--verify", branch)
 	if err != nil {

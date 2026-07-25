@@ -24,7 +24,7 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *formatFlag != "text" && *formatFlag != "json" && *formatFlag != "md" {
-		fmt.Fprintf(stderr, "warden: unknown --format %q (want text, json, or md)\n", *formatFlag)
+		_, _ = fmt.Fprintf(stderr, "warden: unknown --format %q (want text, json, or md)\n", *formatFlag)
 		return 2
 	}
 
@@ -117,11 +117,11 @@ func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
 // printAuditText renders a human-readable audit: a framed header, one line per
 // commit, and a summary — the doctor view reframed as an evidence report.
 func printAuditText(w io.Writer, r domain.AuditReport) {
-	fmt.Fprintln(w, "warden audit — commit provenance report")
-	fmt.Fprintf(w, "  branch:    %s\n", r.Branch)
-	fmt.Fprintf(w, "  adoption:  %s\n", short(r.Adoption))
-	fmt.Fprintf(w, "  generated: %s\n", time.Now().UTC().Format(time.RFC3339))
-	fmt.Fprintln(w, "commits:")
+	_, _ = fmt.Fprintln(w, "warden audit — commit provenance report")
+	_, _ = fmt.Fprintf(w, "  branch:    %s\n", r.Branch)
+	_, _ = fmt.Fprintf(w, "  adoption:  %s\n", short(r.Adoption))
+	_, _ = fmt.Fprintf(w, "  generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	_, _ = fmt.Fprintln(w, "commits:")
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		switch {
@@ -130,27 +130,27 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 			if !c.ChainIntact {
 				state = "TAMPERED"
 			}
-			fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
+			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
 		case c.Reattestable():
-			fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
+			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.ReattestableFrom))
 		default:
-			fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (no warden note)\n",
+			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (no warden note)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
 	verified, intact, unverified := r.Counts()
-	fmt.Fprintf(w, "summary: %d verified (%d chain-intact), %d unverified since adoption\n",
+	_, _ = fmt.Fprintf(w, "summary: %d verified (%d chain-intact), %d unverified since adoption\n",
 		verified, intact, unverified)
 }
 
 // printAuditMarkdown renders a table plus a summary line, suitable for pasting
 // into a compliance doc or PR body.
 func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
-	fmt.Fprintf(w, "# Warden audit — `%s` since adoption `%s`\n\n", r.Branch, short(r.Adoption))
-	fmt.Fprintln(w, "| SHA | Date | Subject | Status | Run |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- |")
+	_, _ = fmt.Fprintf(w, "# Warden audit — `%s` since adoption `%s`\n\n", r.Branch, short(r.Adoption))
+	_, _ = fmt.Fprintln(w, "| SHA | Date | Subject | Status | Run |")
+	_, _ = fmt.Fprintln(w, "| --- | --- | --- | --- | --- |")
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		status, run := "unverified", "—"
@@ -162,10 +162,10 @@ func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
 		case c.Reattestable():
 			status, run = "unverified (reattestable)", "`"+short(c.ReattestableFrom)+"`"
 		}
-		fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s |\n",
+		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s |\n",
 			short(c.SHA), c.Date, truncate(c.Subject, 40), status, run)
 	}
 	verified, intact, unverified := r.Counts()
-	fmt.Fprintf(w, "\n**Summary:** %d verified (%d chain-intact), %d unverified since adoption.\n",
+	_, _ = fmt.Fprintf(w, "\n**Summary:** %d verified (%d chain-intact), %d unverified since adoption.\n",
 		verified, intact, unverified)
 }

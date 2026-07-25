@@ -24,7 +24,7 @@ func Attach(ctx context.Context, gitDir string, w io.Writer) error {
 	if err != nil {
 		return ErrNoRun
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Unblock the blocking Read below when the caller cancels.
 	go func() {
@@ -32,7 +32,7 @@ func Attach(ctx context.Context, gitDir string, w io.Writer) error {
 		_ = conn.Close()
 	}()
 
-	fmt.Fprintln(w, "attached to warden run — live:")
+	_, _ = fmt.Fprintln(w, "attached to warden run — live:")
 	dec := json.NewDecoder(bufio.NewReader(conn))
 	for {
 		var ev Event
@@ -53,25 +53,25 @@ func Attach(ctx context.Context, gitDir string, w io.Writer) error {
 func render(w io.Writer, ev Event) {
 	switch ev.Type {
 	case "done":
-		fmt.Fprintf(w, "\n%s — %s\n", ev.Outcome, ev.Message)
+		_, _ = fmt.Fprintf(w, "\n%s — %s\n", ev.Outcome, ev.Message)
 	case "step":
 		switch ev.Phase {
 		case "started":
-			fmt.Fprintf(w, "▶ %s\n", ev.Step)
+			_, _ = fmt.Fprintf(w, "▶ %s\n", ev.Step)
 		case "output":
-			fmt.Fprintf(w, "    %s\n", ev.Line)
+			_, _ = fmt.Fprintf(w, "    %s\n", ev.Line)
 		case "finished":
 			glyph := "✓"
 			if ev.Status == string(domain.StepFail) {
 				glyph = "✗"
 			}
-			fmt.Fprintf(w, "%s %s\n", glyph, ev.Step)
+			_, _ = fmt.Fprintf(w, "%s %s\n", glyph, ev.Step)
 			for _, f := range ev.Findings {
 				loc := f.File
 				if f.Line > 0 {
 					loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 				}
-				fmt.Fprintf(w, "    [%s] %s %s\n", f.Severity, loc, f.Message)
+				_, _ = fmt.Fprintf(w, "    [%s] %s %s\n", f.Severity, loc, f.Message)
 			}
 		}
 	}

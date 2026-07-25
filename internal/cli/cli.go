@@ -63,16 +63,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		return cmdHelp(stdout)
 	case "version", "--version":
-		fmt.Fprintln(stdout, "warden "+Version)
+		_, _ = fmt.Fprintln(stdout, "warden "+Version)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "warden: unknown command %q\n", cmd)
+		_, _ = fmt.Fprintf(stderr, "warden: unknown command %q\n", cmd)
 		return 2
 	}
 }
 
 func cmdHelp(w io.Writer) int {
-	fmt.Fprint(w, `warden — configurable git commit/push gate
+	_, _ = fmt.Fprint(w, `warden — configurable git commit/push gate
 
 Usage:
   warden status                               show gate state, armed hooks, policy
@@ -105,6 +105,6 @@ Usage:
 
 // fail prints an error to stderr and returns a non-zero code.
 func fail(stderr io.Writer, err error) int {
-	fmt.Fprintf(stderr, "warden: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "warden: %v\n", err)
 	return 1
 }

@@ -51,7 +51,7 @@ func (s *Server) acceptLoop() {
 // serve registers a client channel and streams its events to conn until the
 // channel closes (run ended) or the write fails (watcher left).
 func (s *Server) serve(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	ch := make(chan Event, clientBuffer)
 
 	s.mu.Lock()

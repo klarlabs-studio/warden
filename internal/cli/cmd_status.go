@@ -25,14 +25,14 @@ func cmdStatus(stdout, stderr io.Writer) int {
 		return cmdHelp(stdout)
 	}
 
-	fmt.Fprintf(stdout, "warden %s — %s\n\n", Version, svc.Repo().Dir)
+	_, _ = fmt.Fprintf(stdout, "warden %s — %s\n\n", Version, svc.Repo().Dir)
 
 	installed, err := svc.InstalledHooks()
 	if err != nil {
 		return fail(stderr, err)
 	}
 	pins, _ := svc.HookPins() // diagnostic only; a nil map just omits the pin
-	fmt.Fprintln(stdout, "hooks:")
+	_, _ = fmt.Fprintln(stdout, "hooks:")
 	for _, h := range domain.AllHooks {
 		state := "not installed"
 		if installed[h] {
@@ -41,34 +41,34 @@ func cmdStatus(stdout, stderr io.Writer) int {
 				state += " (pinned " + v + ")"
 			}
 		}
-		fmt.Fprintf(stdout, "  %-11s %s\n", h, state)
+		_, _ = fmt.Fprintf(stdout, "  %-11s %s\n", h, state)
 	}
 	if line := pinSkewLine(pins, Version); line != "" {
-		fmt.Fprintf(stdout, "\n%s\n", line)
+		_, _ = fmt.Fprintf(stdout, "\n%s\n", line)
 	}
 
 	if adoption, err := svc.Repo().ReadAdoption(); err == nil && adoption != "" {
-		fmt.Fprintf(stdout, "\nadoption point: %s\n", short(adoption))
+		_, _ = fmt.Fprintf(stdout, "\nadoption point: %s\n", short(adoption))
 	} else {
-		fmt.Fprintln(stdout, "\nnot initialized — run `warden init`")
+		_, _ = fmt.Fprintln(stdout, "\nnot initialized — run `warden init`")
 	}
 
 	pre, push, err := svc.StepsList()
 	if err == nil {
-		fmt.Fprintln(stdout, "\nsteps:")
+		_, _ = fmt.Fprintln(stdout, "\nsteps:")
 		printSteps(stdout, "  pre-commit", pre)
 		printSteps(stdout, "  pre-push", push)
 		if tip := watchTip(installed, pre, push); tip != "" {
-			fmt.Fprintf(stdout, "\n%s\n", tip)
+			_, _ = fmt.Fprintf(stdout, "\n%s\n", tip)
 		}
 	}
 	if line := notifyAdviceLine(svc); line != "" {
-		fmt.Fprintf(stdout, "\n%s\n", line)
+		_, _ = fmt.Fprintf(stdout, "\n%s\n", line)
 	}
 	if line := scannerPinLine(svc); line != "" {
-		fmt.Fprintf(stdout, "\n%s\n", line)
+		_, _ = fmt.Fprintf(stdout, "\n%s\n", line)
 	}
-	fmt.Fprintln(stdout, "\nrun `warden policy explain` for the fully resolved policy.")
+	_, _ = fmt.Fprintln(stdout, "\nrun `warden policy explain` for the fully resolved policy.")
 	return 0
 }
 

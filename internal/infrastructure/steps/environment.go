@@ -117,7 +117,7 @@ var nodeInstallers = []struct{ lockfile, command string }{
 // bites (a git worktree holds only tracked files, so gitignored node_modules is
 // absent unless warden linked it in). The install command is derived from the
 // lockfile actually present, so the reader can paste it.
-func installHint(dir, tool string) string {
+func installHint(dir, _ string) string {
 	if dir == "" {
 		return ""
 	}

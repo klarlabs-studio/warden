@@ -37,7 +37,7 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	if res.Record == nil {
-		fmt.Fprintf(stderr, "warden: no provenance note on %s — nothing to attest\n", short(res.SHA))
+		_, _ = fmt.Fprintf(stderr, "warden: no provenance note on %s — nothing to attest\n", short(res.SHA))
 		return 1
 	}
 

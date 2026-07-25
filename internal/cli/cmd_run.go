@@ -41,16 +41,17 @@ const (
 	exitEnvironment = 78
 )
 
-// exitForBlocker maps a run's blocker to its process exit code, or falls back to
-// notBlocked for an ordinary verdict about the change.
-func exitForBlocker(b domain.Blocker, notBlocked int) int {
+// exitForBlocker maps a run's blocker to its process exit code. A verdict that
+// is about the change rather than the environment exits 1, like any other
+// failed hook.
+func exitForBlocker(b domain.Blocker) int {
 	switch b {
 	case domain.BlockerContention:
 		return exitContention
 	case domain.BlockerEnvironment:
 		return exitEnvironment
 	default:
-		return notBlocked
+		return 1
 	}
 }
 
@@ -62,7 +63,7 @@ func exitForBlocker(b domain.Blocker, notBlocked int) int {
 // always exits non-zero. See runPrePushExit.
 func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push>")
+		_, _ = fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push>")
 		return 2
 	}
 	hook, err := domain.ParseHook(args[0])
@@ -80,7 +81,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	// payload falls through to gating (fail safe toward enforcement).
 	if hook == domain.PrePush && !isatty.IsTerminal(os.Stdin.Fd()) {
 		if gatable, err := pushGatable(os.Stdin); err == nil && !gatable {
-			fmt.Fprintln(stdout, "warden: push advances no branch; nothing to gate.")
+			_, _ = fmt.Fprintln(stdout, "warden: push advances no branch; nothing to gate.")
 			return 0
 		}
 	}
@@ -235,7 +236,7 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
 	}
-	return exitForBlocker(res.Blocker, 1)
+	return exitForBlocker(res.Blocker)
 }
 
 // noteGitPushError, on a SUCCESSFUL pre-push that warden pushed ITSELF, prints
@@ -256,7 +257,7 @@ func noteGitPushError(w io.Writer, res application.RunResult) {
 	if res.Outcome != domain.OutcomePassed || res.GitCompletesPush {
 		return
 	}
-	fmt.Fprintln(w, `warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit.`)
+	_, _ = fmt.Fprintln(w, `warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit.`)
 }
 
 // notifyAfter is the DEFAULT run duration above which a passing interactive
@@ -392,14 +393,14 @@ func passLine(ran, prePush []domain.StepName) string {
 // pass so the commit proceeds; a failure exits non-zero to abort the commit.
 func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, stderr io.Writer) int {
 	if res.Outcome != domain.OutcomePassed {
-		fmt.Fprintf(stderr, "warden: %s\n", res.Message)
-		return exitForBlocker(res.Blocker, 1)
+		_, _ = fmt.Fprintf(stderr, "warden: %s\n", res.Message)
+		return exitForBlocker(res.Blocker)
 	}
 	if res.FixPatch != "" {
 		if err := svc.ApplyFixPatch(res.FixPatch); err != nil {
 			return fail(stderr, fmt.Errorf("re-apply fixes: %w", err))
 		}
-		fmt.Fprintln(stdout, "warden: applied auto-fixes to your working tree.")
+		_, _ = fmt.Fprintln(stdout, "warden: applied auto-fixes to your working tree.")
 	}
 	// A config we can't read costs us the deferred-steps clause, not the pass:
 	// reporting is never allowed to fail a run that the gate already passed.
@@ -407,7 +408,7 @@ func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, 
 	if err != nil {
 		prePush = nil
 	}
-	fmt.Fprintln(stdout, passLine(res.Policy.Steps, prePush))
+	_, _ = fmt.Fprintln(stdout, passLine(res.Policy.Steps, prePush))
 	return 0
 }
 
@@ -430,12 +431,12 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
 		msg = fmt.Sprintf("%s (%s)", msg, domain.JoinSteps(res.Policy.Steps))
 	}
-	fmt.Fprintf(stdout, "warden: %s\n", msg)
+	_, _ = fmt.Fprintf(stdout, "warden: %s\n", msg)
 	noteGitPushError(stdout, res)
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
 	}
-	return exitForBlocker(res.Blocker, 1)
+	return exitForBlocker(res.Blocker)
 }
 
 func printFindings(w io.Writer, findings []domain.Finding) {
@@ -444,6 +445,6 @@ func printFindings(w io.Writer, findings []domain.Finding) {
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
-		fmt.Fprintf(w, "  [%s] %s %s\n", f.Severity, loc, f.Message)
+		_, _ = fmt.Fprintf(w, "  [%s] %s %s\n", f.Severity, loc, f.Message)
 	}
 }

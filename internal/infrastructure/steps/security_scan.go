@@ -70,7 +70,7 @@ func (s SecurityScanStep) Run(ctx context.Context, sc application.StepContext) (
 	if err != nil {
 		return domain.StepResult{}, fmt.Errorf("%s: create report dir: %w", s.name, err)
 	}
-	defer os.RemoveAll(reportDir)
+	defer func() { _ = os.RemoveAll(reportDir) }()
 
 	out, runErr, contended := s.shell.runIn(ctx, sc, dir, scan.WithReportDir(reportDir))
 	report, readErr := scanner.ReadReport(reportDir)
@@ -118,7 +118,7 @@ func (s SecurityScanStep) runDelta(ctx context.Context, sc application.StepConte
 	introduced, preexisting := scanner.SplitIntroduced(gating, baseFingerprints)
 	if len(introduced) == 0 {
 		summary := fmt.Sprintf("%s passed (%d pre-existing %s, none introduced by this change)",
-			s.name, len(preexisting), plural(len(preexisting), "finding", "findings"))
+			s.name, len(preexisting), plural(len(preexisting)))
 		return s.pass(summary, append(warnings, preexistingNote(preexisting, baseSHA)))
 	}
 	return s.fail(introduced, preexisting, warnings, "delta")
@@ -142,7 +142,7 @@ func (s SecurityScanStep) baseFingerprints(ctx context.Context, sc application.S
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(treeDir)
+	defer func() { _ = os.RemoveAll(treeDir) }()
 	if err := materializeTree(ctx, dir, baseSHA, treeDir); err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func (s SecurityScanStep) baseFingerprints(ctx context.Context, sc application.S
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(reportDir)
+	defer func() { _ = os.RemoveAll(reportDir) }()
 
 	// The base scan's exit code is deliberately ignored: a non-zero exit there
 	// just means the base commit already had findings, which is the thing being
@@ -244,9 +244,9 @@ func (s SecurityScanStep) fail(blocking, ignored []scanner.Finding, warnings []d
 	}
 	findings = append(findings, compact(warnings)...)
 
-	summary := fmt.Sprintf("%s failed: %d %s", s.name, len(blocking), plural(len(blocking), "finding", "findings"))
+	summary := fmt.Sprintf("%s failed: %d %s", s.name, len(blocking), plural(len(blocking)))
 	if mode == "delta" {
-		summary = fmt.Sprintf("%s failed: %d new %s introduced by this change", s.name, len(blocking), plural(len(blocking), "finding", "findings"))
+		summary = fmt.Sprintf("%s failed: %d new %s introduced by this change", s.name, len(blocking), plural(len(blocking)))
 		if len(ignored) > 0 {
 			summary += fmt.Sprintf(" (%d pre-existing not counted)", len(ignored))
 		}
@@ -266,7 +266,7 @@ func preexistingNote(preexisting []scanner.Finding, baseSHA string) domain.Findi
 	return note(fmt.Sprintf(
 		"%d pre-existing unwaived %s in this tree, already present at %s and not introduced by this change. "+
 			"They do not block the push; run the scanner directly to list them, or set security_scan.mode: total to gate on them.",
-		len(preexisting), plural(len(preexisting), "finding", "findings"), short(baseSHA)))
+		len(preexisting), plural(len(preexisting)), short(baseSHA)))
 }
 
 // note is an advisory finding: information the developer should see that must
@@ -305,11 +305,14 @@ func short(sha string) string {
 	return sha
 }
 
-func plural(n int, one, many string) string {
+// plural returns the right noun for a finding count. Every call site in this
+// package counts findings, so the words are fixed rather than parameters that
+// only ever receive one value.
+func plural(n int) string {
 	if n == 1 {
-		return one
+		return "finding"
 	}
-	return many
+	return "findings"
 }
 
 // baseCacheKey identifies a base scan by everything that could change its

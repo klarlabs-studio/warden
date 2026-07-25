@@ -13,7 +13,7 @@ import (
 // key never leaves the machine.
 func cmdKey(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "usage: warden key <show|list>")
+		_, _ = fmt.Fprintln(stderr, "usage: warden key <show|list>")
 		return 2
 	}
 	svc, err := newService(autoApprover{})
@@ -26,7 +26,7 @@ func cmdKey(args []string, stdout, stderr io.Writer) int {
 	case "list":
 		return keyList(svc, stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "usage: warden key <show|list>")
+		_, _ = fmt.Fprintln(stderr, "usage: warden key <show|list>")
 		return 2
 	}
 }
@@ -36,13 +36,13 @@ func cmdKey(args []string, stdout, stderr io.Writer) int {
 func keyShow(svc *service.Service, stdout, stderr io.Writer) int {
 	pub, fp := svc.SigningKey()
 	if pub == "" {
-		fmt.Fprintln(stderr, "warden: no signing key available (config dir unwritable?)")
+		_, _ = fmt.Fprintln(stderr, "warden: no signing key available (config dir unwritable?)")
 		return 1
 	}
-	fmt.Fprintf(stdout, "fingerprint: %s\n", fp)
-	fmt.Fprintf(stdout, "public key:  %s\n", pub)
-	fmt.Fprintln(stdout, "\nAdd this fingerprint to .warden.yaml `trusted_keys:` to make this")
-	fmt.Fprintln(stdout, "machine a trusted signer for the repo's provenance gate.")
+	_, _ = fmt.Fprintf(stdout, "fingerprint: %s\n", fp)
+	_, _ = fmt.Fprintf(stdout, "public key:  %s\n", pub)
+	_, _ = fmt.Fprintln(stdout, "\nAdd this fingerprint to .warden.yaml `trusted_keys:` to make this")
+	_, _ = fmt.Fprintln(stdout, "machine a trusted signer for the repo's provenance gate.")
 	return 0
 }
 
@@ -55,18 +55,18 @@ func keyList(svc *service.Service, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	if len(cfg.TrustedKeys) == 0 {
-		fmt.Fprintln(stdout, "no trusted_keys in .warden.yaml — provenance is verified but not trust-pinned.")
-		fmt.Fprintln(stdout, "add `trusted_keys: [<fingerprint>]` to require a trusted signer (see `warden key show`).")
+		_, _ = fmt.Fprintln(stdout, "no trusted_keys in .warden.yaml — provenance is verified but not trust-pinned.")
+		_, _ = fmt.Fprintln(stdout, "add `trusted_keys: [<fingerprint>]` to require a trusted signer (see `warden key show`).")
 		return 0
 	}
 	_, myFP := svc.SigningKey()
-	fmt.Fprintf(stdout, "trusted signers (%d) from .warden.yaml:\n", len(cfg.TrustedKeys))
+	_, _ = fmt.Fprintf(stdout, "trusted signers (%d) from .warden.yaml:\n", len(cfg.TrustedKeys))
 	for _, k := range cfg.TrustedKeys {
 		mark := ""
 		if k == myFP || domain.KeyFingerprint(k) == myFP {
 			mark = "  <- this machine"
 		}
-		fmt.Fprintf(stdout, "  %s%s\n", k, mark)
+		_, _ = fmt.Fprintf(stdout, "  %s%s\n", k, mark)
 	}
 	return 0
 }

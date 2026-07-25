@@ -18,7 +18,7 @@ func TestResolveBaseSHA(t *testing.T) {
 		dir := newGitRepo(t)
 		writeFile(t, dir, "a.txt", "a")
 		commitAll(t, dir, "base")
-		base := revParse(t, dir, "HEAD")
+		base := revParse(t, dir)
 
 		runGit(t, dir, "checkout", "-q", "-b", "feature")
 		runGit(t, dir, "branch", "--set-upstream-to=main", "feature")
@@ -36,7 +36,7 @@ func TestResolveBaseSHA(t *testing.T) {
 
 	t.Run("an explicit ref wins", func(t *testing.T) {
 		dir := newGitRepo(t)
-		first := revParse(t, dir, "HEAD")
+		first := revParse(t, dir)
 		writeFile(t, dir, "a.txt", "a")
 		commitAll(t, dir, "second")
 
@@ -66,7 +66,7 @@ func TestResolveBaseSHA(t *testing.T) {
 		dir := newGitRepo(t)
 		writeFile(t, dir, "a.txt", "a")
 		commitAll(t, dir, "base")
-		base := revParse(t, dir, "HEAD")
+		base := revParse(t, dir)
 
 		runGit(t, dir, "checkout", "-q", "-b", "feature")
 		runGit(t, dir, "branch", "--set-upstream-to=main", "feature")
@@ -98,11 +98,11 @@ func TestResolveBaseSHA(t *testing.T) {
 	})
 }
 
-func revParse(t *testing.T, dir, ref string) string {
+func revParse(t *testing.T, dir string) string {
 	t.Helper()
-	out, err := gitOut(context.Background(), dir, "rev-parse", ref)
+	out, err := gitOut(context.Background(), dir, "rev-parse", "HEAD")
 	if err != nil {
-		t.Fatalf("rev-parse %s: %v: %s", ref, err, out)
+		t.Fatalf("rev-parse HEAD: %v: %s", err, out)
 	}
 	return strings.TrimSpace(out)
 }
@@ -112,7 +112,7 @@ func TestMaterializeTree(t *testing.T) {
 	writeFile(t, dir, "src/app.go", "package app")
 	writeFile(t, dir, ".nox/baseline.json", `{"entries":[]}`)
 	commitAll(t, dir, "base")
-	base := revParse(t, dir, "HEAD")
+	base := revParse(t, dir)
 
 	// Change the tree after the commit: the materialized copy must reflect the
 	// commit, not the working tree, or the delta compares HEAD against itself.

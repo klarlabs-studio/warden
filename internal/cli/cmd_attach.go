@@ -30,7 +30,7 @@ func cmdAttach(_ []string, stdout, stderr io.Writer) int {
 
 	if err := attach.Attach(ctx, gitDir, stdout); err != nil {
 		if errors.Is(err, attach.ErrNoRun) {
-			fmt.Fprintln(stderr, "warden: no live run to attach to (start one with a push, or `warden run pre-push`).")
+			_, _ = fmt.Fprintln(stderr, "warden: no live run to attach to (start one with a push, or `warden run pre-push`).")
 			return 1
 		}
 		if errors.Is(err, context.Canceled) {

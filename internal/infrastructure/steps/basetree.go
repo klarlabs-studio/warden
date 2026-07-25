@@ -155,7 +155,7 @@ func writeTarFile(tr *tar.Reader, target string, size int64) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.CopyN(f, tr, size); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}

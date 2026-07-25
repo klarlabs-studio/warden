@@ -13,18 +13,18 @@ import (
 // remembering each tool's exact command.
 func cmdRecipes(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stdout, "available recipes (warden recipes <name> to see the snippet):")
+		_, _ = fmt.Fprintln(stdout, "available recipes (warden recipes <name> to see the snippet):")
 		for _, r := range domain.Recipes {
-			fmt.Fprintf(stdout, "  %-14s %s\n", r.Name, r.Summary)
+			_, _ = fmt.Fprintf(stdout, "  %-14s %s\n", r.Name, r.Summary)
 		}
 		return 0
 	}
 
 	r, ok := domain.RecipeByName(args[0])
 	if !ok {
-		fmt.Fprintf(stderr, "warden: no recipe %q; run `warden recipes` to list them\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "warden: no recipe %q; run `warden recipes` to list them\n", args[0])
 		return 1
 	}
-	fmt.Fprintf(stdout, "# %s — %s\n%s\n", r.Name, r.Summary, r.Snippet)
+	_, _ = fmt.Fprintf(stdout, "# %s — %s\n%s\n", r.Name, r.Summary, r.Snippet)
 	return 0
 }

@@ -30,19 +30,19 @@ func newTerminalApprover(in io.Reader, out io.Writer) terminalApprover {
 }
 
 func (a terminalApprover) Approve(_ context.Context, req application.ApprovalRequest) (application.Decision, error) {
-	fmt.Fprintf(a.out, "\nwarden: %s on %s needs approval (risk=%s)\n", req.Hook, req.Branch, req.Risk)
+	_, _ = fmt.Fprintf(a.out, "\nwarden: %s on %s needs approval (risk=%s)\n", req.Hook, req.Branch, req.Risk)
 	for _, f := range req.Findings {
 		loc := f.File
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
-		fmt.Fprintf(a.out, "  [%s] %s %s\n", f.Severity, loc, f.Message)
+		_, _ = fmt.Fprintf(a.out, "  [%s] %s %s\n", f.Severity, loc, f.Message)
 	}
 	if !a.tty {
-		fmt.Fprintln(a.out, "  non-interactive stream; declining. Approve at a terminal or via `warden axi`.")
+		_, _ = fmt.Fprintln(a.out, "  non-interactive stream; declining. Approve at a terminal or via `warden axi`.")
 		return application.Decision{Approved: false, Principal: "warden-cli", Rationale: "no tty"}, nil
 	}
-	fmt.Fprint(a.out, "  approve? [y/N] ")
+	_, _ = fmt.Fprint(a.out, "  approve? [y/N] ")
 	line, _ := bufio.NewReader(a.in).ReadString('\n')
 	yes := strings.EqualFold(strings.TrimSpace(line), "y")
 	return application.Decision{
