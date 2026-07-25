@@ -58,5 +58,9 @@ jobs:
         run: |
           git config --global user.email ci@warden.test
           git config --global user.name ci
+      # -count=1 is REQUIRED, not hygiene. These tests drive a separately built
+      # binary, so the test package's own inputs never change when internal/**
+      # does — Go replays a cached PASS and the suite silently stops running.
+      # See the note in e2e/e2e_test.go.
       - name: Run e2e tests
-        run: WARDEN_E2E=1 go test ./e2e/ -v
+        run: WARDEN_E2E=1 go test ./e2e/ -v -count=1
