@@ -126,7 +126,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	}
 	defer wt.Remove()
 
-	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
+	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan})
 	run := r.newRun(domain.PreCommit, resolved, branch)
 
 	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
@@ -234,7 +234,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	defer wt.Remove()
 
-	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
+	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan})
 	run := r.newRun(domain.PrePush, resolved, branch)
 
 	// spanBase is the commit this push starts from, captured BEFORE the push

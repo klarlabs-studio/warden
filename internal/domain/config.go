@@ -87,6 +87,11 @@ type Config struct {
 
 	Risk RiskConfig `yaml:"risk"`
 
+	// SecurityScan tunes the `security-scan` step: what it fails on (a delta
+	// against the merge-base, or the tree's total state) and whether it refuses
+	// to run on scanner version drift. See SecurityScanConfig.
+	SecurityScan SecurityScanConfig `yaml:"security_scan"`
+
 	// PR configures optional pull-request creation after a passing push.
 	PR PRConfig `yaml:"pr"`
 
@@ -199,6 +204,12 @@ func (c Config) Validate() error {
 		if err := validateDuration(fmt.Sprintf("timeout for step %q", step), s); err != nil {
 			return err
 		}
+	}
+	// A security_scan.mode typo must not resolve to a default: the setting is
+	// exactly "how strict is the security gate", and silently choosing for the
+	// operator is how a repo that asked for `total` ends up gating on a delta.
+	if err := c.SecurityScan.Validate(); err != nil {
+		return err
 	}
 	// Each trusted-key entry must be a real fingerprint or public key — a bad one
 	// would silently trust nobody, quietly disabling the very gate it configures.

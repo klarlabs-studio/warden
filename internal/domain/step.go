@@ -40,6 +40,16 @@ const (
 	StepPush StepName = "push"
 )
 
+// StepSecurityScan is the conventional name for a repo's security scan. It is
+// deliberately NOT a built-in: the step is still defined by a command in
+// `commands:`, and a repo is free to point it at whatever scanner it uses. The
+// name is reserved here only so warden can recognize it and, when the command
+// is one whose report it can read, gate on the findings the change introduced
+// rather than on the tree's total state (see infrastructure/steps.
+// SecurityScanStep). A repo that names its scan step something else keeps the
+// plain run-the-command behavior.
+const StepSecurityScan StepName = "security-scan"
+
 // builtinSteps is the set of step names Warden implements natively. Custom
 // steps are anything not in this set.
 var builtinSteps = map[StepName]bool{

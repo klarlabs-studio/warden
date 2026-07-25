@@ -37,6 +37,8 @@ type ResolvedPolicy struct {
 	// dependency dirs materialized as real files in the worktree rather than
 	// symlinked (see Config.MaterializeDeps). Resolved from the run's step set.
 	MaterializeDeps bool
+	// SecurityScan is the resolved security-scan gate configuration.
+	SecurityScan SecurityScanConfig
 	// WriteSteps are steps the config declared as tree-mutating (Config.Writes).
 	// They run as sequential barriers, never in a parallel batch — the escape
 	// hatch for a custom step (codegen, formatter) that writes the worktree.

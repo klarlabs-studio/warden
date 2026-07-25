@@ -39,6 +39,9 @@ type StepContext struct {
 	Timeout time.Duration
 	// Commands maps shell-backed steps (lint, test) to their command line.
 	Commands map[string]string
+	// SecurityScan is the resolved security-scan gate configuration (delta vs
+	// total, base ref, scanner version check).
+	SecurityScan domain.SecurityScanConfig
 	// PriorFindings carries findings from earlier steps, so a step can react
 	// to what came before (mirrors the wire protocol's prior_findings).
 	PriorFindings []domain.Finding

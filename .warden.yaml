@@ -12,7 +12,8 @@ commands:
   test: "go test -race ./... && go test -tags e2e ./e2e/"
   # A config-defined custom step: any step name with a command here runs it —
   # no code, no installed binary. nox applies the committed .nox/baseline.json,
-  # so only unwaived high/critical findings fail the gate.
+  # so only unwaived high/critical findings reach the gate — and of those, only
+  # the ones this change introduced fail it (security_scan.mode, default delta).
   security-scan: "nox scan . -severity-threshold high"
 steps:
   # pre-commit stays fast: quality gate only.

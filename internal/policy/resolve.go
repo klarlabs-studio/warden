@@ -80,6 +80,10 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		Parallel: cfg.Parallel == nil || *cfg.Parallel,
 		Timeouts: parseTimeouts(cfg.Timeouts),
 		Cache:    cacheGlobs(cfg.Cache),
+		// The security gate's posture is a whole-config setting, not something a
+		// per-branch rule overlays: "which findings fail a push" should not vary
+		// silently with the branch you happen to be on.
+		SecurityScan: cfg.SecurityScan,
 	}
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)

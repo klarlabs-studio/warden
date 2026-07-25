@@ -210,3 +210,13 @@ func TestResolve_ParsesTimeouts(t *testing.T) {
 		t.Errorf("zero timeout must be dropped, got %s", got)
 	}
 }
+
+func TestResolve_CarriesSecurityScanConfig(t *testing.T) {
+	// The step reads its mode off the resolved policy; if Resolve drops it,
+	// every repo silently falls back to the default and `mode: total` is a no-op.
+	cfg := domain.Config{SecurityScan: domain.SecurityScanConfig{Mode: domain.ScanModeTotal, Base: "origin/main"}}
+	got := Resolve(cfg, Input{Hook: domain.PrePush}).SecurityScan
+	if got.Mode != domain.ScanModeTotal || got.Base != "origin/main" {
+		t.Errorf("resolved security scan config = %+v, want the configured one", got)
+	}
+}

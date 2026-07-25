@@ -40,6 +40,10 @@ func (c Config) OverlayOnto(base Config) Config {
 	// discard the base's other threshold (a whole-struct replace would zero the
 	// sibling field and silently reset it to the built-in default).
 	out.Risk = mergeRisk(base.Risk, c.Risk)
+	// SecurityScan merges field-by-field for the same reason as Risk, and holds
+	// one strictness rule of its own: a base that demands `mode: total` cannot be
+	// relaxed to `delta` by a child (see MergeSecurityScan).
+	out.SecurityScan = MergeSecurityScan(base.SecurityScan, c.SecurityScan)
 	if c.PR != (PRConfig{}) {
 		out.PR = c.PR
 	}

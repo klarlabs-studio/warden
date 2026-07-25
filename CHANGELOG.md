@@ -6,6 +6,46 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`security-scan` gates on the diff, not the repo's absolute state.** When the
+  step's command is a nox scan, warden now reads the scan's `findings.json` and
+  fails only on findings absent from the merge-base; pre-existing ones are
+  reported as a counted warning. Gating on total state meant an unrelated
+  one-line change inherited the repo's whole backlog as a precondition — across
+  a fleet rollout, five repos had a finished config commit blocked by 7/16/21/44/71
+  pre-existing findings, and the gate was red in 5 of 7 repos sampled while
+  commits kept landing, i.e. it was being bypassed with `--no-verify`. A
+  routinely bypassed gate protects nothing and removes the signal that it ever
+  ran. `security_scan.mode: total` keeps the old strict behavior for a repo that
+  has reached zero. Closes #87.
+- **Warden refuses to scan on scanner version drift.** A scanner that renumbers
+  rule IDs between releases gives the same hit a different fingerprint, so every
+  committed baseline entry stops matching at once. One repo pinned `NOX_VERSION:
+  1.3.0` in CI while developers ran 1.15.0: none of its 729 baseline entries
+  matched, CI reported 240 phantom criticals, and every release failed for a
+  month because the job only ran on tags. The step now reads the pin out of
+  `.github/workflows/*.yml` (a single source of truth — not a second copy in
+  `.warden.yaml`) and fails at pre-push with both versions and the pinning file
+  named. A baseline matching *zero* current findings is likewise reported as
+  drift rather than as hundreds of new criticals. Opt out with
+  `security_scan.version_check: false`; point at one workflow with
+  `security_scan.pin_file`. Closes #88.
+- **`security_scan:` config block**: `mode` (`delta` default / `total`), `base`,
+  `version_check`, `pin_file`. It inherits through `extends:`, and a child config
+  cannot relax an org base's `total` to `delta` — the same "a child may add
+  strictness, never drop it" rule `writes:` and `trusted_keys:` already follow.
+
+### Changed
+
+- The base scan is cached per base commit under the repo's git dir, so a repo
+  with a standing backlog does not pay for re-scanning an unchanged base on every
+  push. Any command whose report warden cannot read (`make audit`, `npm audit`, a
+  nox invocation that sets its own `-output`/`-format`) keeps the previous
+  run-it-and-check-the-exit-code behavior, as does any case where the report,
+  the base ref, or the base scan is unavailable — the step degrades toward
+  failing, never toward passing.
+
 ## [0.17.0] — 2026-07-07
 
 ### Added

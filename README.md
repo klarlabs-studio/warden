@@ -221,6 +221,7 @@ notify: true     # default — desktop notification after a slow interactive pre
 notify_after: 10s   # default — a *passing* run only notifies once it ran at least this long (fast green gates stay silent); must be a valid Go duration or the config is rejected at load
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
 risk: { diff_lines_high: 400, files_touched_high: 15 }
+security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:
@@ -340,6 +341,51 @@ commands:
 steps:
   pre_push: [rebase, lint, security-scan, test]
 ```
+
+### The `security-scan` step
+
+`security-scan` is the one command step Warden interprets rather than just runs.
+When its command is a [nox](https://github.com/nox-hq/nox) scan, Warden reads the
+scan's `findings.json` and gates on **what your change introduced**, not on the
+tree's total state:
+
+```yaml
+security_scan:
+  mode: delta          # default. total = fail on any unwaived finding, whoever added it
+  base: ""             # default: merge-base with the branch's upstream (falls back to origin/HEAD)
+  version_check: true  # default: refuse to scan when the local scanner isn't the version CI pins
+  pin_file: ""         # default: search .github/workflows/*.yml for the pin
+```
+
+**Why delta is the default.** Gating on the tree's absolute state means an
+unrelated one-line change inherits the repo's entire historical backlog as a
+precondition. Measured across a fleet rollout, five repos had a finished,
+unrelated config commit blocked by 7 / 16 / 21 / 44 / 71 pre-existing findings —
+and the gate was red in 5 of 7 repos sampled while commits kept landing, i.e. it
+was being routed around with `--no-verify`. A gate that is routinely bypassed
+protects nothing *and* removes the signal that it ever ran. Delta gating keeps
+the property that matters (you cannot add a vulnerability) and drops the wall:
+pre-existing findings are reported as a counted warning. Set `mode: total` in a
+repo that has genuinely reached zero and wants to stay there.
+
+**Scanner version drift.** Scanners renumber their rule IDs between releases, so
+the same hit gets a different fingerprint — and every entry in the committed
+baseline stops matching at once. One repo pinned `NOX_VERSION: 1.3.0` in CI while
+developers ran 1.15.0: none of its **729** baseline entries matched anything CI
+scanned, CI reported 240 phantom criticals, and every release failed for a month
+before anyone noticed (the job only ran on tags). Warden now refuses to scan when
+the scanner on `PATH` is not the version the repo's workflows pin, naming both
+versions and the file that pins them, so the mismatch surfaces at pre-push where
+it is cheap. The pin is read from the workflow rather than restated in
+`.warden.yaml` — a second copy is a second thing to forget. Warden also reports a
+baseline that matches **zero** current findings as drift rather than as hundreds
+of new criticals. **Rule of thumb: bump the pin and regenerate the baseline in
+the same commit.**
+
+Anything Warden cannot interpret — `make audit`, `npm audit`, a nox command that
+directs its own `-output`/`-format` — keeps the plain behavior: run it, fail on a
+non-zero exit. The same is true whenever the report cannot be read or the base
+commit cannot be scanned: the step degrades toward failing, never toward passing.
 
 ### 2. A subprocess step (structured findings)
 
