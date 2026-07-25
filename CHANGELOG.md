@@ -6,8 +6,53 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A successful pre-push now exits 0.** Warden performs the push itself and
+  used to fail the hook on purpose, so every successful push ended on
+  `error: failed to push some refs` and a non-zero status — automation read
+  success as failure, and warden had to print a disclaimer telling people to
+  ignore the next line, training them to ignore `error:` from a gate. When
+  nothing rewrote the branch and no force is needed, the push git already has
+  queued *is* warden's push, so warden now stands aside and lets git report the
+  real outcome. It still pushes itself (and still exits non-zero, with the
+  disclaimer) when a step rewrote the branch — git would otherwise publish the
+  unvalidated pre-fix commit — or when a force is needed, or when a PR is to be
+  opened. **If you script `warden run pre-push` or the hook's exit status, this
+  is a contract change.** Closes #89.
+- **`rebase` targets the branch's integration base, not its own remote ref.**
+  It rebased onto `@{upstream}`, which is right until the branch is rewritten:
+  after a local rebase onto an updated `main` — the standard way to satisfy
+  "head branch is not up to date with the base branch" — `origin/<branch>` still
+  holds the commit just replaced, so `origin/<branch>..HEAD` contains *main's*
+  commits and the step replayed main onto the superseded tip, failing on main's
+  own conflicts and refusing a push that was never wrong. It now resolves
+  `pr.base` → the remote's default head → an `@{upstream}` pointing elsewhere,
+  and never the branch's own ref. Note this also means the step *runs* on a real
+  pre-push for the first time: warden seeds a detached worktree, where
+  `@{upstream}` never resolved, so it had been reporting "no upstream, skipped"
+  throughout. Closes #102.
+
 ### Fixed
 
+- **Security: a range gate read its trust roster from the head it was checking.**
+  `warden verify --range` resolved `trusted_keys` from the working tree — the PR
+  head under gate — so a change could add its own key to `.warden.yaml` and
+  self-certify. The roster is now resolved from the range's **base** ref (the
+  trusted side) and a malformed base roster fails closed. Separately,
+  `reattest` carried provenance from any self-verifying note, letting an
+  untrusted note pushed for a tree-identical commit be laundered into a
+  locally-trusted re-attestation; the source must now also be signed by a
+  trusted key.
+- **Security: two known CVEs in indirect dependencies.** `google.golang.org/grpc`
+  → v1.82.1 (GHSA-hrxh-6v49-42gf, high) and `golang.org/x/text` → v0.39.0
+  (GO-2026-5970, flagged reachable).
+- **`warden reattest --push` publishes even when it writes nothing.** The push
+  was gated on *this* invocation having written a note, so the obvious two-step
+  workflow — sweep, inspect, then publish — left every note local while the
+  command reported success. Found by using it: 19 notes stayed local and the
+  remote notes ref sat 20 commits behind. `--push` now means "make the remote
+  match". The single-commit form had the same trap on its already-noted path.
 - **A gated push no longer deletes a colleague's commits.** With
   `push.force: lease`, warden force-pushed whenever the remote tip was not an
   ancestor of the local branch — a test that cannot tell "I rebased my own
@@ -25,6 +70,36 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **A provenance note covers the span its push published, not just the tip.** A
+  run writes one note, on `HEAD`, so an ordinary commit → commit → commit → push
+  left the earlier commits reading `UNVERIFIED` forever while
+  `warden verify --range` demanded a note on every one — the range gate was
+  checking for provenance the gate never produces. Attesting each commit
+  individually would be a lie (a run validates one tree, the tip's; the
+  intermediate trees were never checked out), so the note now records the span
+  `(covers_from, commit_sha]` *inside the signed payload*, and `verify --range`
+  reads it. A covering note must clear the same signature and trust bar it is
+  being used to satisfy, the span is bounded by real git history rather than by
+  what the note claims, and a commit outside every trusted span keeps its
+  failure. `verify --range` reports how many commits passed by span rather than
+  by their own note. Closes #86.
+- **`push:` config block** — `force: lease` (default) or `never`. Warden performs
+  the push itself, and git's pre-push hook is handed no signal that you typed
+  `--force`, so a rebased branch could not be pushed through the gate at all; the
+  only way out was `git push --no-verify`, which skips the gate and writes no
+  provenance. Warden now detects the rewrite and decides by policy. Closes #85.
+- **`secrets` step** — refuses a change in which a tracked file the change
+  touched carries a live credential. Narrow on purpose (changed files only,
+  high-confidence shapes; `${VAR}` placeholders never match) because a false
+  positive is a wall in front of an unrelated commit. Findings name file and line
+  but never echo the value.
+- **`warden reattest --all [--branch b]`** sweeps a branch from the adoption
+  point and closes every recoverable squash-merge gap in one pass, applying
+  exactly the same trust rules as the single-commit form. `doctor` and `audit`
+  now read `UNVERIFIED (reattestable from <sha>)` where a validated
+  tree-identical commit exists, so a recoverable binding gap is distinguishable
+  from a genuinely unchecked commit. On warden's own `main` this recovered 19 of
+  the unverified commits. Closes #76.
 - **`security-scan` gates on the diff, not the repo's absolute state.** When the
   step's command is a nox scan, warden now reads the scan's `findings.json` and
   fails only on findings absent from the merge-base; pre-existing ones are
@@ -119,6 +194,37 @@ All notable changes to warden are documented here. The format follows
 - **`NODE_AUTH_TOKEN` is documented as the supported private-registry path**,
   with an explicit warning against `npm config set`, in the README and in the
   missing-dependency failure message itself. (#91)
+- **The pre-commit pass line names the steps that ran.** Under a split policy
+  `warden: pre-commit passed.` meant *lint* passed while the suite was unrun, but
+  read as "my tree is green" — a commit went through clean while `go test -race`
+  was red. Now: `pre-commit passed (lint) — test runs at pre-push.` Closes #78.
+- **Hook version-pin skew is visible.** The shim prefers a `warden` on `PATH`, so
+  the pin only ever governed developers with no global install — while the shim's
+  comment claimed the whole team ran the same verified binary. The pin is a
+  bootstrap floor, not a lock; the shim now says
+  `hook pins 0.17.0, PATH has 0.18.16 — running 0.18.16`, and `warden status`
+  shows each hook's pin and names any divergence. Closes #77.
+- **`warden status` surfaces `warden watch`** when a step is deferred to a later
+  hook, which is exactly the gap watch exists to close. Closes #79.
+- **Desktop notifications are usable.** They were posted via `osascript`, so
+  macOS filed them under *Script Editor* — silently suppressed unless that app
+  had notification access, and clicking one opened an empty script. Warden now
+  prefers `terminal-notifier` (its own identity, click returns to the terminal
+  the gate ran in, grouped per repo) and falls back to `osascript`. The content
+  is structured too — `warden: pre-push failed` / `repo · branch` /
+  `step lint failed` — and `warden status` names a degraded setup, since the
+  macOS fallback fails invisibly.
+- **A tool that refuses to run concurrently is no longer reported as a lint
+  failure.** `golangci-lint` declines to start while another copy holds its lock;
+  warden reported that refusal as `step lint failed`, sending developers hunting
+  an error that did not exist. It now waits the lock out and, if the budget
+  expires, says `could not run (lock contention)`. Closes #81.
+- **The `warden-gate` / `warden-verify` actions no longer need a Go toolchain.**
+  They ran `go install`, so the documented `setup-go` with
+  `go-version-file: go.mod` killed the job *before verifying anything* in any
+  repo without a root `go.mod` — a permanently red check that provided zero
+  verification while appearing enforced. They now install a released,
+  checksum-verified binary, failing closed on a mismatch. Closes #92.
 
 ## [0.17.0] — 2026-07-07
 
