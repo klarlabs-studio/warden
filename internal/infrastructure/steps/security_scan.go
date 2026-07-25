@@ -196,7 +196,7 @@ func (s SecurityScanStep) refuseOnVersionDrift(ctx context.Context, dir, binary 
 	if !cfg.VersionCheckEnabled() {
 		return domain.StepResult{}, false
 	}
-	pin, found, err := scanner.DiscoverPin(dir, binary, cfg.PinFile)
+	pin, found, err := scanner.DiscoverPin(ctx, dir, binary, cfg.PinFile)
 	if err != nil {
 		return s.refusal(err.Error()), true
 	}

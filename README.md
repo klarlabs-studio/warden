@@ -410,6 +410,33 @@ Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
 
+### Pinning the scanner when the pin lives elsewhere
+
+The `security-scan` step refuses to run when the scanner on your PATH differs
+from the version CI pins — a scanner that renumbers rule IDs between releases
+invalidates every baseline fingerprint at once, so the whole triaged corpus
+reads as net-new.
+
+It finds the pin by reading the workflow that already declares it. If your fleet
+pins the scanner **once**, centrally, in a shared reusable workflow, point at it
+across the repository boundary:
+
+```yaml
+security_scan:
+  pin_file: my-org/.github/.github/workflows/go-ci.yml@main
+```
+
+This names *where* the pin lives, never what it is — there is still exactly one
+copy of the version number, in the workflow that already defines it. Both shapes
+are understood: a scalar (`NOX_VERSION: "1.16.1"` in `env:` or `with:`) and a
+reusable workflow's own input **default**, which is how the defining repo states
+it.
+
+Resolution is cached for an hour and bounded by a short timeout, and **any**
+failure — offline, moved, renamed, no pin in the file — degrades to "no pin
+found" rather than blocking a push. `warden status` reports when the check is
+inert, so a silent check is never mistaken for a passing one.
+
 ### What `rebase` rebases onto
 
 The `rebase` step targets the branch's **integration base** — the ref it is

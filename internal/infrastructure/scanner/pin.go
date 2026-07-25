@@ -47,12 +47,18 @@ const maxWorkflowBytes = 1 << 20
 // on it), no pin (nothing to compare — stay quiet, most repos do not pin), and
 // conflicting pins (two workflows disagreeing is already the drift this check
 // exists to catch, reported as an error rather than silently picking one).
-func DiscoverPin(root, binary, pinFile string) (Pin, bool, error) {
+func DiscoverPin(ctx context.Context, root, binary, pinFile string) (Pin, bool, error) {
+	// A pin_file may point across a repository boundary, for a fleet that pins
+	// its scanner once in a shared reusable workflow (#112). The repo still
+	// names only WHERE the pin lives; the version itself is never restated.
+	if spec, ok := ParseRemoteSpec(pinFile); ok {
+		return discoverRemotePin(ctx, spec, binary)
+	}
+
 	files, err := workflowFiles(root, pinFile)
 	if err != nil {
 		return Pin{}, false, err
 	}
-	keys := pinKeys(binary)
 
 	var found []Pin
 	for _, rel := range files {
@@ -61,12 +67,8 @@ func DiscoverPin(root, binary, pinFile string) (Pin, bool, error) {
 			// A workflow warden cannot read is not a reason to fail a push.
 			continue
 		}
-		var doc yaml.Node
-		if err := yaml.Unmarshal(data, &doc); err != nil {
-			continue
-		}
-		for _, v := range findKeys(&doc, keys) {
-			found = append(found, Pin{Version: v.value, Source: rel, Key: v.key})
+		if pin, ok := pinFromWorkflow(data, binary, rel); ok {
+			found = append(found, pin)
 		}
 	}
 	if len(found) == 0 {
@@ -83,6 +85,21 @@ func DiscoverPin(root, binary, pinFile string) (Pin, bool, error) {
 		}
 	}
 	return first, true, nil
+}
+
+// pinFromWorkflow extracts a scanner pin from one workflow's bytes, labeled
+// with source for the message that names the line to change. Shared by the
+// local and remote paths so "what a pin looks like" has exactly one definition
+// — a second parser would drift from the first and disagree silently.
+func pinFromWorkflow(data []byte, binary, source string) (Pin, bool) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return Pin{}, false
+	}
+	for _, v := range findKeys(&doc, pinKeys(binary)) {
+		return Pin{Version: v.value, Source: source, Key: v.key}, true
+	}
+	return Pin{}, false
 }
 
 // workflowFiles lists the workflow files to search, newest-sorted for stable
@@ -115,6 +132,38 @@ func workflowFiles(root, pinFile string) ([]string, error) {
 
 type pinHit struct{ key, value string }
 
+// scalarOrDefault reads a matched key's version, from either shape a workflow
+// writes one in:
+//
+//	NOX_VERSION: "1.16.1"          # env / with — the value IS the version
+//	nox-version:                   # a reusable workflow's own input declaration
+//	  description: "…"
+//	  default: "1.16.1"            # …where the version is the default
+//
+// The second shape is the whole point of a centrally-pinned fleet: the repo
+// that DEFINES the shared workflow states the version as an input default, and
+// every caller inherits it without restating it. Reading only scalars meant
+// warden could see a caller that overrode the pin but never the definition that
+// set it — so a fleet doing the recommended thing had no discoverable pin at
+// all (#112).
+func scalarOrDefault(v *yaml.Node) string {
+	if v == nil {
+		return ""
+	}
+	if v.Kind == yaml.ScalarNode {
+		return v.Value
+	}
+	if v.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(v.Content); i += 2 {
+		if v.Content[i].Value == "default" && v.Content[i+1].Kind == yaml.ScalarNode {
+			return v.Content[i+1].Value
+		}
+	}
+	return ""
+}
+
 // findKeys walks a YAML document for mapping keys matching any of keys and
 // returns their scalar values. It walks the whole tree rather than looking at a
 // fixed path because a pin is written in a `env:` block at workflow, job or
@@ -128,8 +177,8 @@ func findKeys(n *yaml.Node, keys []string) []pinHit {
 	if n.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
-			if v.Kind == yaml.ScalarNode && matchesKey(k.Value, keys) {
-				if version := normalizeVersion(v.Value); version != "" {
+			if matchesKey(k.Value, keys) {
+				if version := normalizeVersion(scalarOrDefault(v)); version != "" {
 					out = append(out, pinHit{key: k.Value, value: version})
 				}
 			}

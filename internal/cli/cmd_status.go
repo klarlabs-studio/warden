@@ -138,7 +138,7 @@ func scannerPinLine(svc interface {
 	}
 
 	root := svc.Repo().Dir
-	pin, found, err := scanner.DiscoverPin(root, scan.Binary, cfg.SecurityScan.PinFile)
+	pin, found, err := scanner.DiscoverPin(context.Background(), root, scan.Binary, cfg.SecurityScan.PinFile)
 	local := scanner.LocalVersion(context.Background(), root, scan.Binary)
 	switch {
 	case err != nil:
