@@ -36,8 +36,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # HOMEBREW_TAP_TOKEN scopes the tap-repo push for the brew formula.
-          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Scopes the tap-repo push for the brew cask. Prefer TAP_GITHUB_TOKEN
+          # — the name the other repos publishing to felixgeelhaar/homebrew-tap
+          # already use — and fall back to the legacy HOMEBREW_TAP_TOKEN so this
+          # keeps working whichever exists. Two names for one credential is how
+          # v0.19.0 shipped with a 401: the PAT was rotated and updated under one
+          # name, leaving warden's copy stale. Drop the fallback once the secret
+          # is renamed.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
 
       # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
       # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
@@ -111,19 +117,41 @@ jobs:
   # immutable ref pin an exact version or commit SHA (see docs/ci-provenance-gate.md).
   major-tag:
     needs: [goreleaser, npm]
+    # Run even when goreleaser failed, and decide from the RELEASE rather than
+    # from the job's exit code. goreleaser publishes the release and then pushes
+    # the brew cask; a failure in that last, cosmetic step used to skip this job
+    # entirely, stranding the floating major tag on the previous version while
+    # the docs tell consumers to reference `@v0`. That is exactly what happened
+    # on v0.19.0 — a stale tap PAT left every action consumer silently pinned to
+    # 0.18.16 until the tag was moved by hand.
+    #
+    # The guard below is the honest condition: move the tag if and only if a
+    # real release exists for it. A goreleaser that died before publishing moves
+    # nothing.
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write # force-push the floating major tag
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Move floating major tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"    # e.g. v0.16.0
           case "$tag" in
             *-*) echo "prerelease $tag: leaving the major tag where it is"; exit 0 ;;
           esac
+          # Publishing is what the tag points consumers at, so require it — a
+          # draft or absent release means there is nothing to point them to.
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)" != "false" ]; then
+            echo "no published release for $tag: leaving the major tag where it is"
+            exit 1
+          fi
           major="${tag%%.*}"          # e.g. v0
+          # Lightweight on purpose: a signed annotated tag here would be moved by
+          # force on every release, so the signature would assert nothing.
           git tag -f "$major" "${GITHUB_SHA}"
           git push -f origin "refs/tags/$major"
           echo "moved $major -> $tag (${GITHUB_SHA})"
