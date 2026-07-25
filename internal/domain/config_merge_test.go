@@ -175,3 +175,27 @@ func TestConfigValidate_RejectsUnsafeStepNames(t *testing.T) {
 		t.Errorf("valid config rejected: %v", err)
 	}
 }
+
+func TestOverlayOnto_SecurityScanInheritsThroughExtends(t *testing.T) {
+	base := Config{SecurityScan: SecurityScanConfig{Mode: ScanModeTotal, PinFile: ".github/workflows/ci.yml"}}
+	child := Config{SecurityScan: SecurityScanConfig{Base: "origin/main"}}
+
+	got := child.OverlayOnto(base).SecurityScan
+	if got.Mode != ScanModeTotal {
+		t.Errorf("mode = %q, want the org base's total to survive", got.Mode)
+	}
+	if got.PinFile != ".github/workflows/ci.yml" {
+		t.Errorf("pin_file = %q, want it inherited", got.PinFile)
+	}
+	if got.Base != "origin/main" {
+		t.Errorf("base = %q, want the child's override", got.Base)
+	}
+}
+
+func TestOverlayOnto_ChildCannotWeakenSecurityScanMode(t *testing.T) {
+	base := Config{SecurityScan: SecurityScanConfig{Mode: ScanModeTotal}}
+	child := Config{SecurityScan: SecurityScanConfig{Mode: ScanModeDelta}}
+	if got := child.OverlayOnto(base).SecurityScan.Mode; got != ScanModeTotal {
+		t.Errorf("mode = %q, want total: a repo must not silently relax an inherited security gate", got)
+	}
+}

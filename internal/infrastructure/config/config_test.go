@@ -22,6 +22,7 @@ steps:
   pre_commit: [lint]
   pre_push: [intent, rebase, review, test, document, lint]
 risk: { diff_lines_high: 400, files_touched_high: 15 }
+security_scan: { mode: total, base: origin/main, version_check: false, pin_file: .github/workflows/ci.yml }
 rules:
   - match: { paths: ["security/**"] }
     then: { require_approval: true, agent: { review: codex } }
@@ -47,6 +48,27 @@ rules:
 	}
 	if len(cfg.Writes) != 1 || cfg.Writes[0] != "codegen" {
 		t.Errorf("writes not parsed: %+v", cfg.Writes)
+	}
+	if cfg.SecurityScan.Mode != domain.ScanModeTotal || cfg.SecurityScan.Base != "origin/main" {
+		t.Errorf("security_scan not parsed: %+v", cfg.SecurityScan)
+	}
+	if cfg.SecurityScan.VersionCheckEnabled() {
+		t.Error("security_scan.version_check: false was not parsed")
+	}
+	if cfg.SecurityScan.PinFile != ".github/workflows/ci.yml" {
+		t.Errorf("security_scan.pin_file = %q", cfg.SecurityScan.PinFile)
+	}
+}
+
+func TestParse_RejectsBadSecurityScanMode(t *testing.T) {
+	// The setting decides how strict the security gate is. A typo must fail the
+	// load, not silently resolve to the default.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("security_scan: { mode: strict }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRepository(dir).Load(); err == nil {
+		t.Fatal("expected an error on an unknown security_scan.mode")
 	}
 }
 

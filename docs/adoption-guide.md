@@ -93,6 +93,20 @@ git add .nox/baseline.json && git commit -m "chore: baseline existing findings"
 > a fixed nox, dir and worktree scans are identical and a single committed
 > baseline just works — no per-repo workaround.
 
+**You do not have to baseline first.** Since the delta gate, `security-scan`
+fails only on findings your change *introduced*, measured against the merge-base
+— so a repo with an untouched backlog can turn the step on today and the backlog
+becomes a counted warning rather than a wall. A baseline is still worth writing:
+it is the reviewable record of what was accepted, and it is what `nox` itself
+uses to keep its own output quiet. See "The `security-scan` step" in the README
+for `security_scan.mode` and the scanner version-pin check.
+
+**Bump the scanner pin and regenerate the baseline in the same commit.** Rule IDs
+are renumbered between scanner releases, which changes every fingerprint, which
+invalidates every baseline entry at once. Warden refuses to scan when the
+scanner on `PATH` is not the version your workflows pin, precisely so that this
+surfaces at pre-push rather than at a release tag.
+
 ### Why this beats a one-shot cleanup
 
 The debt is recorded, not hidden: `new-from-rev`'s base ref and the committed

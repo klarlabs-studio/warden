@@ -137,7 +137,7 @@ func resolveStep(reg application.Registry, name domain.StepName, commands map[st
 		return nil, fmt.Errorf("built-in step %q has no registered implementation", name)
 	}
 	if cmd, ok := commands[string(name)]; ok && strings.TrimSpace(cmd) != "" {
-		return steps.NewShellStep(name, string(name)), nil
+		return commandStep(name), nil
 	}
 	bin, err := exec.LookPath(customStepBinary(name))
 	if err != nil {
@@ -145,6 +145,19 @@ func resolveStep(reg application.Registry, name domain.StepName, commands map[st
 			name, name, customStepBinary(name), err)
 	}
 	return NewSubprocessStep(name, bin), nil
+}
+
+// commandStep picks the implementation for a config-defined command step. Every
+// step runs its command verbatim; `security-scan` gets a wrapper that also
+// reads the scanner's report, so it can fail on the findings the change
+// introduced instead of on the repo's whole backlog. The wrapper falls back to
+// the plain shell behavior for any command whose output it cannot read, so a
+// `make audit` or `npm audit` scan step is unaffected.
+func commandStep(name domain.StepName) application.Step {
+	if name == domain.StepSecurityScan {
+		return steps.NewSecurityScanStep(name)
+	}
+	return steps.NewShellStep(name, string(name))
 }
 
 // newStepAction builds the axi ActionDefinition for a step: empty contracts

@@ -44,7 +44,16 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		}, nil
 	}
 
-	out, err, contended := s.runWithContentionRetry(ctx, sc, command)
+	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
+	return s.resultFor(ctx, sc, out, err, contended), nil
+}
+
+// resultFor turns a finished command into the step's normalized result. It is
+// separate from Run so a step that wraps a shell command with extra
+// interpretation (see SecurityScanStep) can still fall back to exactly this
+// behavior when its own interpretation is unavailable — one definition of what
+// a failing command means, not two that can drift.
+func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, out []byte, err error, contended bool) domain.StepResult {
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		summary := string(s.name) + " failed"
@@ -74,13 +83,13 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 				Message:  msg,
 			}},
 			Summary: summary,
-		}, nil
+		}
 	}
 	return domain.StepResult{
 		Step:    s.name,
 		Status:  domain.StepPass,
 		Summary: string(s.name) + " passed",
-	}, nil
+	}
 }
 
 // contentionBudget bounds how long a step waits out another process's lock
@@ -96,9 +105,15 @@ var contentionBudget = 60 * time.Second
 // step responsive the moment the lock frees.
 var contentionPoll = 2 * time.Second
 
-// runWithContentionRetry runs command, retrying while the failure is another
-// process holding the tool's lock rather than a real finding. It reports the
-// last output and error plus whether the run ended still contended.
+// runIn runs command in dir, retrying while the failure is another process
+// holding the tool's lock rather than a real finding. It reports the last
+// output and error plus whether the run ended still contended.
+//
+// dir is a parameter rather than always sc.WorktreeDir because a step may need
+// to run the same command against a second tree — the security scan does, to
+// see what the base commit already reported — and it must do so through the
+// identical execution path (same shell, same env, same contention handling) or
+// the two results are not comparable.
 //
 // The gate's job is to answer "is this tree clean", and a tool that declined to
 // start has not answered it. Waiting briefly turns the overwhelmingly common
@@ -106,13 +121,13 @@ var contentionPoll = 2 * time.Second
 // into a slightly slower green one, without ever converting a genuine failure
 // into a pass: only output matching a narrow contention signature is retried,
 // and exhausting the budget still fails the step.
-func (s ShellStep) runWithContentionRetry(ctx context.Context, sc application.StepContext, command string) (out []byte, err error, contended bool) {
+func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, command string) (out []byte, err error, contended bool) {
 	deadline := time.Now().Add(contentionBudget)
 	for attempt := 0; ; attempt++ {
 		// Run through the shell so configured commands may use pipes and globs,
 		// matching how a developer would run them.
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
-		cmd.Dir = sc.WorktreeDir
+		cmd.Dir = dir
 		cmd.Env = stepEnv(sc)
 		// Run in its own process group so a timeout/cancel kills the command's
 		// children (go test, tsc, …), not just the wrapping shell.
