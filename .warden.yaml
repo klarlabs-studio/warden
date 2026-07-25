@@ -26,6 +26,18 @@ steps:
   pre_commit: [credentials, lint]
   # pre-push mirrors CI order: secrets -> quality -> security -> tests.
   pre_push: [credentials, rebase, lint, security-scan, test]
+security_scan:
+  # The nox pin lives ONCE, centrally, in the shared reusable workflow every
+  # klarlabs repo calls — so a search of THIS repo's workflows finds nothing and
+  # the version-drift check was inert here (#112). This names WHERE the pin is,
+  # never what it is: there is still exactly one copy of the version, in the
+  # workflow that already defines it. Resolution is cached, and any failure
+  # (offline, moved, renamed) degrades to "no pin" — never to a blocked push.
+  #
+  # Requires warden >= 0.20.0: older versions read pin_file as a repo-relative
+  # path and fail the step outright.
+  pin_file: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
+
 risk:
   diff_lines_high: 400
   files_touched_high: 15
