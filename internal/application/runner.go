@@ -205,12 +205,19 @@ func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, 
 // so a rebased branch would simply be rejected — and warden's whole reason for
 // supporting a lease (#85) is that the alternative is a gate bypass.
 //
-// When both hold, delegating is strictly better than pushing ourselves: git
+// Finally, it is unsafe when a PR is to be opened. PR creation runs AFTER the
+// push, and git's push does not happen until the hook has exited — so a
+// delegating run reaches `gh pr create` while the branch is still absent from
+// the remote. On a first push that fails ("head branch not found"), and because
+// PR creation is best-effort it fails SILENTLY: no PR, no error. Warden pushes
+// itself in that case so the branch exists by the time the forge is called.
+//
+// When all three hold, delegating is strictly better than pushing ourselves: git
 // reports the push it actually performed, with a real exit code, instead of
 // warden succeeding and then having to warn the developer to ignore the
 // `error:` git prints because warden deliberately failed the hook (#89).
-func (r *Runner) delegateToGit(finalSHA, seedTip string, force domain.PushForce) bool {
-	return finalSHA == seedTip && force == domain.ForceNever
+func (r *Runner) delegateToGit(finalSHA, seedTip string, force domain.PushForce, willOpenPR bool) bool {
+	return finalSHA == seedTip && force == domain.ForceNever && !willOpenPR
 }
 
 // runPrePush runs the full pipeline in a worktree cloned from the branch tip,
@@ -236,6 +243,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	var spanBase string
 	// gitCompletes records that warden left the push to git — see delegateToGit.
 	var gitCompletes bool
+	// willOpenPR is resolved once, before the gate, because the delegation
+	// decision is made inside the push closure but PR creation happens after it.
+	willOpenPR := prCfg.Enabled && r.Forge != nil && r.Forge.Available()
 
 	// The push closure runs only after the kernel's approval gate clears. It
 	// performs the real fast-forward-back, push, and note write (§4.3 step 2).
@@ -254,7 +264,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		if err != nil {
 			return domain.StepResult{}, err
 		}
-		if r.delegateToGit(finalSHA, seedTip, force) {
+		if r.delegateToGit(finalSHA, seedTip, force, willOpenPR) {
 			gitCompletes = true
 			return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 		}
@@ -310,10 +320,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			_ = r.Git.PushNotes(r.Settings.Remote)
 		}
 	}
-	msg := "warden pushed the gated commit(s); local branch fast-forwarded"
-	if gitCompletes {
-		msg = "gate passed; git is completing the push"
-	}
+	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes)
 	if err := run.MarkPushed(*record, msg); err != nil {
 		return RunResult{}, err
 	}
@@ -322,7 +329,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	res.GitCompletesPush = gitCompletes
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
-	if prCfg.Enabled && r.Forge != nil && r.Forge.Available() {
+	if willOpenPR {
 		if pr, err := r.Forge.EnsurePR(ctx, branch, prCfg.Base); err == nil {
 			res.PR = &pr
 			if pr.URL != "" {
@@ -573,6 +580,31 @@ func (r *Runner) newRun(hook domain.Hook, resolved domain.ResolvedPolicy, branch
 }
 
 // result projects the aggregate into the application's output DTO.
+// pushedMessage states what landed where, so "did it push?" is answerable from
+// the output alone rather than by running `git ls-remote` — which is what an
+// operator had to do while success and failure printed the same thing (#89).
+// A delegating run makes no claim: git is about to report that push itself, and
+// warden asserting it first would be a second account of the same event, and a
+// false one if git's push then fails.
+func pushedMessage(sha, remote, branch string, gitCompletes bool) string {
+	if gitCompletes {
+		return "gate passed; git is completing the push"
+	}
+	short := sha
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	if short == "" {
+		// HEAD was unreadable, so no note was bound either; do not render a blank.
+		short = "the gated commit(s)"
+	}
+	target := branch
+	if remote != "" {
+		target = remote + "/" + branch
+	}
+	return fmt.Sprintf("pushed %s to %s; local branch fast-forwarded", short, target)
+}
+
 func (r *Runner) result(run *domain.Run, patch string) RunResult {
 	return RunResult{
 		Outcome:  run.Outcome(),

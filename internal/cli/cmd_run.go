@@ -24,9 +24,10 @@ import (
 
 // cmdRun handles `warden run <hook>`, the entry point the installed hook shims
 // call. Its exit code drives git: a pre-commit pass exits 0 so the commit
-// proceeds; a pre-push run ALWAYS exits non-zero — on success because Warden
-// has already performed the push itself and git's own (now-stale) push must be
-// stopped from racing it (§4.3 step 4), on failure because the push is blocked.
+// proceeds; a pre-push pass exits 0 when warden stood aside and left the push to
+// git, and non-zero when warden performed the push itself and git's own
+// (now-stale) push must be stopped from racing it (§4.3 step 4). A blocked push
+// always exits non-zero. See runPrePushExit.
 func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push>")

@@ -106,17 +106,28 @@ From then on `git commit` / `git push` are gated. Warden's own push runs with
   your working tree. Passes → the commit proceeds.
 - **pre-push** (full pipeline): seeds a worktree from the branch tip, runs the
   resolved pipeline (`intent → rebase → review → test → document → lint`),
-  pauses at an approval gate when a rule requires it, then **fast-forwards your
-  local branch and pushes itself**, writing a hash-chained provenance note under
-  `refs/notes/warden` for each validated commit. If the branch moved mid-run the
-  fast-forward is aborted, never forced.
+  pauses at an approval gate when a rule requires it, then fast-forwards your
+  local branch to whatever the pipeline produced and writes a hash-chained
+  provenance note under `refs/notes/warden` for each validated commit. If the
+  branch moved mid-run the fast-forward is aborted, never forced.
 
-The pre-push hook always exits non-zero on success — Warden already performed
-the push, so git's own (now-stale) push must be stopped from racing it. As a
-result git prints `error: failed to push some refs` on **every successful
-push** — this is expected, not a failure: your gated commit is already on the
-remote. Warden pre-empts it with a `warden: git will now print '…' — that's
-expected` line so you know to ignore git's error.
+**A passing push exits 0 and prints no error.** When the pipeline changed
+nothing, Warden stands aside and lets git perform and report the push itself, so
+`git push` means exactly what it always did and its exit code answers "did it
+land?" on its own.
+
+Warden performs the push itself only when git cannot do it unaided: a step
+rewrote the commit (an auto-fix, an amending agent step), the push needs a
+policy-decided force (`push.force: lease`), or a PR is to be opened. Git resolves
+the refs it will push *before* calling the hook and its push protocol is a
+compare-and-swap, so its now-stale attempt would be rejected — Warden pushes,
+then fails the hook on purpose to pre-empt it. Only on that path does git print
+`error: failed to push some refs`, and Warden tells you first:
+
+```
+warden: pushed 9d90f7f3657c to origin/feature; local branch fast-forwarded
+warden: git will now print 'error: failed to push some refs' — that's expected, not a failure…
+```
 
 ### Signed provenance
 
