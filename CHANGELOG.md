@@ -6,6 +6,62 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-07-25
+
+### Fixed
+
+- **`warden init` no longer rewrites an existing config.** Authorship was
+  inferred from the *parsed* config — "has rules or commands" — so a policy
+  built entirely on built-in steps read as "no config" and was regenerated from
+  defaults. A `.warden.yaml` setting `steps:` and `trusted_keys:` but no
+  `commands:` had its steps reset **and its trusted-signer roster emptied**,
+  silently dropping the repo from trusted-signed to attested depth. That is the
+  one config whose loss is a security change rather than an inconvenience, and
+  the function's own doc comment already promised it "never rewrites the file".
+  Whether a file exists is no longer deduced from its contents.
+- **A failed step's output survives.** The TUI inlined a finding's entire
+  message into a frame that is redrawn in place, so a failing `go test` made the
+  frame taller than the terminal and everything above the last screenful was
+  lost — leaving the tail, often the bare word `FAIL`, with the failing package,
+  test name and assertion gone. Without a test name an intermittent test is
+  indistinguishable from an environment problem or a real failure that happened
+  to clear, so the only available response was to retry until green: the exact
+  habit a gate exists to prevent. The frame now previews a finding (keeping the
+  *head*, where a test failure names itself) and a failed run reprints its
+  findings to stdout after teardown, matching what the non-interactive path
+  always did.
+- **A reusable workflow's input `default:` is read as a scanner pin.** Only
+  scalar values were read, so warden could see a caller that *overrode* a pin
+  but never the definition that *set* it.
+
+### Added
+
+- **`security_scan.pin_file` accepts a cross-repository reference**, for a fleet
+  that pins its scanner once in a shared reusable workflow:
+
+  ```yaml
+  security_scan:
+    pin_file: my-org/.github/.github/workflows/go-ci.yml@main
+  ```
+
+  The version-drift check searched only *this* repo's workflows, so it no-opped
+  for exactly the repos that followed the advice to centralize the pin. This
+  names **where** the pin lives, never what it is — there is still one copy of
+  the version, in the workflow that already defines it. Resolution is bounded by
+  a 3s timeout and cached for an hour, and every failure (offline, 404, moved,
+  malformed) degrades to "no pin found" rather than failing a push.
+- **`warden status` reports an inert scanner version check.** Silence used to
+  mean both "checked, the versions agree" and "found no pin, compared nothing".
+
+### Changed
+
+- warden's own gate runs the `credentials` step, and its provenance `gate` check
+  is now required — the three defects that made it fail on legitimate PRs
+  (0.19.0) are fixed.
+- Release plumbing: a brew-cask failure can no longer strand the floating `v0`
+  tag, the release workflow can be re-driven with `workflow_dispatch`, and the
+  tap credential has one name instead of two.
+
 ## [0.19.0] — 2026-07-25
 
 ### Changed
