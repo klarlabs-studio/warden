@@ -284,6 +284,29 @@ All notable changes to warden are documented here. The format follows
   verification while appearing enforced. They now install a released,
   checksum-verified binary, failing closed on a mismatch. Closes #92.
 
+## [0.18.0] – [0.18.16] — 2026-07-11
+
+Seventeen releases in one day, none of which changed how warden behaves. The
+series was a single sustained attempt to get npm **trusted publishing (OIDC)**
+working, and each failure mode only revealed itself on a real publish — hence a
+release per attempt. Recorded as one entry rather than seventeen empty ones,
+and noted here because the jump from 0.17.0 to 0.19.0 otherwise looks like
+missing history.
+
+### Changed
+
+- **npm packages now publish via OIDC trusted publishing** instead of a
+  long-lived token (#63–#75). Getting there needed, in order: publishing with
+  `--provenance`; dropping `registry-url` and later restoring it; adding
+  `repository.url` to every per-platform package; pinning npm 11.x, because npm
+  12 returns `ENEEDAUTH` under trusted publishing; and finally clearing the
+  `setup-node` placeholder token, which was overriding OIDC with an empty
+  credential and producing a 404.
+- Bumped `go.klarlabs.de/mcp` to v1.22.0 (#62) and v1.24.0 (#69).
+
+If you are on 0.17.0, 0.18.16 behaves identically — there is nothing to read
+into the gap beyond release plumbing.
+
 ## [0.17.0] — 2026-07-07
 
 ### Added
