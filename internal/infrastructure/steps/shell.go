@@ -65,6 +65,16 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 			msg = string(s.name) + " could not run: another process held its lock for " +
 				contentionBudget.String() + ". Nothing is wrong with your tree — wait for the other " +
 				"run to finish and retry.\n" + msg
+		// Likewise the command itself does not exist: an environment gap, not a
+		// verdict on the code. Saying "step js-build failed" sends the developer
+		// to their diff when the fix is `npm ci`.
+		default:
+			if looksLikeShellNotFound(msg) {
+				if env := classifyEnvFailure(s.name, msg, sc.WorktreeDir); env != nil {
+					summary = env.Summary
+					msg = env.Message + "\n\n" + msg
+				}
+			}
 		}
 		return domain.StepResult{
 			Step:   s.name,

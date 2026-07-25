@@ -353,6 +353,64 @@ Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
 
+### The `secrets` step — credentials in tracked files
+
+```yaml
+steps:
+  pre_push: [rebase, secrets, lint, test]
+```
+
+Refuses a change in which a **tracked** file the change touched carries a live
+credential. It exists for a specific, repeatable trap rather than as a general
+secret scanner:
+
+Getting a JS step to run needs the project's dependencies; installing them from
+a private registry needs auth; and the obvious command —
+
+```bash
+npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
+```
+
+writes a **real token into `.npmrc`**, which in many repos is a *tracked* file
+holding only a `${NODE_AUTH_TOKEN}` placeholder. The natural way to make the
+gate pass ends in staging a credential for commit. A gate must not have a happy
+path that leaks a secret.
+
+Scope is narrow on purpose — only files the change touched, only high-confidence
+shapes (npm auth tokens, GitHub/Slack tokens, AWS key ids, private-key blocks) —
+because a false positive is a wall in front of an unrelated commit, which is how
+gates get bypassed wholesale. Placeholders (`${VAR}`, `$VAR`, empty) are the
+correct committed form and never match. Findings name the file and line but
+**never echo the value**, since they reach the terminal, the run record, and
+possibly a PR comment.
+
+The supported way to authenticate is the `NODE_AUTH_TOKEN` environment
+variable, not `npm config set`.
+
+### When a step's command doesn't exist
+
+A step whose command is missing has not judged your code — it never ran:
+
+```
+sh: astro: command not found
+```
+
+Reporting that as `step js-build failed` sends you to your diff when the fix is
+an install. Warden distinguishes the two, and picks the remediation from the
+lockfile actually present:
+
+```
+warden: step js-build could not run (dependencies not installed)
+  js-build could not run: `astro` is not available because node_modules is
+  missing — the project's dependencies have never been installed here.
+  Nothing is wrong with your tree. Install them in the repository root and retry:
+    pnpm install --frozen-lockfile
+```
+
+If the dependencies *are* installed, the tool itself is missing and it says so
+instead. Either way the step still **fails** — an unrun check is not a clean
+tree — and the command's own output is kept.
+
 ### Tools that refuse to run concurrently
 
 Some checkers guard a shared resource with a mutex and refuse to start while

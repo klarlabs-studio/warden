@@ -34,6 +34,8 @@ const (
 	StepTest     StepName = "test"
 	StepDocument StepName = "document"
 	StepLint     StepName = "lint"
+	// StepSecrets refuses a change whose TRACKED files carry a live credential.
+	StepSecrets StepName = "secrets"
 	// StepPush is the terminal write-external action the daemon performs
 	// itself on a full pass (§4.3). It is never listed in user config; the
 	// runner appends it to a passing pre-push run.
@@ -49,6 +51,7 @@ var builtinSteps = map[StepName]bool{
 	StepTest:     true,
 	StepDocument: true,
 	StepLint:     true,
+	StepSecrets:  true,
 	StepPush:     true,
 }
 
