@@ -21,6 +21,10 @@ inputs:
       ran here". Get a fingerprint with `warden key show`.
     required: false
     default: ""
+  warden-version:
+    description: "warden version to install (e.g. v0.18.16, or 'latest')."
+    required: false
+    default: latest
 
 outputs:
   validated:
@@ -30,12 +34,16 @@ outputs:
 runs:
   using: composite
   steps:
-    # warden is a Go install; the caller must have run actions/setup-go first.
-    # GOTOOLCHAIN=auto lets `go install` fetch the toolchain warden requires when
-    # the runner's Go (from the repo's go.mod) is older than warden's minimum.
+    # Install from a released, checksum-verified binary — NOT `go install`.
+    # Verifying provenance is not a Go build step, and requiring a toolchain made
+    # this action fail before it verified anything in any repo without a root
+    # go.mod (a monorepo whose module lives in a subdirectory), leaving the check
+    # permanently red and therefore providing zero verification (#92).
     - name: Install warden
       shell: bash
-      run: GOTOOLCHAIN=auto go install go.klarlabs.de/warden@latest
+      env:
+        WARDEN_VERSION: ${{ inputs.warden-version }}
+      run: ${{ github.action_path }}/../install-warden.sh
 
     - name: Fetch warden notes
       shell: bash
