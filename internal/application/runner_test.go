@@ -822,23 +822,73 @@ func TestRunner_DelegatesToGitOnlyWhenSafe(t *testing.T) {
 		final    string
 		seed     string
 		force    domain.PushForce
+		pr       bool
 		delegate bool
 	}{
-		{"unrewritten fast-forward", "sha1", "sha1", domain.ForceNever, true},
+		{"unrewritten fast-forward", "sha1", "sha1", domain.ForceNever, false, true},
 		// An auto-fix or amending agent step moved the branch; git would publish
 		// the UNVALIDATED pre-fix commit it captured before the hook.
-		{"a step rewrote the branch", "sha2", "sha1", domain.ForceNever, false},
+		{"a step rewrote the branch", "sha2", "sha1", domain.ForceNever, false, false},
 		// Git's own push is not forced, so a rebased branch would be rejected —
 		// and the alternative developers reach for is a gate bypass (#85).
-		{"push needs a lease", "sha1", "sha1", domain.ForceLease, false},
-		{"rewritten and needs a lease", "sha2", "sha1", domain.ForceLease, false},
+		{"push needs a lease", "sha1", "sha1", domain.ForceLease, false, false},
+		{"rewritten and needs a lease", "sha2", "sha1", domain.ForceLease, false, false},
+		// Git does not push until the hook exits, so a delegating run calls the
+		// forge while the branch is still absent from the remote.
+		{"a PR is to be opened", "sha1", "sha1", domain.ForceNever, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := r.delegateToGit(tc.final, tc.seed, tc.force); got != tc.delegate {
-				t.Errorf("delegateToGit(%q, %q, %q) = %v, want %v", tc.final, tc.seed, tc.force, got, tc.delegate)
+			if got := r.delegateToGit(tc.final, tc.seed, tc.force, tc.pr); got != tc.delegate {
+				t.Errorf("delegateToGit(%q, %q, %q, pr=%v) = %v, want %v", tc.final, tc.seed, tc.force, tc.pr, got, tc.delegate)
 			}
 		})
+	}
+}
+
+// TestRunner_PRRunPushesBeforeOpeningIt is the regression guard for the silent
+// half of the bug: PR creation is best-effort, so delegating did not fail — it
+// just produced no PR, on exactly the first push where you need one.
+func TestRunner_PRRunPushesBeforeOpeningIt(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "feature", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg()
+	cfg.PR = domain.PRConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	forge := &fakeForge{available: true, pr: domain.PRInfo{URL: "https://example.test/pr/1"}}
+	r.Forge = forge
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.GitCompletesPush {
+		t.Error("a run that opens a PR must not delegate: the branch would not be on the remote yet")
+	}
+	if !git.pushed {
+		t.Fatal("warden must push before calling the forge")
+	}
+	if !forge.called {
+		t.Error("expected the PR to be opened")
+	}
+	if res.PR == nil {
+		t.Error("expected the opened PR on the result")
+	}
+}
+
+// TestPushedMessage_NamesWhatLandedWhere covers the reporting half of #89.
+func TestPushedMessage_NamesWhatLandedWhere(t *testing.T) {
+	got := pushedMessage("0123456789abcdef0123", "origin", "feature", false)
+	if !strings.Contains(got, "pushed 0123456789ab to origin/feature") {
+		t.Errorf("pushedMessage = %q, want it to name the sha and target", got)
+	}
+	// A delegating run must not claim a push git has not performed yet.
+	if got := pushedMessage("0123456789abcdef0123", "origin", "feature", true); strings.Contains(got, "pushed 0123") {
+		t.Errorf("delegating run claimed a push it did not perform: %q", got)
+	}
+	// An unreadable HEAD must not render a blank sha into the success line.
+	if got := pushedMessage("", "origin", "feature", false); strings.Contains(got, "pushed  to") {
+		t.Errorf("empty sha leaked into the message: %q", got)
 	}
 }
 
