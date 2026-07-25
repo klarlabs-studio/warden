@@ -156,6 +156,44 @@ func (r *Repo) PushRewritesHistory(remote, branch string) (bool, error) {
 	return false, nil
 }
 
+// UnmergedRemoteCommits lists commits on remote/branch with no patch-equivalent
+// in the local branch, using `git cherry` — the same patch-id equivalence rebase
+// itself uses to drop commits already applied upstream.
+//
+// This is the distinction PushRewritesHistory cannot make. "The remote tip is
+// not an ancestor of ours" is true both when we rebased our OWN commits (the
+// remote holds their pre-rewrite form, and force-pushing loses nothing) and when
+// someone else pushed new work to a shared branch (force-pushing destroys it).
+// git cherry marks the first case '-' (an equivalent patch exists locally) and
+// the second '+'. Only '+' commits are at risk.
+//
+// --force-with-lease does NOT cover this: the lease only asserts that the remote
+// has not moved since our last fetch, so once we have fetched the colleague's
+// commit the lease is satisfied and the push destroys it anyway.
+func (r *Repo) UnmergedRemoteCommits(remote, branch string) ([]string, error) {
+	remoteRef := remote + "/" + branch
+	if _, err := r.run("rev-parse", "--verify", "--quiet", remoteRef+"^{commit}"); err != nil {
+		return nil, nil // no remote branch yet: nothing can be lost
+	}
+	out, err := r.run("cherry", branch, remoteRef)
+	if err != nil {
+		return nil, err
+	}
+	var lost []string
+	for line := range strings.SplitSeq(out, "\n") {
+		sha, ok := strings.CutPrefix(strings.TrimSpace(line), "+ ")
+		if !ok {
+			continue // "- <sha>": an equivalent patch is already in our history
+		}
+		subject, err := r.run("log", "-1", "--format=%h %s", strings.TrimSpace(sha))
+		if err != nil {
+			subject = sha
+		}
+		lost = append(lost, strings.TrimSpace(subject))
+	}
+	return lost, nil
+}
+
 // WriteNote attaches rec as JSON to commit sha under refs/notes/warden. The -f
 // flag overwrites any prior note so a re-validated commit reflects its latest
 // run (§9).

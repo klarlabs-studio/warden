@@ -46,6 +46,11 @@ type Git interface {
 	// PushSpanBase is the newest commit on branch the remote already has, so
 	// (base, tip] is what this push publishes — the span a run vouches for.
 	PushSpanBase(remote, branch string) (string, error)
+	// UnmergedRemoteCommits lists commits on remote/branch that have NO
+	// patch-equivalent in the local branch — i.e. work a force-push would
+	// destroy, as opposed to our own commits the remote holds in a pre-rewrite
+	// form. Each entry is a short sha and subject, for naming them in a refusal.
+	UnmergedRemoteCommits(remote, branch string) ([]string, error)
 	WriteNote(sha string, rec domain.RunRecord) error
 	PushNotes(remote string) error
 }

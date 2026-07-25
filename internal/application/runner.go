@@ -163,6 +163,18 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 // remote has and the repo's policy forbids rewriting (push.force: never).
 var ErrPushRewritesHistory = errors.New("push would rewrite the remote branch's history")
 
+// ErrPushDiscardsRemoteWork is returned when a forced push would delete commits
+// that exist only on the remote — someone else's work on a shared branch, as
+// opposed to our own commits in their pre-rewrite form.
+//
+// push.force: lease exists so a branch rebased onto an updated base can still be
+// published (#85). It is permission to replace OUR history, and it is not a
+// judgement that anything on the remote is expendable. --force-with-lease does
+// not draw that line either: it only asserts the remote has not moved since our
+// last fetch, so once we have fetched a colleague's commit the lease is
+// satisfied and the push destroys it silently.
+var ErrPushDiscardsRemoteWork = errors.New("push would discard commits that exist only on the remote")
+
 // pushForce decides how to push a branch whose history may no longer
 // fast-forward from the remote — the ordinary result of rebasing onto an
 // updated base.
@@ -191,6 +203,19 @@ func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, 
 		return "", fmt.Errorf("%w: %s has been rebased or amended, and this repo sets push.force: never. "+
 			"Rewrite it deliberately (git push --force-with-lease) or allow it with push.force: lease in .warden.yaml",
 			ErrPushRewritesHistory, branch)
+	}
+	// A lease is permission to replace OUR OWN pre-rewrite commits, never to
+	// discard someone else's. Refuse when the remote carries work with no
+	// patch-equivalent locally — see ErrPushDiscardsRemoteWork.
+	if lost, err := r.Git.UnmergedRemoteCommits(r.Settings.Remote, branch); err != nil || len(lost) > 0 {
+		if err != nil {
+			// Cannot tell whose work is on the remote: do not force on a guess.
+			return "", fmt.Errorf("%w: could not determine whether %s/%s carries work not in your history: %v",
+				ErrPushDiscardsRemoteWork, r.Settings.Remote, branch, err)
+		}
+		return "", fmt.Errorf("%w: %s/%s carries %d commit(s) that are not in your history:\n  %s\n"+
+			"force-pushing would delete them; integrate first with `git pull --rebase`, then push",
+			ErrPushDiscardsRemoteWork, r.Settings.Remote, branch, len(lost), strings.Join(lost, "\n  "))
 	}
 	return mode, nil
 }

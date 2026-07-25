@@ -6,6 +6,23 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A gated push no longer deletes a colleague's commits.** With
+  `push.force: lease`, warden force-pushed whenever the remote tip was not an
+  ancestor of the local branch — a test that cannot tell "I rebased my own
+  commits" from "someone else pushed to this shared branch". The second case
+  silently destroyed their work, and `--force-with-lease` did not catch it: the
+  lease only asserts the remote has not moved since your last fetch, so once you
+  have fetched their commit the lease is satisfied and the push deletes it.
+  Reproduced against a real remote — a colleague's commit and its file vanished
+  from the branch with no warning. Warden now compares patch-ids (`git cherry`)
+  before forcing and refuses when the remote carries work with no equivalent in
+  your history, naming the commits at risk and pointing at `git pull --rebase`.
+  A branch rebased onto an updated base still publishes exactly as before: the
+  remote holds only your own pre-rewrite commits, which are patch-equivalent, so
+  nothing is at risk. An unreadable comparison refuses rather than guesses.
+
 ### Added
 
 - **`security-scan` gates on the diff, not the repo's absolute state.** When the
