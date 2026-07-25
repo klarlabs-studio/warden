@@ -325,8 +325,14 @@ func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
 	if res.Outcome != domain.OutcomePassed {
 		t.Fatalf("outcome = %s, want passed", res.Outcome)
 	}
-	if !git.pushed {
-		t.Error("expected push to origin")
+	// Nothing rewrote the branch (worktree head == seed tip) and no force is
+	// needed, so the push git already has queued IS warden's push: warden stands
+	// aside and lets git report it honestly (#89).
+	if !res.GitCompletesPush {
+		t.Error("an unrewritten fast-forward should be left to git")
+	}
+	if git.pushed {
+		t.Error("warden must not push behind git's back when git can do it")
 	}
 	if !git.wroteNote || !git.notesPushed {
 		t.Error("expected provenance note written and pushed")
@@ -804,4 +810,60 @@ func TestRunner_PushForce(t *testing.T) {
 			t.Errorf("force = %q, want %q — an error is not a license to rewrite", got, domain.ForceNever)
 		}
 	})
+}
+
+// Standing aside is only safe when git's queued push is byte-for-byte warden's.
+// Git pushes the ref value it captured BEFORE the hook ran, so any rewrite —
+// and any push needing a force — must still go through warden.
+func TestRunner_DelegatesToGitOnlyWhenSafe(t *testing.T) {
+	r := &Runner{}
+	cases := []struct {
+		name     string
+		final    string
+		seed     string
+		force    domain.PushForce
+		delegate bool
+	}{
+		{"unrewritten fast-forward", "sha1", "sha1", domain.ForceNever, true},
+		// An auto-fix or amending agent step moved the branch; git would publish
+		// the UNVALIDATED pre-fix commit it captured before the hook.
+		{"a step rewrote the branch", "sha2", "sha1", domain.ForceNever, false},
+		// Git's own push is not forced, so a rebased branch would be rejected —
+		// and the alternative developers reach for is a gate bypass (#85).
+		{"push needs a lease", "sha1", "sha1", domain.ForceLease, false},
+		{"rewritten and needs a lease", "sha2", "sha1", domain.ForceLease, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := r.delegateToGit(tc.final, tc.seed, tc.force); got != tc.delegate {
+				t.Errorf("delegateToGit(%q, %q, %q) = %v, want %v", tc.final, tc.seed, tc.force, got, tc.delegate)
+			}
+		})
+	}
+}
+
+// When a step rewrites the branch, warden pushes the validated commit itself —
+// the case that must keep working, since git would otherwise publish the
+// pre-fix commit.
+func TestRunner_PushesItselfWhenAStepRewroteTheBranch(t *testing.T) {
+	git := &fakeGit{
+		root: t.TempDir(), branch: "main", head: "sha1",
+		wt: &fakeWorktree{dir: "/wt", headSHA: "sha2"}, // a step amended
+	}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if !git.pushed {
+		t.Error("warden must push the validated commit when git would publish the pre-fix one")
+	}
+	if res.GitCompletesPush {
+		t.Error("git cannot be trusted to complete a push whose ref warden moved")
+	}
 }

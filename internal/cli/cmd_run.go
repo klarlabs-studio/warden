@@ -177,20 +177,31 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	server.PublishDone(res)
 	maybeNotify(svc, res, time.Since(start))
 	// The TUI already rendered the outcome as its final frame — don't reprint
-	// it. Pre-push always exits non-zero so git's own (stale) push is stopped.
+	// it. Exit 0 only when git is completing the push itself; otherwise warden
+	// already pushed and must fail the hook so git's stale push is stopped.
 	noteGitPushError(stdout, res)
+	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
+		return 0
+	}
 	return 1
 }
 
-// noteGitPushError, on a SUCCESSFUL pre-push, prints a heads-up that git is
-// about to print "error: failed to push some refs". Warden already pushed the
-// gated commit itself and then fails the hook on purpose so git's own redundant
-// push can't proceed (see cmdRun) — that non-zero exit is exactly what makes git
-// emit the error. Without this line a normal successful push ends on a red
-// "error:" and reads as a failure. On a real failure (push blocked) git's error
-// is correct, so we stay silent and let it stand.
+// noteGitPushError, on a SUCCESSFUL pre-push that warden pushed ITSELF, prints
+// a heads-up that git is about to print "error: failed to push some refs".
+//
+// Warden has to fail the hook in that case: git pushes the ref value it
+// captured before the hook ran, so letting it proceed after warden rewrote the
+// branch would publish the unvalidated pre-fix commit. (Exiting 0 is worse
+// still — git compare-and-swaps against its stale advertisement and the remote,
+// already at the new value, hard-rejects it.) The deliberate non-zero exit is
+// what makes git emit the error, so without this line a successful push ends on
+// a red "error:".
+//
+// It stays silent when git is completing the push (nothing was rewritten): git
+// then reports the real outcome and warden exits 0, so there is nothing to
+// apologize for. On a real failure git's error is correct and stands.
 func noteGitPushError(w io.Writer, res application.RunResult) {
-	if res.Outcome != domain.OutcomePassed {
+	if res.Outcome != domain.OutcomePassed || res.GitCompletesPush {
 		return
 	}
 	fmt.Fprintln(w, `warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit.`)
@@ -348,10 +359,15 @@ func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, 
 	return 0
 }
 
-// runPrePushExit reports the outcome and always returns non-zero (see cmdRun).
-// For symmetry with the pre-commit line the steps that ran are named, so a
-// passing push says which checks stand behind it. Nothing is deferred past
-// pre-push, so there is no follow-up clause to add.
+// runPrePushExit reports the outcome and returns the hook's exit code. For
+// symmetry with the pre-commit line the steps that ran are named, so a passing
+// push says which checks stand behind it. Nothing is deferred past pre-push, so
+// there is no follow-up clause to add.
+//
+// Exit 0 when git is completing the push: git then reports the real result and
+// "did it push?" is answerable from the exit code alone. Otherwise warden
+// already pushed and MUST fail the hook so git's stale push cannot proceed (see
+// noteGitPushError) — the one case where a success still exits non-zero.
 func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	msg := res.Message
 	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
@@ -359,6 +375,9 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "warden: %s\n", msg)
 	noteGitPushError(stdout, res)
+	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
+		return 0
+	}
 	return 1
 }
 
