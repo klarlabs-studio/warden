@@ -74,6 +74,43 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	return ReattestResult{Target: target, Source: source, Wrote: true}, nil
 }
 
+// ReattestAll re-attests every commit on branch since the adoption point whose
+// content a validated tree-identical commit already covers. It exists because
+// the per-SHA form does not survive contact with reality: a repo can run the
+// provenance gate on every PR and still show a majority-unverified base branch,
+// because squash-merge mints a new commit id for each merge and nobody
+// remembers to relocate the note by hand. One command over the whole gap is what
+// makes the repair actually happen.
+//
+// It is exactly as conservative as Reattest — the same tree-equality and
+// trusted-signer rules decide each commit, so this is a batch of the same safe
+// operation, never a weaker one. Commits with no validated tree-identical source
+// are skipped, not forced. Results come back oldest-first, one per commit
+// written; a single push at the end publishes them together.
+func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error) {
+	report, err := s.Doctor(branch)
+	if err != nil {
+		return nil, err
+	}
+	var out []ReattestResult
+	gaps := report.Reattestable()
+	for i := range gaps {
+		sha := gaps[i].SHA
+		// Push per-commit is suppressed: one push after the batch beats N.
+		res, err := s.Reattest(sha, false)
+		if err != nil {
+			return out, fmt.Errorf("re-attest %s: %w", sha[:min(12, len(sha))], err)
+		}
+		if res.Wrote {
+			out = append(out, res)
+		}
+	}
+	if push && len(out) > 0 {
+		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
+	}
+	return out, nil
+}
+
 // reattestTrustSet is the set of signers a re-attestation may carry provenance
 // from: the committed roster plus this machine's own key. Carrying over only
 // from a trusted (or our own) source stops an untrusted self-signed note — one
