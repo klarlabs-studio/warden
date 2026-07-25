@@ -209,6 +209,24 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	}
 	server.PublishDone(res)
 	maybeNotify(svc, res, time.Since(start))
+	// Reprint the findings of a FAILED run to plain stdout, even though the TUI
+	// rendered them in its final frame.
+	//
+	// The frame is drawn inline and redrawn in place, so a finding carrying a
+	// whole `go test` output makes it taller than the terminal and everything
+	// above the last screenful is lost. What survives is the tail — typically
+	// the bare word `FAIL` — with the failing package, test name and assertion
+	// gone. A developer then cannot tell an intermittent test from an
+	// environment problem from a real failure, so the only available response is
+	// to retry until green, which is exactly the habit a gate exists to prevent
+	// (#114). Printing after teardown puts the full output in scrollback where
+	// it can be read and pasted.
+	//
+	// Only on failure: a passing run has nothing to diagnose, and the TUI's
+	// summary is the right level of detail for it.
+	if res.Outcome != domain.OutcomePassed {
+		printFindings(stdout, res.Findings)
+	}
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Exit 0 only when git is completing the push itself; otherwise warden
 	// already pushed and must fail the hook so git's stale push is stopped — and
