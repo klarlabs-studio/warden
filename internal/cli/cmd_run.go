@@ -250,9 +250,39 @@ func maybeNotify(svc interface{ Config() (domain.Config, error) }, res applicati
 	notify.Send(title, res.Message)
 }
 
+// preCommitReporter is the slice of the service a finished pre-commit needs:
+// re-apply the fix patch, and read the configured step lists so the pass line
+// can say what actually ran and what is still outstanding.
+type preCommitReporter interface {
+	ApplyFixPatch(string) error
+	StepsList() (preCommit, prePush []domain.StepName, err error)
+}
+
+// passLine renders the pre-commit pass message. A bare "pre-commit passed"
+// reads as "my tree is green" even under a split policy where only the fast
+// checks ran, so the line names the steps it actually ran and — when the policy
+// defers others to pre-push — says so in the same breath. Pure and
+// side-effect-free so the wording is unit-testable. A run whose step list is
+// unknown (empty policy, or an unreadable config) degrades to the original
+// unqualified line rather than asserting something it cannot back up.
+func passLine(ran, prePush []domain.StepName) string {
+	if len(ran) == 0 {
+		return "warden: pre-commit passed."
+	}
+	line := fmt.Sprintf("warden: pre-commit passed (%s)", domain.JoinSteps(ran))
+	if deferred := domain.DeferredSteps(ran, prePush); len(deferred) > 0 {
+		verb := "runs"
+		if len(deferred) > 1 {
+			verb = "run"
+		}
+		return fmt.Sprintf("%s — %s %s at pre-push.", line, domain.JoinSteps(deferred), verb)
+	}
+	return line + "."
+}
+
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a
 // pass so the commit proceeds; a failure exits non-zero to abort the commit.
-func runPreCommitExit(svc interface{ ApplyFixPatch(string) error }, res application.RunResult, stdout, stderr io.Writer) int {
+func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, stderr io.Writer) int {
 	if res.Outcome != domain.OutcomePassed {
 		fmt.Fprintf(stderr, "warden: %s\n", res.Message)
 		return 1
@@ -263,13 +293,26 @@ func runPreCommitExit(svc interface{ ApplyFixPatch(string) error }, res applicat
 		}
 		fmt.Fprintln(stdout, "warden: applied auto-fixes to your working tree.")
 	}
-	fmt.Fprintln(stdout, "warden: pre-commit passed.")
+	// A config we can't read costs us the deferred-steps clause, not the pass:
+	// reporting is never allowed to fail a run that the gate already passed.
+	_, prePush, err := svc.StepsList()
+	if err != nil {
+		prePush = nil
+	}
+	fmt.Fprintln(stdout, passLine(res.Policy.Steps, prePush))
 	return 0
 }
 
 // runPrePushExit reports the outcome and always returns non-zero (see cmdRun).
+// For symmetry with the pre-commit line the steps that ran are named, so a
+// passing push says which checks stand behind it. Nothing is deferred past
+// pre-push, so there is no follow-up clause to add.
 func runPrePushExit(res application.RunResult, stdout io.Writer) int {
-	fmt.Fprintf(stdout, "warden: %s\n", res.Message)
+	msg := res.Message
+	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
+		msg = fmt.Sprintf("%s (%s)", msg, domain.JoinSteps(res.Policy.Steps))
+	}
+	fmt.Fprintf(stdout, "warden: %s\n", msg)
 	noteGitPushError(stdout, res)
 	return 1
 }

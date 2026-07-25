@@ -250,6 +250,18 @@ func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
 	return hooks.Installed(gitDir), nil
 }
 
+// HookPins reports the warden version each installed shim was written at. The
+// shims prefer a warden on PATH, so a pin that differs from the running binary
+// is skew a status surface should name rather than leave to be discovered in a
+// provenance note after the fact.
+func (s *Service) HookPins() (map[domain.Hook]string, error) {
+	gitDir, err := s.repo.GitDir()
+	if err != nil {
+		return nil, err
+	}
+	return hooks.Pinned(gitDir), nil
+}
+
 // writeStarterConfig writes a minimal .warden.yaml only when none exists. On an
 // existing (user-authored) config it never rewrites the file — it updates just
 // the hooks selection in place, preserving comments and formatting. When it does
