@@ -68,7 +68,10 @@ func TestPush_LeaseRefusesToClobberUnfetchedWork(t *testing.T) {
 
 	// A second clone pushes a commit our clone has never fetched.
 	other := t.TempDir()
-	gitRun(t, other, "clone", "-q", bare, ".")
+	// --branch main explicitly: the bare repo's HEAD follows init.defaultBranch,
+	// which is not "main" on every machine, so a plain clone can land on an
+	// unborn branch and leave `main` unavailable locally.
+	gitRun(t, other, "clone", "-q", "--branch", "main", bare, ".")
 	gitRun(t, other, "config", "user.email", "o@o.co")
 	gitRun(t, other, "config", "user.name", "o")
 	gitRun(t, other, "commit", "-q", "--allow-empty", "--no-verify", "-m", "someone else's work")
