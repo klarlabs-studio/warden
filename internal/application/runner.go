@@ -203,6 +203,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands})
 	run := r.newRun(domain.PrePush, resolved, branch)
 
+	// spanBase is the commit this push starts from, captured BEFORE the push
+	// moves the remote-tracking ref. It becomes the record's CoversFrom, so the
+	// note states the span the run vouches for and not just its tip (#86).
+	var spanBase string
+
 	// The push closure runs only after the kernel's approval gate clears. It
 	// performs the real fast-forward-back, push, and note write (§4.3 step 2).
 	push := func(ctx context.Context) (domain.StepResult, error) {
@@ -213,6 +218,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		if err := r.Git.FastForwardTo(branch, finalSHA, seedTip); err != nil {
 			return domain.StepResult{}, fmt.Errorf("%w: %v", ErrBranchMoved, err)
 		}
+		// Best-effort: a span we cannot determine is simply not claimed, leaving
+		// the note attesting its tip alone. Provenance never fails the gate.
+		spanBase, _ = r.Git.PushSpanBase(r.Settings.Remote, branch)
 		force, err := r.pushForce(cfg, branch)
 		if err != nil {
 			return domain.StepResult{}, err
@@ -255,6 +263,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	finalSHA, shaErr := r.Git.HeadSHA()
 	if shaErr == nil {
 		record.CommitSHA = finalSHA
+		// Claim the span only when it is strictly below the tip. A base equal to
+		// (or absent from) the tip covers nothing extra, and claiming an empty or
+		// self-referential span would be noise in a signed statement.
+		if spanBase != "" && spanBase != finalSHA {
+			record.CoversFrom = spanBase
+		}
 	}
 	r.sign(record)
 	if shaErr == nil {

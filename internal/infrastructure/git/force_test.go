@@ -136,3 +136,59 @@ func TestPush_LeaseStillAllowsFastForward(t *testing.T) {
 		t.Errorf("remote main = %s, want %s", got, advanced)
 	}
 }
+
+func TestPushSpanBase(t *testing.T) {
+	dir := newTestRepo(t)
+	repo := &Repo{Dir: dir}
+	setupBareRemote(t, dir)
+	onRemote := gitRev(t, dir, "main")
+
+	t.Run("names the newest commit the remote already has", func(t *testing.T) {
+		gitRun(t, dir, "commit", "-q", "--allow-empty", "--no-verify", "-m", "A")
+		gitRun(t, dir, "commit", "-q", "--allow-empty", "--no-verify", "-m", "B")
+		base, err := repo.PushSpanBase("origin", "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base != onRemote {
+			t.Errorf("PushSpanBase = %s, want %s", base, onRemote)
+		}
+		// The span is exactly what this push publishes.
+		span, err := repo.CommitsInSpan(base, gitRev(t, dir, "main"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(span) != 2 {
+			t.Errorf("span = %v, want the two unpushed commits", span)
+		}
+	})
+
+	t.Run("survives a rebase by landing on the merge-base", func(t *testing.T) {
+		// Rebasing makes every commit new to the remote; the boundary must still
+		// be a commit the remote has, not an empty result.
+		gitRun(t, dir, "commit", "-q", "--allow-empty", "--amend", "--no-verify", "-m", "B rewritten")
+		base, err := repo.PushSpanBase("origin", "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base != onRemote {
+			t.Errorf("PushSpanBase after rewrite = %s, want the merge-base %s", base, onRemote)
+		}
+	})
+}
+
+func TestCommitsInSpan_EmptyBaseCoversNothing(t *testing.T) {
+	dir := newTestRepo(t)
+	repo := &Repo{Dir: dir}
+	// A span warden could not determine must cover nothing rather than
+	// everything — the fail-safe direction.
+	for _, args := range [][2]string{{"", "main"}, {"main", ""}, {"", ""}} {
+		got, err := repo.CommitsInSpan(args[0], args[1])
+		if err != nil {
+			t.Fatalf("CommitsInSpan(%q, %q): %v", args[0], args[1], err)
+		}
+		if len(got) != 0 {
+			t.Errorf("CommitsInSpan(%q, %q) = %v, want nothing", args[0], args[1], got)
+		}
+	}
+}

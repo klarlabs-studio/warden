@@ -119,6 +119,36 @@ whose commits still carry their notes, and gates the **merge itself**: the check
 must pass *before* the platform rewrites history. Enforce before the squash, not
 after.
 
+### Multi-commit pushes: the note covers the span, not just the tip
+
+A run validates **one tree** — the tip's, in the disposable worktree. Warden
+therefore does not attest each commit of a multi-commit push individually;
+those intermediate trees were never checked out, and a note claiming
+"lint and test passed on this commit" would be false for all but the last.
+
+What a passing run *can* honestly claim is the span: a trusted signer ran the
+policy and published `(covers_from, commit_sha]` as one gated push. The note
+records that span inside the signed payload, so it cannot be widened after
+signing, and `warden verify --range` reads it:
+
+```
+verified 4 commit(s) in a1b2c3d..e4f5a6b (trusted-signed)
+  (3 covered by a gated push's signed span, not individually attested)
+```
+
+Without this, an ordinary `commit → commit → commit → push` left two commits
+reading `UNVERIFIED` forever, because the range gate demanded per-commit notes
+warden never writes.
+
+The coverage is not a weaker path to green:
+
+- a covering note must clear **the same bar** it is being used to satisfy —
+  same signature and trusted-key requirements at its own commit;
+- the span is bounded by **real git history** (`rev-list base..tip`), not by
+  anything the note asserts about reachability;
+- a commit outside every trusted span keeps its original failure, so a
+  `--no-verify` commit in the middle of a branch still fails the gate.
+
 ### Keeping the base branch green after a squash (`warden reattest`)
 
 The gate assures every merge, but the *squash commit itself* on the base branch

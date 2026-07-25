@@ -46,6 +46,8 @@ type fakeGit struct {
 	pushForce       domain.PushForce
 	rewritesHistory bool
 	rewritesErr     error
+	spanBase        string
+	spanBaseErr     error
 	notesPushed     bool
 	wroteNote       bool
 	note            domain.RunRecord
@@ -77,6 +79,12 @@ func (g *fakeGit) Push(_, _ string, force domain.PushForce) error {
 // false by default, so existing tests exercise the ordinary fast-forward path.
 func (g *fakeGit) PushRewritesHistory(string, string) (bool, error) {
 	return g.rewritesHistory, g.rewritesErr
+}
+
+// PushSpanBase scripts the commit the push starts from; "" (the default) means
+// the run claims no span, matching a first push with nothing behind it.
+func (g *fakeGit) PushSpanBase(string, string) (string, error) {
+	return g.spanBase, g.spanBaseErr
 }
 func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	g.wroteNote = true

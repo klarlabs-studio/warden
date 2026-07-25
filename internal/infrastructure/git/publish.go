@@ -89,6 +89,52 @@ func (r *Repo) remoteTrackingSHA(remote, branch string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// PushSpanBase returns the commit this push starts from: the newest commit
+// reachable from branch that the remote ALREADY has. Everything after it in
+// (base, branch] is what this push publishes, which is exactly the span a
+// passing run vouches for (see domain.RunRecord.CoversFrom).
+//
+// It is computed against every ref under refs/remotes/<remote>/, not just this
+// branch's tracking ref, so it stays correct after a rebase: the rebased
+// commits are all new to the remote, and the boundary lands on the merge-base
+// with whatever the remote already had. Returns "" when no boundary exists
+// (an unrelated or entirely new history), which records no span rather than
+// guessing one.
+func (r *Repo) PushSpanBase(remote, branch string) (string, error) {
+	out, err := r.run("rev-list", "--boundary", branch, "--not", "--remotes="+remote)
+	if err != nil {
+		return "", err
+	}
+	// `--boundary` prefixes with '-' the commits just outside the set — i.e. the
+	// ones the remote already has. The first is the nearest.
+	for line := range strings.SplitSeq(out, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "-"); ok {
+			return rest, nil
+		}
+	}
+	return "", nil
+}
+
+// CommitsInSpan lists the commits in (base, head], i.e. those a push with this
+// span published. An empty base yields nothing: a span warden could not
+// determine covers nothing, rather than everything.
+func (r *Repo) CommitsInSpan(base, head string) ([]string, error) {
+	if base == "" || head == "" {
+		return nil, nil
+	}
+	out, err := r.run("rev-list", base+".."+head)
+	if err != nil {
+		return nil, err
+	}
+	var shas []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			shas = append(shas, s)
+		}
+	}
+	return shas, nil
+}
+
 // PushRewritesHistory reports whether pushing branch to remote would discard
 // commits the remote currently has — i.e. the remote tip is not an ancestor of
 // the local tip. That is the signal warden uses in place of the --force flag it

@@ -53,6 +53,9 @@ func (a *Adapter) Push(remote, branch string, force domain.PushForce) error {
 func (a *Adapter) PushRewritesHistory(remote, branch string) (bool, error) {
 	return a.repo.PushRewritesHistory(remote, branch)
 }
+func (a *Adapter) PushSpanBase(remote, branch string) (string, error) {
+	return a.repo.PushSpanBase(remote, branch)
+}
 func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 	return a.repo.WriteNote(sha, rec)
 }

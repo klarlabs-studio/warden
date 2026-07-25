@@ -43,6 +43,9 @@ type Git interface {
 	// PushRewritesHistory reports whether pushing branch would discard commits
 	// the remote has, i.e. whether a force is needed at all.
 	PushRewritesHistory(remote, branch string) (bool, error)
+	// PushSpanBase is the newest commit on branch the remote already has, so
+	// (base, tip] is what this push publishes — the span a run vouches for.
+	PushSpanBase(remote, branch string) (string, error)
 	WriteNote(sha string, rec domain.RunRecord) error
 	PushNotes(remote string) error
 }

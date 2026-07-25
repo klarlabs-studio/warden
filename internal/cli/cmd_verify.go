@@ -201,6 +201,18 @@ func reasonHint(r domain.VerifyReason) string {
 	}
 }
 
+// countCovered tallies commits that passed via a covering push-span rather
+// than a note of their own.
+func countCovered(res service.RangeVerifyResult) int {
+	n := 0
+	for i := range res.Commits {
+		if res.Commits[i].CoveredBy != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // printRange renders the human-readable range-gate result: a per-failure line
 // for anything that did not pass, then a one-line verdict naming the depth.
 func printRange(w io.Writer, res service.RangeVerifyResult) {
@@ -210,6 +222,12 @@ func printRange(w io.Writer, res service.RangeVerifyResult) {
 	}
 	if len(fails) == 0 {
 		fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
+		// Say how many passed by span rather than by their own note, so a reader
+		// can tell "individually attested" from "published by a gated push" —
+		// green should not hide which claim is being made.
+		if n := countCovered(res); n > 0 {
+			fmt.Fprintf(w, "  (%d covered by a gated push's signed span, not individually attested)\n", n)
+		}
 		return
 	}
 	fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))

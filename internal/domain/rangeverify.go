@@ -29,6 +29,12 @@ const (
 type CommitVerdict struct {
 	SHA    string       `json:"sha"`
 	Reason VerifyReason `json:"reason,omitempty"`
+	// CoveredBy names the commit whose signed push-span vouches for this one,
+	// when it carries no note of its own. It records HOW the commit passed —
+	// covered by a gated push rather than individually attested — so an auditor
+	// reading the gate can tell the two apart instead of seeing an
+	// undifferentiated green.
+	CoveredBy string `json:"covered_by,omitempty"`
 }
 
 // OK reports whether the commit passed the gate.
