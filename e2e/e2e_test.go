@@ -1,9 +1,20 @@
 // Package e2e drives the built warden binary against real git repositories,
 // exercising the whole gate end to end: the pre-commit fast path, the pre-push
-// pipeline with its self-performed push and provenance notes, and the doctor
-// bypass audit. Opt-in via WARDEN_E2E=1 (see Makefile `make e2e`); a plain
-// `go test ./...` skips it. An env gate rather than a build tag keeps the
-// package always listable by go list / coverage tooling.
+// pipeline with its push and provenance notes, and the doctor bypass audit.
+// Opt-in via WARDEN_E2E=1 (see Makefile `make e2e`); a plain `go test ./...`
+// skips it. An env gate rather than a build tag keeps the package always
+// listable by go list / coverage tooling.
+//
+// ALWAYS RUN THESE WITH -count=1.
+//
+// These tests exercise a separately built binary, so from the go tool's point of
+// view this package depends only on os/exec/strings/testing. A change anywhere
+// in internal/** leaves the test binary's inputs identical, Go serves the run
+// from its test cache, and the suite reports a stale PASS without executing.
+// That is not theoretical: the "End-to-End" CI check reported success as
+// `ok go.klarlabs.de/warden/e2e (cached)` while the push-contract test below was
+// actually failing, which is how a pre-push regression reached main behind a
+// green gate. Both invocations (Makefile, ci.yml) now pass -count=1; keep it.
 package e2e
 
 import (
@@ -87,6 +98,33 @@ func (h *harness) wardenIn(stdin string, args ...string) (string, int) {
 		code = ee.ExitCode()
 	} else if err != nil {
 		h.t.Fatalf("warden %v: %v", args, err)
+	}
+	return string(out), code
+}
+
+// hookEnv puts the binary under test at the FRONT of PATH. An installed hook
+// shim resolves `warden` from PATH, so without this a real `git push` would
+// gate through whatever warden the developer (or the runner image) happens to
+// have installed — testing a released binary instead of this working tree, and
+// reporting its behavior as if it were ours.
+func hookEnv() []string {
+	return append(os.Environ(), "PATH="+filepath.Dir(wardenBin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// gitTry runs git and returns (combined output, exit code) instead of failing
+// the test, for the cases where the exit code IS the assertion. It runs with
+// hookEnv so any hook git fires is the binary under test.
+func (h *harness) gitTry(args ...string) (string, int) {
+	h.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = h.dir
+	cmd.Env = hookEnv()
+	out, err := cmd.CombinedOutput()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		h.t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out), code
 }
@@ -180,13 +218,24 @@ func TestE2E_PrePushPushesWithProvenance(t *testing.T) {
 	h.git("commit", "--no-verify", "-am", "feature change")
 	localSHA := h.git("rev-parse", "HEAD")
 
-	out, code := h.warden("run", "pre-push")
-	// Pre-push always exits non-zero (warden performed the push itself).
-	if code == 0 {
-		t.Fatalf("pre-push should exit non-zero after self-push: %s", out)
+	// Drive a REAL `git push` through the installed hook rather than invoking
+	// `warden run pre-push` directly. Who performs the push is now the thing under
+	// test, and only a real push exercises it: git resolves its refs before the
+	// hook runs, so the hand-off can only be observed from git's side.
+	out, code := h.gitTry("push", "origin", "main")
+
+	// Nothing rewrote the commit, so warden stands aside and git performs the
+	// push. That is what makes a passing push exit 0 (#89) — the old contract
+	// (always non-zero, plus "error: failed to push some refs") trained everyone
+	// to ignore this tool's errors.
+	if code != 0 {
+		t.Fatalf("a passing push must exit 0, got %d: %s", code, out)
 	}
-	if !strings.Contains(out, "warden pushed") {
-		t.Fatalf("expected self-push message, got: %s", out)
+	if strings.Contains(out, "error:") {
+		t.Errorf("a passing push must not print an error: %s", out)
+	}
+	if !strings.Contains(out, "git is completing the push") {
+		t.Errorf("expected the hand-off message, got: %s", out)
 	}
 
 	// The remote must now hold the feature commit.
@@ -272,4 +321,53 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return string(out)
+}
+
+// TestE2E_PrePushSelfPushWhenStepRewrites pins the other half of the push
+// contract. When a step rewrites the commit, git holds the pre-rewrite sha and
+// its push protocol is a compare-and-swap, so its attempt would be rejected —
+// warden pushes the validated commit itself and fails the hook on purpose to
+// pre-empt it. That exit MUST stay non-zero: it is the only thing stopping git
+// from racing a stale ref onto the remote.
+func TestE2E_PrePushSelfPushWhenStepRewrites(t *testing.T) {
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v %s", err, out)
+	}
+	h := newHarness(t)
+	h.git("remote", "add", "origin", remote)
+	h.write("a.txt", "hello\n")
+	h.git("add", "a.txt")
+	h.git("commit", "--no-verify", "-m", "init")
+	h.git("branch", "-M", "main")
+	h.git("push", "--no-verify", "-u", "origin", "main")
+
+	// A step that commits in the worktree moves the tip off the sha git resolved.
+	h.write(".warden.yaml", `
+hooks: { pre_commit: true, pre_push: true }
+commands: { amender: "git commit -q --allow-empty --no-verify -m warden-added-this" }
+steps: { pre_commit: [], pre_push: [amender] }
+rules: []
+`)
+	h.warden("init")
+	h.write("a.txt", "feature\n")
+	h.git("commit", "--no-verify", "-am", "feature change")
+	before := h.git("rev-parse", "HEAD")
+
+	out, code := h.gitTry("push", "origin", "main")
+	if code == 0 {
+		t.Fatalf("a rewriting push must fail the hook so git cannot race a stale ref: %s", out)
+	}
+	after := h.git("rev-parse", "HEAD")
+	if after == before {
+		t.Fatalf("expected the step to rewrite HEAD; it did not: %s", out)
+	}
+	// The success line must name what landed — the #89 complaint was that you
+	// could not tell a successful push from a failed one without git ls-remote.
+	if !strings.Contains(out, "pushed "+after[:12]) {
+		t.Errorf("expected the pushed sha in the message, got: %s", out)
+	}
+	if remoteSHA := strings.TrimSpace(gitIn(t, remote, "rev-parse", "main")); remoteSHA != after {
+		t.Errorf("remote main = %s, want the validated commit %s", remoteSHA, after)
+	}
 }

@@ -36,7 +36,8 @@ cover: ## Coverage policy check (coverctl)
 	coverctl check
 
 e2e: ## End-to-end tests (builds the binary, drives real git)
-	WARDEN_E2E=1 go test ./e2e/ -v
+	# -count=1 is REQUIRED, not hygiene: see the note in e2e/e2e_test.go.
+	WARDEN_E2E=1 go test ./e2e/ -v -count=1
 
 build: ## Build the binary
 	go build -o warden .
