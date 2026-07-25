@@ -1,12 +1,18 @@
 name: provenance
 
-# Advisory dogfood of the warden-gate action on warden's own PRs (ADR-0002).
-# It reports whether every commit on the branch carries trusted-signed
-# provenance — a note bound to the commit, its evidence chain intact, and signed
-# by a key in .warden.yaml `trusted_keys`. It is NOT (yet) a required check:
-# promote it in branch-protection settings once we trust the signal. It runs on
-# the PR head, whose commits still carry their notes, so a squash-merge on main
-# never trips it.
+# Dogfood of the warden-gate action on warden's own PRs (ADR-0002). It checks
+# that every commit on the branch carries trusted-signed provenance — a note
+# bound to the commit, its evidence chain intact, and signed by a key in
+# .warden.yaml `trusted_keys`. It runs on the PR head, whose commits still carry
+# their notes, so a squash-merge on main never trips it.
+#
+# This IS a required status check as of 0.19.0. It was advisory until three
+# defects were fixed that made it fail on legitimate PRs — a note covered only
+# its push's tip (#86), a rebased branch could not be pushed through the gate at
+# all (#85), and the rebase step targeted the branch's own remote ref (#102).
+# With those closed it passed 12 consecutive runs, which is what earned the
+# promotion. If it starts failing on work that is genuinely gated, suspect a
+# regression in one of those three rather than the branch.
 on:
   pull_request:
 
