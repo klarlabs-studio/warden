@@ -6,6 +6,14 @@ on:
     # major-tag job maintains (v0) has no dots, so moving it never re-triggers a
     # release.
     tags: ["v*.*.*"]
+  # Re-drive a release without re-tagging. v0.19.0 needed exactly this: the
+  # GitHub Release and npm package published, then the brew cask failed on a
+  # stale tap PAT — and with no manual trigger the only ways forward were
+  # deleting and re-pushing the tag, or fixing the cask by hand.
+  # Dispatch against the TAG itself (`--ref v0.19.0`): goreleaser and the
+  # major-tag job both read GITHUB_REF_NAME, so no input is needed and there is
+  # no second place for the version to be wrong.
+  workflow_dispatch:
 
 permissions:
   contents: write # create the GitHub Release
@@ -36,14 +44,11 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Scopes the tap-repo push for the brew cask. Prefer TAP_GITHUB_TOKEN
-          # — the name the other repos publishing to felixgeelhaar/homebrew-tap
-          # already use — and fall back to the legacy HOMEBREW_TAP_TOKEN so this
-          # keeps working whichever exists. Two names for one credential is how
-          # v0.19.0 shipped with a 401: the PAT was rotated and updated under one
-          # name, leaving warden's copy stale. Drop the fallback once the secret
-          # is renamed.
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
+          # Scopes the tap-repo push for the brew cask. Named to match the
+          # other repos publishing to felixgeelhaar/homebrew-tap: one credential
+          # under two names is how v0.19.0 shipped with a 401 — the PAT was
+          # rotated and updated under the other name, leaving warden's stale.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 
       # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
       # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
