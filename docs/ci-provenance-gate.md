@@ -24,14 +24,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # notes + the full PR range ride on history
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
+      # No setup-go needed: the action installs a released, checksum-verified
+      # binary, so this works in any repo — including one with no root go.mod.
       - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0
         with:
           require-signed: "true"
           key: "<fingerprint1>,<fingerprint2>" # your org's trusted signers
 ```
+
+### No toolchain required
+
+The action installs warden from a **released, checksum-verified binary**, not
+via `go install`. That matters beyond convenience: verifying provenance is not a
+Go build step, and requiring a toolchain coupled every consumer to a root
+`go.mod`. In a monorepo whose module lives in a subdirectory, `setup-go` with
+`go-version-file: go.mod` fails and the job dies *before verifying anything* —
+leaving a permanently-red check that is indistinguishable from a broken one, and
+which therefore provides no verification at all while appearing to be enforced.
+
+Pin a version with `warden-version:` (default `latest`). The download is
+digest-checked against the release's `checksums.txt` and **fails closed** on a
+mismatch; if no binary exists for the runner's platform it falls back to
+`go install` only when a toolchain happens to be present.
 
 Mark the `gate` job a **required status check** (Settings → Branches → branch
 protection) and un-provenanced PRs can no longer be merged.

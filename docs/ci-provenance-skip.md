@@ -19,9 +19,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # notes ride on history
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
+      # No setup-go needed: the action installs a released, checksum-verified
+      # binary, so this works in any repo — including one with no root go.mod.
       - id: warden
         uses: ./.github/actions/warden-verify # or klarlabs-studio/warden/.github/actions/warden-verify@v0 (see gate doc on pinning)
 

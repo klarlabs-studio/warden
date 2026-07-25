@@ -54,12 +54,16 @@ inputs:
 runs:
   using: composite
   steps:
-    # warden is a Go install; the caller must have run actions/setup-go first,
-    # and checkout with fetch-depth: 0 so the range's history and notes exist.
-    # GOTOOLCHAIN=auto lets `go install` fetch the toolchain warden requires.
+    # Install from a released, checksum-verified binary — NOT `go install`, so
+    # this gate needs no Go toolchain and no root go.mod. Requiring one made the
+    # check die at setup (before verifying anything) in every repo whose module
+    # lives in a subdirectory, leaving it permanently red (#92). The caller must
+    # still checkout with fetch-depth: 0 so the range's history and notes exist.
     - name: Install warden
       shell: bash
-      run: GOTOOLCHAIN=auto go install "go.klarlabs.de/warden@${{ inputs.warden-version }}"
+      env:
+        WARDEN_VERSION: ${{ inputs.warden-version }}
+      run: ${{ github.action_path }}/../install-warden.sh
 
     - name: Fetch warden notes
       shell: bash

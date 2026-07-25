@@ -20,9 +20,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0 # notes + the full PR range ride on history
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: go.mod
+      # No setup-go: the action installs a released, checksum-verified binary,
+      # so the gate does not depend on a Go toolchain or a root go.mod (#92).
       - uses: ./.github/actions/warden-gate
         # No `key:` input — the committed .warden.yaml `trusted_keys` roster
         # supplies the trusted signer(s), so this runs at trusted-signed depth.
