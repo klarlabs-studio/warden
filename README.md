@@ -410,6 +410,27 @@ Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
 
+### What `rebase` rebases onto
+
+The `rebase` step targets the branch's **integration base** — the ref it is
+meant to merge into — resolved in order:
+
+1. `pr.base` when the repo configures one (`origin/<base>`),
+2. otherwise the remote's default head (`origin/HEAD` → e.g. `origin/main`),
+3. otherwise an explicitly-set `@{upstream}`, but only when it points somewhere
+   other than this branch's own remote ref.
+
+It deliberately never rebases onto `origin/<this-branch>`. That was the original
+behaviour and it is correct only until the branch is rewritten: after a local
+rebase onto an updated `main` — the standard way to satisfy *"head branch is not
+up to date with the base branch"* — `origin/<branch>` still holds the commit you
+just replaced, so `origin/<branch>..HEAD` contains **main's** commits. The step
+would then replay main onto the superseded tip and fail on main's own conflicts,
+refusing a push that was never wrong.
+
+When no integration base exists (a brand-new branch, or a repo whose only branch
+is the one being pushed) the step passes and says so, rather than failing.
+
 ### Tools that refuse to run concurrently
 
 Some checkers guard a shared resource with a mutex and refuse to start while

@@ -39,6 +39,14 @@ type StepContext struct {
 	Timeout time.Duration
 	// Commands maps shell-backed steps (lint, test) to their command line.
 	Commands map[string]string
+	// Remote is the git remote the run publishes to (usually "origin"). Steps
+	// that reason about the integration point need it to name a remote ref.
+	Remote string
+	// PRBase is the branch a pull request from here would target
+	// (domain.PRConfig.Base), or "" when the repo does not say. It names the
+	// INTEGRATION point, which is what a rebase should target — as opposed to
+	// the branch's own remote-tracking ref (see RebaseStep).
+	PRBase string
 	// SecurityScan is the resolved security-scan gate configuration (delta vs
 	// total, base ref, scanner version check).
 	SecurityScan domain.SecurityScanConfig

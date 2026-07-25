@@ -51,8 +51,8 @@ func TestRebaseStepNoUpstream(t *testing.T) {
 	if res.Status != domain.StepPass {
 		t.Errorf("status = %s, want pass", res.Status)
 	}
-	if !strings.Contains(res.Summary, "no upstream") {
-		t.Errorf("summary = %q, want it to mention no upstream", res.Summary)
+	if !strings.Contains(res.Summary, "no integration base") {
+		t.Errorf("summary = %q, want it to say there is no integration base", res.Summary)
 	}
 }
 
