@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
+	"go.klarlabs.de/warden/internal/infrastructure/scanner"
 )
 
 // A verdict that arrives minutes later, on a machine with several repos open,
@@ -181,4 +186,80 @@ func TestPinSkewLine(t *testing.T) {
 	if strings.Contains(got, "pre-commit") || !strings.Contains(got, "pre-push pins 0.17.0") {
 		t.Errorf("only the skewed hook should be named: %q", got)
 	}
+}
+
+// fakeScanSvc feeds scannerPinLine a scripted config and repo root.
+type fakeScanSvc struct {
+	cfg  domain.Config
+	repo *git.Repo
+}
+
+func (f fakeScanSvc) Config() (domain.Config, error) { return f.cfg, nil }
+func (f fakeScanSvc) Repo() *git.Repo                { return f.repo }
+
+// A control that reports nothing when it did not run is the failure shape this
+// line exists to close: silence must not mean both "versions agree" and "no pin
+// found, nothing compared".
+func TestScannerPinLine(t *testing.T) {
+	noxCmd := map[string]string{"security-scan": "nox scan . -severity-threshold high"}
+
+	t.Run("no recognizable scanner says nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		svc := fakeScanSvc{cfg: domain.Config{Commands: map[string]string{"security-scan": "make audit"}}, repo: &git.Repo{Dir: dir}}
+		if got := scannerPinLine(svc); got != "" {
+			t.Errorf("got %q, want silence", got)
+		}
+	})
+
+	t.Run("an explicitly disabled check says so", func(t *testing.T) {
+		off := false
+		svc := fakeScanSvc{
+			cfg:  domain.Config{Commands: noxCmd, SecurityScan: domain.SecurityScanConfig{VersionCheck: &off}},
+			repo: &git.Repo{Dir: t.TempDir()},
+		}
+		if got := scannerPinLine(svc); !strings.Contains(got, "disabled") {
+			t.Errorf("got %q, want it to name the opt-out", got)
+		}
+	})
+
+	t.Run("no discoverable pin is reported as INERT", func(t *testing.T) {
+		// A repo with workflows but no scanner pin — warden's own shape, and the
+		// shape of any repo whose pin lives in a shared reusable workflow.
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".github", "workflows", "ci.yml"),
+			[]byte("name: CI\non: push\njobs:\n  ci:\n    uses: org/.github/.github/workflows/go-ci.yml@main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := scannerPinLine(fakeScanSvc{cfg: domain.Config{Commands: noxCmd}, repo: &git.Repo{Dir: dir}})
+		if !strings.Contains(got, "INERT") {
+			t.Errorf("got %q, want it to say the check is inert", got)
+		}
+		// It must not merely say "inert" — it has to be actionable.
+		if !strings.Contains(got, "pin_file") {
+			t.Errorf("got %q, want it to name the way out", got)
+		}
+	})
+
+	t.Run("a matching pin says nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Pin to whatever is actually installed, so this asserts the
+		// agree-therefore-silent path rather than a hardcoded version.
+		local := scanner.LocalVersion(context.Background(), dir, "nox")
+		if local == "" {
+			t.Skip("nox not installed")
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".github", "workflows", "ci.yml"),
+			[]byte("name: CI\non: push\nenv:\n  NOX_VERSION: \""+local+"\"\njobs:\n  a:\n    runs-on: ubuntu-latest\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := scannerPinLine(fakeScanSvc{cfg: domain.Config{Commands: noxCmd}, repo: &git.Repo{Dir: dir}}); got != "" {
+			t.Errorf("got %q, want silence when the versions agree", got)
+		}
+	})
 }

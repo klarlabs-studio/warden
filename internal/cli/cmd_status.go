@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/notify"
+	"go.klarlabs.de/warden/internal/infrastructure/scanner"
 )
 
 // cmdStatus handles the bare `warden` invocation. The spec envisions a TUI that
@@ -62,6 +65,9 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	if line := notifyAdviceLine(svc); line != "" {
 		fmt.Fprintf(stdout, "\n%s\n", line)
 	}
+	if line := scannerPinLine(svc); line != "" {
+		fmt.Fprintf(stdout, "\n%s\n", line)
+	}
 	fmt.Fprintln(stdout, "\nrun `warden policy explain` for the fully resolved policy.")
 	return 0
 }
@@ -100,6 +106,62 @@ func pinSkewLine(pins map[domain.Hook]string, running string) string {
 	}
 	return fmt.Sprintf("note: %s, but %s is what runs (hooks prefer a warden on PATH).\n      re-pin with `warden hooks enable <hook>`.",
 		strings.Join(skewed, "; "), running)
+}
+
+// scannerPinLine reports whether the scanner version-drift check can actually
+// run, and what it compares.
+//
+// The check refuses to scan when the local scanner differs from the version CI
+// pins — but it finds that pin by searching this repo's workflows, and is
+// SILENT when it finds none. Silence then means two opposite things: "checked,
+// the versions agree" and "found no pin, checked nothing". A repo whose pin
+// lives in a shared reusable workflow gets the second and cannot tell (#112).
+//
+// Status is the right place to say so: naming it on every push would be noise
+// for the many repos that pin nothing, but a developer asking about the gate's
+// state deserves to know which of its controls are inert. Returns "" when the
+// repo runs no recognizable scanner at all — there is nothing to report then.
+func scannerPinLine(svc interface {
+	Config() (domain.Config, error)
+	Repo() *git.Repo
+}) string {
+	cfg, err := svc.Config()
+	if err != nil || svc.Repo() == nil {
+		return ""
+	}
+	scan, ok := scanner.ParseCommand(cfg.Commands[string(domain.StepSecurityScan)])
+	if !ok {
+		return "" // no scanner warden can interpret: nothing to say
+	}
+	if cfg.SecurityScan.VersionCheck != nil && !*cfg.SecurityScan.VersionCheck {
+		return "note: scanner version check is disabled (security_scan.version_check: false)."
+	}
+
+	root := svc.Repo().Dir
+	pin, found, err := scanner.DiscoverPin(root, scan.Binary, cfg.SecurityScan.PinFile)
+	local := scanner.LocalVersion(context.Background(), root, scan.Binary)
+	switch {
+	case err != nil:
+		return "note: scanner version check could not read the workflows (" + err.Error() + ")."
+	case !found:
+		return "note: scanner version check is INERT — no " + scan.Binary + " pin found in .github/workflows.\n" +
+			"      local " + scan.Binary + " is " + orUnknown(local) + "; nothing here says what CI runs, so drift\n" +
+			"      cannot be detected. Point at the pin with security_scan.pin_file, or see issue #112\n" +
+			"      if it lives in a shared reusable workflow."
+	case local == "":
+		return "note: " + scan.Binary + " is pinned to " + pin.Version + " (" + pin.Source + ") but is not on PATH."
+	case !scanner.SameVersion(local, pin.Version):
+		return "note: " + scan.Binary + " drift — " + pin.Source + " pins " + pin.Version + ", PATH has " + local + "."
+	default:
+		return ""
+	}
+}
+
+func orUnknown(v string) string {
+	if v == "" {
+		return "not installed"
+	}
+	return v
 }
 
 // watchTip surfaces `warden watch` exactly where it earns its keep: a split
