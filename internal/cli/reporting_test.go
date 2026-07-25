@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -262,4 +263,22 @@ func TestScannerPinLine(t *testing.T) {
 			t.Errorf("got %q, want silence when the versions agree", got)
 		}
 	})
+}
+
+// The TUI renders findings into a frame that is redrawn in place, so a long
+// failure output scrolls out of reach and leaves only its tail. The full output
+// must therefore also reach plain stdout, where scrollback keeps it (#114).
+func TestPrintFindings_CarriesTheWholeFailureOutput(t *testing.T) {
+	var buf bytes.Buffer
+	msg := "--- FAIL: TestThing (0.02s)\n    thing_test.go:41: got 3, want 4\nFAIL\tpkg/thing\t0.3s"
+	printFindings(&buf, []domain.Finding{{Severity: domain.SeverityHigh, Message: msg}})
+
+	out := buf.String()
+	// The three things a developer needs to act, none of which survive in the
+	// frame's tail: the test name, the assertion, and the package.
+	for _, want := range []string{"TestThing", "got 3, want 4", "pkg/thing"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("printFindings dropped %q:\n%s", want, out)
+		}
+	}
 }

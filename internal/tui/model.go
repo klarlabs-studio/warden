@@ -295,12 +295,36 @@ func (m model) stepGlyph(s stepStatus) string {
 	}
 }
 
+// findingPreviewLines caps how much of a finding the live frame shows.
+//
+// A shell step's finding message is the command's ENTIRE combined output, so a
+// failing `go test` can be hundreds of lines. The frame is drawn inline and
+// redrawn in place: once it exceeds the terminal height, everything above the
+// last screenful is lost, and what the developer is left with is the tail —
+// often just `FAIL` (#114). Previewing keeps the frame legible; the full output
+// is printed to stdout after teardown, where scrollback keeps it.
+const findingPreviewLines = 6
+
 func renderFinding(f domain.Finding) string {
 	loc := f.File
 	if f.Line > 0 {
 		loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 	}
-	return styMuted.Render(fmt.Sprintf("[%s] %s %s", f.Severity, loc, f.Message))
+	msg, truncated := previewLines(f.Message, findingPreviewLines)
+	out := styMuted.Render(fmt.Sprintf("[%s] %s %s", f.Severity, loc, msg))
+	if truncated {
+		out += styMuted.Render(" … (full output below)")
+	}
+	return out
+}
+
+// previewLines returns at most n lines of s, and whether anything was dropped.
+func previewLines(s string, n int) (string, bool) {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= n {
+		return s, false
+	}
+	return strings.Join(lines[:n], "\n"), true
 }
 
 func renderOutcome(res application.RunResult) string {

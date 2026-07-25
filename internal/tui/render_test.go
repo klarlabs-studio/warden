@@ -125,3 +125,54 @@ func TestTruncateLine(t *testing.T) {
 		t.Errorf("truncateLine(len100,10) = %q (len %d)", got, len([]rune(got)))
 	}
 }
+
+// A shell step's finding message is the command's ENTIRE output, so a failing
+// `go test` can be hundreds of lines. Inlining that into a frame drawn in place
+// pushes everything above the last screenful out of reach — which is how a
+// developer ends up with just `FAIL` and no failing test name (#114).
+func TestRenderFinding_PreviewsLongOutput(t *testing.T) {
+	var long strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&long, "line %d\n", i)
+	}
+	got := renderFinding(domain.Finding{Severity: domain.SeverityHigh, Message: long.String()})
+
+	if n := strings.Count(got, "\n"); n >= 40 {
+		t.Errorf("frame line count = %d, want it capped near %d", n, findingPreviewLines)
+	}
+	if !strings.Contains(got, "full output below") {
+		t.Errorf("a truncated finding must say where the rest is: %q", got)
+	}
+	// The head must survive — it is where a test failure names itself.
+	if !strings.Contains(got, "line 0") {
+		t.Errorf("preview dropped the start of the output: %q", got)
+	}
+}
+
+// A short finding must be shown whole, with no truncation marker.
+func TestRenderFinding_ShortOutputIsUntouched(t *testing.T) {
+	got := renderFinding(domain.Finding{
+		Severity: domain.SeverityHigh, File: "main.go", Line: 12,
+		Message: "undefined: foo",
+	})
+	if !strings.Contains(got, "undefined: foo") || !strings.Contains(got, "main.go:12") {
+		t.Errorf("short finding = %q", got)
+	}
+	if strings.Contains(got, "full output below") {
+		t.Errorf("a short finding must not claim to be truncated: %q", got)
+	}
+}
+
+func TestPreviewLines(t *testing.T) {
+	if got, trunc := previewLines("a\nb", 6); got != "a\nb" || trunc {
+		t.Errorf("previewLines(short) = %q, %v", got, trunc)
+	}
+	got, trunc := previewLines("a\nb\nc\nd", 2)
+	if got != "a\nb" || !trunc {
+		t.Errorf("previewLines(long) = %q, %v", got, trunc)
+	}
+	// A trailing newline must not count as an extra line and trip truncation.
+	if _, trunc := previewLines("a\nb\n", 2); trunc {
+		t.Error("a trailing newline should not make a 2-line message look truncated")
+	}
+}
