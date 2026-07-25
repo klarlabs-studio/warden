@@ -268,15 +268,18 @@ func (s *Service) HookPins() (map[domain.Hook]string, error) {
 // write a starter, it detects the project language and pre-fills lint/test
 // commands, returning the detected language for reporting.
 func (s *Service) writeStarterConfig(selected []domain.Hook) (domain.Language, error) {
-	existing, err := s.Config()
-	if err != nil {
-		return domain.LangUnknown, err
-	}
 	hookCfg := hookConfigFrom(selected)
 
-	// A config with any rules or commands is considered user-authored: leave it
-	// untouched except for the hooks selection.
-	if len(existing.Rules) > 0 || len(existing.Commands) > 0 {
+	// An existing .warden.yaml is user-authored, full stop: leave it untouched
+	// except for the hooks selection.
+	//
+	// This used to infer authorship from the parsed config — "has rules or
+	// commands" — which silently misread any policy built on built-in steps. A
+	// config setting `steps:` and `trusted_keys:` but no `commands:` looked
+	// absent and was overwritten wholesale, resetting the trusted-signer roster
+	// among everything else. Whether a file exists is not something to deduce
+	// from its contents.
+	if s.configs.Exists() {
 		return domain.LangUnknown, s.configs.SetHooks(hookCfg)
 	}
 

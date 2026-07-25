@@ -44,6 +44,18 @@ func (r *Repository) Load() (domain.Config, error) {
 	return loadFrom(r.root, filepath.Join(r.root, FileName), nil)
 }
 
+// Exists reports whether the repo has a .warden.yaml at all.
+//
+// Callers must not infer this from a loaded Config: a missing file and a file
+// that happens to set only fields the caller does not inspect both parse to the
+// same values, and treating the second as absent overwrites a real policy. That
+// is exactly how `warden init` used to reset a config that configured `steps:`
+// and `trusted_keys:` but no `commands:`.
+func (r *Repository) Exists() bool {
+	_, err := os.Stat(filepath.Join(r.root, FileName))
+	return err == nil
+}
+
 // maxExtends bounds the extends chain so a misconfiguration can't loop forever.
 const maxExtends = 10
 

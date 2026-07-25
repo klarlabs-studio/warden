@@ -257,3 +257,55 @@ func TestService_DoctorFlagsUnverifiedCommit(t *testing.T) {
 		t.Errorf("expected 1 unverified commit, got %d (%d commits)", unverified, len(report.Commits))
 	}
 }
+
+// `warden init` on an existing config must never rewrite it. Authorship used to
+// be inferred from the parsed config — "has rules or commands" — so a policy
+// built on BUILT-IN steps looked absent and was overwritten wholesale, resetting
+// the trusted-signer roster along with everything else.
+func TestService_InitPreservesAConfigWithNoCommands(t *testing.T) {
+	dir := initRepo(t)
+	// steps + trusted_keys, no commands and no rules: entirely built-in steps,
+	// which is a perfectly ordinary policy.
+	original := "hooks:\n  pre_commit: true\n  pre_push: true\nsteps:\n  pre_commit: [credentials]\ntrusted_keys:\n  - 139e6eb9e2611c76\n"
+	path := filepath.Join(dir, ".warden.yaml")
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Init(domain.AllHooks); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := svc.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The roster is the one that matters: losing it silently drops the repo from
+	// trusted-signed to attested depth.
+	if len(cfg.TrustedKeys) != 1 || cfg.TrustedKeys[0] != "139e6eb9e2611c76" {
+		t.Errorf("trusted_keys = %v, want the committed roster preserved", cfg.TrustedKeys)
+	}
+	steps := cfg.Steps["pre_commit"]
+	if len(steps) != 1 || steps[0] != domain.StepCredentials {
+		t.Errorf("steps.pre_commit = %v, want [credentials] preserved", steps)
+	}
+}
+
+// The starter config is still written when there is genuinely no file.
+func TestService_InitWritesStarterWhenNoConfigExists(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Init(domain.AllHooks); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".warden.yaml")); err != nil {
+		t.Fatalf("init should write a starter config when none exists: %v", err)
+	}
+}
