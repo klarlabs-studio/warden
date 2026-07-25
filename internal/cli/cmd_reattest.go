@@ -63,7 +63,15 @@ func reattestAll(svc *service.Service, branch string, push bool, stdout, stderr 
 		return fail(stderr, err)
 	}
 	if len(results) == 0 {
-		fmt.Fprintln(stdout, "warden: nothing to re-attest; no unverified commit has a validated tree-identical source.")
+		// Say what actually happened. A no-op sweep WITH --push still published
+		// any notes an earlier push-less run left local, and reporting only
+		// "nothing to re-attest" would leave the reader unsure whether the remote
+		// is now current — which is the whole question they ran this to answer.
+		msg := "warden: nothing to re-attest; no unverified commit has a validated tree-identical source."
+		if push {
+			msg += "\nwarden: pushed notes to the remote (no-op if it was already current)."
+		}
+		fmt.Fprintln(stdout, msg)
 		return 0
 	}
 	for _, r := range results {

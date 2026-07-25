@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -172,6 +173,90 @@ func TestService_ReattestAll(t *testing.T) {
 	}
 	if _, _, unverified := report.Counts(); unverified != 0 {
 		t.Errorf("branch should be fully verified after the sweep, %d unverified", unverified)
+	}
+}
+
+// gitIn runs a git command in dir, failing the test on error.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// --push means "make the remote match", not "publish what this call happened to
+// write". Sweeping without --push and then re-running with it is the obvious
+// two-step workflow; gating the push on this invocation having written
+// something leaves those notes local forever while the command reports success.
+func TestService_ReattestAllPushesEvenWhenNothingNewIsWritten(t *testing.T) {
+	dir, svc := initAdopted(t)
+
+	// A bare repo standing in for origin, so PushNotes has somewhere to go.
+	remote := t.TempDir()
+	gitIn(t, remote, "init", "--bare", ".")
+	gitIn(t, dir, "remote", "add", "origin", remote)
+
+	a := commit(t, dir, svc, "A (gated)")
+	commit(t, dir, svc, "B (squash, same tree)")
+	if err := svc.Repo().WriteNote(a, signAs(t, svc, attestRecord(a, "rA"))); err != nil {
+		t.Fatal(err)
+	}
+
+	// First sweep: write the notes but deliberately do not publish them.
+	wrote, err := svc.ReattestAll("", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wrote) == 0 {
+		t.Fatal("expected the first sweep to re-attest B")
+	}
+	if refs := gitIn(t, remote, "for-each-ref", "--format=%(refname)", "refs/notes"); refs != "" {
+		t.Fatalf("a push-less sweep must not publish: remote has %q", refs)
+	}
+
+	// Second sweep WITH --push: nothing new to write, but the remote is stale.
+	again, err := svc.ReattestAll("", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Errorf("second sweep should write nothing, got %+v", again)
+	}
+	local := gitIn(t, dir, "rev-parse", "refs/notes/warden")
+	published := gitIn(t, remote, "rev-parse", "refs/notes/warden")
+	if published != local {
+		t.Errorf("--push must publish notes an earlier run left local: remote=%s local=%s", published, local)
+	}
+}
+
+// The single-commit form has the same trap: a commit that already carries a
+// note returns early, and must still honor --push.
+func TestService_ReattestPushesWhenTheNoteAlreadyExists(t *testing.T) {
+	dir, svc := initAdopted(t)
+	remote := t.TempDir()
+	gitIn(t, remote, "init", "--bare", ".")
+	gitIn(t, dir, "remote", "add", "origin", remote)
+
+	a := commit(t, dir, svc, "A")
+	if err := svc.Repo().WriteNote(a, signAs(t, svc, attestRecord(a, "rA"))); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.Reattest(a, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.AlreadyHad {
+		t.Fatalf("expected AlreadyHad, got %+v", res)
+	}
+	local := gitIn(t, dir, "rev-parse", "refs/notes/warden")
+	published := gitIn(t, remote, "rev-parse", "refs/notes/warden")
+	if published != local {
+		t.Errorf("--push must publish an already-present note: remote=%s local=%s", published, local)
 	}
 }
 

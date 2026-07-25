@@ -81,4 +81,35 @@ func TestCmdReattest(t *testing.T) {
 	if !strings.Contains(out.String(), "not re-attesting") {
 		t.Errorf("expected a 'not re-attesting' message, got %q", out.String())
 	}
+
+	// --all audits the branch, so it needs an adoption point. Anchor it at A:
+	// the window is then {B, C} — B was re-attested above and C has no source,
+	// so the sweep has nothing left to write, which is success, not failure.
+	if err := svc.Repo().WriteAdoption(a); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := cmdReattest([]string{"--all"}, &out, &errb); code != 0 {
+		t.Fatalf("--all sweep: code=%d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "nothing to re-attest") {
+		t.Errorf("expected a 'nothing to re-attest' message, got %q", out.String())
+	}
+	// Without --push it must not claim to have touched the remote.
+	if strings.Contains(out.String(), "pushed notes") {
+		t.Errorf("a push-less sweep must not claim a push: %q", out.String())
+	}
+
+	// With --push the reader has to learn whether the remote is now current —
+	// that is the question they ran the command to answer — even when the sweep
+	// itself wrote nothing.
+	out.Reset()
+	errb.Reset()
+	if code := cmdReattest([]string{"--all", "--push"}, &out, &errb); code != 0 {
+		t.Fatalf("--all --push sweep: code=%d err=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "pushed notes to the remote") {
+		t.Errorf("--push must report the publish attempt, got %q", out.String())
+	}
 }

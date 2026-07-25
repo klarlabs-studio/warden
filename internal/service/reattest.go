@@ -32,6 +32,13 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 		return ReattestResult{}, fmt.Errorf("resolve %q: %w", commitish, err)
 	}
 	if rec, _ := s.repo.ReadNote(target); rec != nil && rec.Attests(target) {
+		// Already noted locally — but --push asks for the REMOTE to carry it, and
+		// a note written by an earlier push-less run is exactly the case that
+		// needs publishing. Returning here without pushing would report success
+		// while the note stays local forever.
+		if push {
+			_ = s.repo.PushNotes(s.remote)
+		}
 		return ReattestResult{Target: target, AlreadyHad: true}, nil
 	}
 	if s.signer == nil {
@@ -87,6 +94,14 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 // operation, never a weaker one. Commits with no validated tree-identical source
 // are skipped, not forced. Results come back oldest-first, one per commit
 // written; a single push at the end publishes them together.
+//
+// push means "make the remote match", NOT "publish what this call happened to
+// write". Sweeping without --push and then re-running with it is the obvious
+// two-step workflow, and gating the push on this invocation having written
+// something would silently leave those notes local forever — the run reports
+// success while the remote never learns. So push is unconditional whenever it
+// is asked for; PushNotes is idempotent and a no-op push costs one cheap
+// round trip.
 func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error) {
 	report, err := s.Doctor(branch)
 	if err != nil {
@@ -105,7 +120,7 @@ func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error
 			out = append(out, res)
 		}
 	}
-	if push && len(out) > 0 {
+	if push {
 		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
 	}
 	return out, nil
