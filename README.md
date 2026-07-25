@@ -201,7 +201,7 @@ agent_commands:
   opencode: "opencode run {prompt}"   # example: any other agent
 steps:
   pre_commit: [lint]
-  pre_push: [intent, rebase, review, test, document, lint]
+  pre_push: [intent, rebase, review, test, document, lint, credentials]   # credentials: refuse a push carrying a secret (see below)
 parallel: true   # default — run independent checks concurrently (see below)
 writes: [codegen]   # steps whose tree writes must be KEPT — run as sequential barriers (not isolated/discarded)
 symlink_deps: false   # default false = hardlink-copy node_modules into the worktree (works with Turbopack); true = fast symlink
@@ -369,14 +369,126 @@ warden: another process holds lint's lock, waiting…
 ```
 
 If the lock is still held when that budget runs out, the gate still fails —
-"I could not check" is not "the tree is clean" — but it says which:
+"I could not check" is not "the tree is clean" — but it says which, and exits
+`75` instead of `1` (see [Exit codes](#exit-codes)):
 
 ```
-warden: step lint could not run (lock contention)
+warden: step lint could not run: another process holds its lock
 ```
 
 Only a narrow set of known contention messages is retried, so a genuine failure
 fails immediately and keeps the tool's own output.
+
+**To stop it recurring with golangci-lint**, add `--allow-parallel-runners` to
+your lint command. That lock exists to keep concurrent runs from corrupting a
+*shared* cache, and warden already points every run at its own
+`GOLANGCI_LINT_CACHE` — so the thing the lock protects is already protected, and
+two repos need never queue behind each other again:
+
+```yaml
+commands:
+  lint: "golangci-lint run --allow-parallel-runners ./..."
+```
+
+Warden says so in the failure message when it sees you haven't.
+
+### Steps whose toolchain isn't installed
+
+A validation worktree is a git worktree, so it starts with tracked files only.
+When a step's executable isn't there you get the shell's verdict, not the
+tool's:
+
+```
+> astro build
+sh: astro: command not found
+```
+
+That is an environment failure, not a build failure, and warden reports it as
+one — with the install command derived from the lockfile actually present, and
+exit code `78`:
+
+```
+warden: step js-build could not run: its toolchain or dependencies are not installed
+  [high]  js-build could not run: astro is not installed in the validation worktree.
+          This is an environment problem, not a problem with your change.
+          Run: pnpm install --frozen-lockfile (in web)
+```
+
+The gate still fails: an unbuilt tree is not a validated tree. (Warden links or
+copies gitignored `node_modules` from your live checkout into the worktree — see
+`symlink_deps` / `materialize_deps` — so this usually means the deps aren't
+installed in your checkout either.)
+
+#### Private registries: use `NODE_AUTH_TOKEN`, never `npm config set`
+
+If installing needs auth for a private registry package, **export the token as
+an environment variable**:
+
+```bash
+export NODE_AUTH_TOKEN="$(gh auth token)"   # in your shell / .envrc, not in the repo
+```
+
+Warden passes your environment through to steps unchanged, and a tracked
+`.npmrc` referring to `${NODE_AUTH_TOKEN}` resolves against it:
+
+```
+@org:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+**Do not** reach for the command every guide suggests:
+
+```bash
+# DON'T — this writes a LIVE TOKEN into .npmrc
+npm config set //npm.pkg.github.com/:_authToken "$(gh auth token)"
+```
+
+`.npmrc` is a **tracked file in most repos**, holding exactly the placeholder
+above. `npm config set` overwrites it in place with the real credential, and the
+next `git add` stages a secret. The whole point of a gate is that its happy path
+can't end in a leak — so warden's built-in `credentials` step refuses the push if
+it happens anyway.
+
+### The `credentials` step
+
+Runs by default at pre-push. It reads the files your change touched and refuses
+the push if any of them carries something shaped like a live credential —
+GitHub/npm/AWS/Slack/Stripe/OpenAI/Anthropic/Google tokens and PEM private keys:
+
+```
+warden: step credentials failed
+  [high] .npmrc:2 looks like a live GitHub token (first 7 chars…). A tracked file must not
+         carry a credential — move it to an environment variable …
+```
+
+Matches are redacted in the output, and lines that defer to a variable
+(`${NODE_AUTH_TOKEN}`, `{{ secrets.X }}`, `$(vault read …)`) or that hold an
+obvious dummy (AWS's documented `AKIA…EXAMPLE` key) are not findings — a check that cries
+wolf gets deleted, and then it catches nothing.
+
+It is deliberately shallow: prefix-tagged token formats only, changed files
+only, no entropy heuristics and no history. For real coverage add
+`warden recipes gitleaks`. To turn it off, leave `credentials` out of
+`steps.pre_push`.
+
+### Exit codes
+
+`warden run` distinguishes "your change is wrong" from "this machine wasn't
+ready", so a retry wrapper can tell them apart without parsing prose:
+
+| Code | Meaning | Retry? |
+|------|---------|--------|
+| `0` | passed (pre-commit, or a pre-push where git completed the push) | — |
+| `1` | the gate reached a verdict about your change — or a pre-push passed that *warden* had to push (see below) | no |
+| `2` | usage error | no |
+| `75` | a step couldn't run: another process holds its lock (`EX_TEMPFAIL`) | **yes**, later |
+| `78` | a step couldn't run: its toolchain/deps aren't installed (`EX_CONFIG`) | no — run the remediation |
+
+A passing pre-push usually exits `0`. It exits `1` in the one case where warden
+performs the push itself — after a step rewrote the branch, or when a force is
+needed — because git's own now-stale push must then be stopped from racing it.
+So `1` stays ambiguous, which is exactly why the environmental cases get their
+own codes.
 
 ## Rebasing a gated branch (`push.force`)
 

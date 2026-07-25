@@ -35,3 +35,24 @@ func isContention(output string) bool {
 	}
 	return false
 }
+
+// parallelRunnerHint offers the permanent cure when warden can see that the
+// contending command is golangci-lint: its lock exists to stop concurrent runs
+// from corrupting a SHARED cache, and warden already gives every run its own
+// cache dir (see stepEnv), so opting out of the lock is safe here in a way it is
+// not in general. Waiting out the lock fixes the symptom once; this fixes it for
+// good, and only warden knows the precondition holds.
+//
+// The hint is withheld when the command already carries either opt-out flag, so
+// a repo that has taken the advice is not told to take it again. Returns a
+// trailing-newline-terminated line, or "" when there is nothing useful to say.
+func parallelRunnerHint(command string) string {
+	if !strings.Contains(command, "golangci-lint") {
+		return ""
+	}
+	if strings.Contains(command, "--allow-parallel-runners") || strings.Contains(command, "--allow-serial-runners") {
+		return ""
+	}
+	return "To stop this recurring, add --allow-parallel-runners to your lint command: " +
+		"warden already isolates each run's GOLANGCI_LINT_CACHE, which is what the lock protects.\n"
+}

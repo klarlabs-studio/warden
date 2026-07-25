@@ -34,6 +34,10 @@ const (
 	StepTest     StepName = "test"
 	StepDocument StepName = "document"
 	StepLint     StepName = "lint"
+	// StepCredentials refuses a push whose changed files carry a live-looking
+	// credential. Named "credentials" rather than "secrets" so it does not
+	// shadow the `secrets` command step the gitleaks recipe tells repos to add.
+	StepCredentials StepName = "credentials"
 	// StepPush is the terminal write-external action the daemon performs
 	// itself on a full pass (§4.3). It is never listed in user config; the
 	// runner appends it to a passing pre-push run.
@@ -43,13 +47,14 @@ const (
 // builtinSteps is the set of step names Warden implements natively. Custom
 // steps are anything not in this set.
 var builtinSteps = map[StepName]bool{
-	StepIntent:   true,
-	StepRebase:   true,
-	StepReview:   true,
-	StepTest:     true,
-	StepDocument: true,
-	StepLint:     true,
-	StepPush:     true,
+	StepIntent:      true,
+	StepRebase:      true,
+	StepReview:      true,
+	StepTest:        true,
+	StepDocument:    true,
+	StepLint:        true,
+	StepCredentials: true,
+	StepPush:        true,
 }
 
 // IsBuiltin reports whether s is a Warden built-in step.
@@ -78,12 +83,17 @@ func (s StepName) IsAgentStep() bool { return builtinAgentSteps[s] }
 // checks consecutive lets them share a single parallel batch instead of being
 // split by an intervening writer. It also means the checks validate the tree
 // after the agents have finished shaping it.
+//
+// credentials joins the read-only group at pre-push: a leaked token is the one
+// failure that cannot be undone by a follow-up commit, so it must be caught
+// before anything leaves the machine. It reads only the changed files, so it
+// costs nothing measurable and batches with test and lint.
 func DefaultSteps(h Hook) []StepName {
 	switch h {
 	case PreCommit:
 		return []StepName{StepLint}
 	case PrePush:
-		return []StepName{StepIntent, StepRebase, StepReview, StepDocument, StepTest, StepLint}
+		return []StepName{StepIntent, StepRebase, StepReview, StepDocument, StepTest, StepLint, StepCredentials}
 	default:
 		return nil
 	}

@@ -220,7 +220,7 @@ func TestService_StepsListFallsBackToDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pre) != 1 || len(push) != 6 {
+	if len(pre) != 1 || len(push) != 7 {
 		t.Errorf("defaults expected, got pre=%v push=%v", pre, push)
 	}
 }

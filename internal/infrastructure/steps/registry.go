@@ -19,7 +19,8 @@ func Default() application.Registry {
 		domain.StepTest: NewShellStep(domain.StepTest, "test"),
 		domain.StepDocument: NewAgentStep(domain.StepDocument,
 			"Check that public APIs and user-facing behavior changed here are documented; note gaps."),
-		domain.StepLint: NewShellStep(domain.StepLint, "lint"),
+		domain.StepLint:        NewShellStep(domain.StepLint, "lint"),
+		domain.StepCredentials: NewCredentialsStep(),
 	}
 }
 
@@ -28,5 +29,6 @@ func BuiltinNames() []domain.StepName {
 	return []domain.StepName{
 		domain.StepIntent, domain.StepRebase, domain.StepReview,
 		domain.StepTest, domain.StepDocument, domain.StepLint,
+		domain.StepCredentials,
 	}
 }

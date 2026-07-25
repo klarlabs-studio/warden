@@ -6,6 +6,66 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`credentials` step: a push can no longer carry a secret out of a tracked
+  file.** New built-in step, on by default at pre-push, that reads the files the
+  change touched and refuses the push when one holds a live-looking credential
+  (prefix-tagged GitHub / npm / AWS / Slack / Stripe / OpenAI / Anthropic /
+  Google tokens, and PEM private keys). It closes a trap the gate itself was
+  creating: a JS step fails for want of dependencies, installing them needs
+  private-registry auth, and `npm config set …_authToken "$(gh auth token)"` —
+  the command every guide reaches for — writes a live token into `.npmrc`, a
+  file most repos *track* with a `${NODE_AUTH_TOKEN}` placeholder in it. The
+  path of least resistance out of a red gate ended in a staged credential.
+  Matches are redacted in the output; lines deferring to a variable
+  (`${NODE_AUTH_TOKEN}`, `{{ secrets.X }}`) and obvious dummies
+  (AWS's documented `AKIA…EXAMPLE` key) are not findings. Deliberately shallow — changed
+  files only, issuer prefixes only, no entropy heuristics — because a check that
+  cries wolf gets deleted. For real coverage add `warden recipes gitleaks`; to
+  opt out, leave `credentials` out of `steps.pre_push`. Note the upgrade order:
+  an *explicit* `steps.pre_push` list naming `credentials` is a hard error on a
+  warden that predates this release ("define commands.credentials … or install
+  warden-step-credentials"), so upgrade the binary before adding the name.
+  Repos that don't pin `steps` pick it up automatically with the new binary.
+  (#91)
+- **Distinct exit codes for a gate that never ran.** `75` (`EX_TEMPFAIL`) when a
+  step was blocked by another process's lock — retry later — and `78`
+  (`EX_CONFIG`) when its toolchain or dependencies are not installed, where
+  retrying is pointless. Previously everything collapsed onto `1`, which on
+  pre-push *already* means both "passed and pushed" and "failed", so no wrapper
+  could tell a lock it should wait out from a verdict it must not retry.
+  (#90, #91)
+
+### Fixed
+
+- **A step that never ran is no longer reported as a step that failed.** The
+  step-level message was fixed in v0.17.0, but the run's own verdict still read
+  `warden: step lint failed` — the line the developer actually sees — when the
+  truth was that a sibling repo held golangci-lint's machine-global lock. The
+  verdict now names the obstacle: `step lint could not run: another process
+  holds its lock`. (#90)
+- **A missing toolchain is reported as an environment failure, not a build
+  failure.** `sh: astro: command not found` from a `js-build`/`js-check` step
+  meant the checkout has no `node_modules`, but read as a broken build — and
+  blocked pushes whose diff touched no JS at all. Warden now recognizes every
+  common shell's wording for a missing executable (plus `Cannot find module`),
+  says plainly that nothing is wrong with the change, and names the exact
+  install command derived from the lockfile actually present (`npm ci`,
+  `pnpm install --frozen-lockfile`, `yarn install --immutable`,
+  `bun install --frozen-lockfile`), scoped to the right package in a monorepo.
+  It withholds the advice when `node_modules` is already there, since a
+  reinstall would not be the fix. The gate still fails — an unbuilt tree is not
+  a validated tree. (#91)
+- **golangci-lint contention now comes with the permanent cure.** The failure
+  message suggests `--allow-parallel-runners` when the lint command doesn't
+  already use it. That lock guards a *shared* cache, and warden already gives
+  every run its own `GOLANGCI_LINT_CACHE` — so only warden is in a position to
+  know the flag is safe here. (#90)
+- **`NODE_AUTH_TOKEN` is documented as the supported private-registry path**,
+  with an explicit warning against `npm config set`, in the README and in the
+  missing-dependency failure message itself. (#91)
+
 ## [0.17.0] — 2026-07-07
 
 ### Added

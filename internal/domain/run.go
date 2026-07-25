@@ -51,6 +51,7 @@ type Run struct {
 	needsApproval bool
 	outcome       Outcome
 	message       string
+	blocker       Blocker
 	record        *RunRecord
 }
 
@@ -73,6 +74,11 @@ func (r *Run) Branch() string         { return r.branch }
 func (r *Run) Outcome() Outcome       { return r.outcome }
 func (r *Run) Message() string        { return r.message }
 func (r *Run) Record() *RunRecord     { return r.record }
+
+// Blocker reports the environmental obstacle that ended the run, or
+// BlockerNone when the run was decided by the change itself. Callers use it to
+// pick an exit code: an unrun gate is a different fact from a rejected change.
+func (r *Run) Blocker() Blocker { return r.blocker }
 
 // Findings returns a defensive copy of the accumulated findings.
 func (r *Run) Findings() []Finding {
@@ -98,7 +104,17 @@ func (r *Run) RecordStep(res StepResult) error {
 	switch res.Status {
 	case StepFail:
 		r.outcome = OutcomeFailed
-		r.message = fmt.Sprintf("step %s failed", res.Step)
+		// A step that never ran must not be reported as one that ran and
+		// rejected the change: "step lint failed" reads as "your code is
+		// broken" when the truth is that a sibling repo held golangci-lint's
+		// lock, or that node_modules is absent. Name the obstacle instead, and
+		// keep it machine-readable on the run so the exit code can follow.
+		r.blocker = res.Blocker
+		if reason := res.Blocker.Reason(); reason != "" {
+			r.message = fmt.Sprintf("step %s could not run: %s", res.Step, reason)
+		} else {
+			r.message = fmt.Sprintf("step %s failed", res.Step)
+		}
 	case StepNeedsApproval:
 		r.needsApproval = true
 	}

@@ -48,6 +48,8 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		summary := string(s.name) + " failed"
+		blocker := domain.BlockerNone
+		envFail, missingToolchain := detectEnvFailure(string(out), sc.WorktreeDir)
 		switch {
 		// A cancelled context means the per-step timeout fired: say so plainly,
 		// since the command's own output rarely explains a kill.
@@ -61,10 +63,18 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		// wait budget ran out. The gate still fails — "I could not check" is not
 		// "the tree is clean" — but it must not claim the tree is dirty.
 		case contended:
+			blocker = domain.BlockerContention
 			summary = string(s.name) + " could not run (lock contention)"
 			msg = string(s.name) + " could not run: another process held its lock for " +
 				contentionBudget.String() + ". Nothing is wrong with your tree — wait for the other " +
-				"run to finish and retry.\n" + msg
+				"run to finish and retry.\n" + parallelRunnerHint(command) + msg
+		// The command never ran either, for the other environmental reason: the
+		// executable it needs is not installed. Same rule — fail, but say what is
+		// actually wrong, and name the command that fixes it.
+		case missingToolchain:
+			blocker = domain.BlockerEnvironment
+			summary = string(s.name) + " could not run (missing toolchain)"
+			msg = envFail.message(string(s.name)) + "\n" + msg
 		}
 		return domain.StepResult{
 			Step:   s.name,
@@ -74,6 +84,7 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 				Message:  msg,
 			}},
 			Summary: summary,
+			Blocker: blocker,
 		}, nil
 	}
 	return domain.StepResult{
