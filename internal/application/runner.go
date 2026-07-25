@@ -29,7 +29,12 @@ type RunResult struct {
 	PR *domain.PRInfo
 	// FixPatch is the worktree diff to re-apply on a passing pre-commit run.
 	FixPatch string
-	Message  string
+	// GitCompletesPush is true when a passing pre-push left the actual push to
+	// git rather than performing it itself. The hook can then exit 0 and let git
+	// report the push honestly, instead of having to fail on purpose and warn
+	// the developer to ignore git's resulting `error:` line (#89).
+	GitCompletesPush bool
+	Message          string
 }
 
 // Runner is the application service that drives a hook invocation end to end:
@@ -186,6 +191,28 @@ func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, 
 	return mode, nil
 }
 
+// delegateToGit reports whether the push git is ALREADY about to perform is
+// byte-for-byte the one warden would perform, so warden can stand aside and let
+// git do it.
+//
+// Warden normally pushes itself and then fails the hook on purpose, because git
+// pushes the ref value it captured BEFORE the hook ran: if a step rewrote the
+// branch (an auto-fix, an amending agent step), git would publish the
+// *unvalidated* pre-fix commit. Standing aside is only safe when nothing was
+// rewritten.
+//
+// It is also unsafe when the push needs a force. Git's own push is not forced,
+// so a rebased branch would simply be rejected — and warden's whole reason for
+// supporting a lease (#85) is that the alternative is a gate bypass.
+//
+// When both hold, delegating is strictly better than pushing ourselves: git
+// reports the push it actually performed, with a real exit code, instead of
+// warden succeeding and then having to warn the developer to ignore the
+// `error:` git prints because warden deliberately failed the hook (#89).
+func (r *Runner) delegateToGit(finalSHA, seedTip string, force domain.PushForce) bool {
+	return finalSHA == seedTip && force == domain.ForceNever
+}
+
 // runPrePush runs the full pipeline in a worktree cloned from the branch tip,
 // then fast-forwards back and pushes on approval (§4.3).
 func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, cfg domain.Config) (RunResult, error) {
@@ -207,6 +234,8 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// moves the remote-tracking ref. It becomes the record's CoversFrom, so the
 	// note states the span the run vouches for and not just its tip (#86).
 	var spanBase string
+	// gitCompletes records that warden left the push to git — see delegateToGit.
+	var gitCompletes bool
 
 	// The push closure runs only after the kernel's approval gate clears. It
 	// performs the real fast-forward-back, push, and note write (§4.3 step 2).
@@ -224,6 +253,10 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		force, err := r.pushForce(cfg, branch)
 		if err != nil {
 			return domain.StepResult{}, err
+		}
+		if r.delegateToGit(finalSHA, seedTip, force) {
+			gitCompletes = true
+			return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 		}
 		if err := r.Git.Push(r.Settings.Remote, branch, force); err != nil {
 			return domain.StepResult{}, fmt.Errorf("push: %w", err)
@@ -277,11 +310,16 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			_ = r.Git.PushNotes(r.Settings.Remote)
 		}
 	}
-	if err := run.MarkPushed(*record, "warden pushed the gated commit(s); local branch fast-forwarded"); err != nil {
+	msg := "warden pushed the gated commit(s); local branch fast-forwarded"
+	if gitCompletes {
+		msg = "gate passed; git is completing the push"
+	}
+	if err := run.MarkPushed(*record, msg); err != nil {
 		return RunResult{}, err
 	}
 
 	res := r.result(run, "")
+	res.GitCompletesPush = gitCompletes
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
 	if prCfg.Enabled && r.Forge != nil && r.Forge.Available() {
