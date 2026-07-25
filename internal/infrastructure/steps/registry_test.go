@@ -12,6 +12,7 @@ func TestDefaultRegistry(t *testing.T) {
 	want := []domain.StepName{
 		domain.StepIntent, domain.StepRebase, domain.StepReview,
 		domain.StepTest, domain.StepDocument, domain.StepLint,
+		domain.StepCredentials,
 	}
 	if len(reg) != len(want) {
 		t.Fatalf("Default() has %d steps, want %d", len(reg), len(want))
@@ -50,8 +51,8 @@ func TestDefaultRegistryStepTypes(t *testing.T) {
 
 func TestBuiltinNames(t *testing.T) {
 	names := BuiltinNames()
-	if len(names) != 6 {
-		t.Fatalf("BuiltinNames() = %d names, want 6", len(names))
+	if len(names) != 7 {
+		t.Fatalf("BuiltinNames() = %d names, want 7", len(names))
 	}
 
 	// Every built-in name must resolve in the default registry, and vice versa,

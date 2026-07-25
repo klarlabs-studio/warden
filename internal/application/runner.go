@@ -35,6 +35,10 @@ type RunResult struct {
 	// the developer to ignore git's resulting `error:` line (#89).
 	GitCompletesPush bool
 	Message          string
+	// Blocker names the environmental obstacle that ended a failed run (a tool's
+	// lock, a missing toolchain) rather than the change itself. BlockerNone means
+	// the verdict is about the change. Delivery maps it to a distinct exit code.
+	Blocker domain.Blocker
 }
 
 // Runner is the application service that drives a hook invocation end to end:
@@ -614,6 +618,7 @@ func (r *Runner) result(run *domain.Run, patch string) RunResult {
 		Record:   run.Record(),
 		FixPatch: patch,
 		Message:  run.Message(),
+		Blocker:  run.Blocker(),
 	}
 }
 
