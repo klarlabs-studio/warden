@@ -1,6 +1,9 @@
 package domain
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // StepName identifies a pipeline step. Built-in steps have reserved names;
 // custom steps supplied by a repo author use any other name and run through
@@ -84,4 +87,36 @@ func DefaultSteps(h Hook) []StepName {
 	default:
 		return nil
 	}
+}
+
+// DeferredSteps returns the steps in later that ran is missing — the checks a
+// split policy postpones to a subsequent hook. It is the domain rule behind
+// "lint is green, tests are unrun": a hook that reports a bare pass invites the
+// reader to conclude the whole tree is validated, which is only true when
+// nothing is deferred. Order follows later; duplicates collapse.
+func DeferredSteps(ran, later []StepName) []StepName {
+	done := make(map[StepName]bool, len(ran))
+	for _, s := range ran {
+		done[s] = true
+	}
+	var out []StepName
+	seen := make(map[StepName]bool, len(later))
+	for _, s := range later {
+		if done[s] || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// JoinSteps renders a step list as a comma-separated string for a one-line
+// human-facing summary ("lint, test"). An empty list renders as "".
+func JoinSteps(steps []StepName) string {
+	parts := make([]string, len(steps))
+	for i, s := range steps {
+		parts[i] = string(s)
+	}
+	return strings.Join(parts, ", ")
 }

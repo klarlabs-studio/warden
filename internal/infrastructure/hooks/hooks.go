@@ -23,11 +23,17 @@ const releaseRepo = "klarlabs-studio/warden"
 // shim is the hook script body. It is self-bootstrapping and version-pinned:
 // prefer a `warden` on PATH; else use (or fetch, once) a pinned static binary
 // cached under ~/.warden/bin/<version>. So a repo adopted with `npx
-// @klarlabs-studio/warden init` keeps working on every later commit/push with no global
-// install — and the whole team runs the *same* pinned warden. The script
-// forwards git's stdin and exits with warden's status, so a failing gate blocks
-// git. A version that is not a real release (empty/dev/snapshot) skips the
-// download branch and requires a warden on PATH.
+// @klarlabs-studio/warden init` keeps working on every later commit/push with no
+// global install. The script forwards git's stdin and exits with warden's
+// status, so a failing gate blocks git. A version that is not a real release
+// (empty/dev/snapshot) skips the download branch and requires a warden on PATH.
+//
+// Scope of the pin: PATH wins unconditionally, so the pin governs the
+// no-global-install cohort — it is a bootstrap floor, NOT a team-wide version
+// lock. Forcing it would break the ordinary "I installed warden" workflow, so
+// instead the shim makes the skew *visible*: when a PATH binary's version
+// differs from the pin it prints one line naming both and which one is running,
+// at the moment it matters rather than after the fact in `warden why`.
 //
 // Supply-chain integrity: the self-fetched tarball is verified against the
 // SHA-256 published in the release's checksums.txt *before* it is ever made
@@ -62,9 +68,13 @@ _wd_fetch() { # $1 url  $2 dest-file
 
 # Resolve the warden binary: prefer one on PATH, else the pinned cached binary
 # (fetched once, checksum-verified), so a repo adopted with no global install
-# keeps working — and the whole team runs the *same* verified binary.
+# keeps working. PATH wins on purpose — the pin is a bootstrap floor, not a
+# team-wide lock — and any resulting version skew is reported by the preflight
+# below rather than silently tolerated.
+from_path=0
 if command -v warden >/dev/null 2>&1; then
   bin=warden
+  from_path=1
 else
   case "$ver" in ""|*dev*|*snapshot*)
     echo "warden: not installed and no pinned release ($ver); install: npx @klarlabs-studio/warden, or https://github.com/%s" >&2
@@ -146,11 +156,22 @@ _wd_timeout() {
   fi
   "$@"  # no timeout tool available — best effort
 }
-if ! _wd_timeout 15 "$bin" --version >/dev/null 2>&1; then
+if ! _wd_ver_out=$(_wd_timeout 15 "$bin" --version 2>/dev/null); then
   echo "warden: '$bin' is installed but not runnable (Gatekeeper-quarantined, corrupt, or blocked)." >&2
   echo "warden: fix it (macOS: xattr -dr com.apple.quarantine \"$bin\"; or reinstall), then retry." >&2
   echo "warden: to commit once without the gate: git commit --no-verify" >&2
   exit 1
+fi
+
+# Report version-pin skew. Only a PATH binary can diverge — the cached branch
+# fetched exactly $ver — so the check is scoped there. The preflight already
+# paid for the --version call; reuse its output rather than exec'ing twice.
+# "warden 0.18.16" -> "0.18.16".
+if [ "$from_path" = 1 ] && [ -n "$ver" ]; then
+  running=${_wd_ver_out##* }
+  if [ -n "$running" ] && [ "$running" != "$ver" ]; then
+    echo "warden: hook pins $ver, PATH has $running — running $running" >&2
+  fi
 fi
 
 exec "$bin" run "$hook"
@@ -214,4 +235,36 @@ func Installed(gitDir string) map[domain.Hook]bool {
 		}
 	}
 	return out
+}
+
+// pinnedPrefix is the shim line carrying the version a hook was installed at.
+const pinnedPrefix = "# pinned: "
+
+// Pinned reports the version baked into each installed Warden-managed shim,
+// keyed by hook. A hook that is absent, unmanaged, or carries no pin line is
+// simply omitted — the pin is diagnostic, so an unreadable one is silence, not
+// an error. Reading it back out is what lets a surface like `warden status`
+// show pin-vs-running skew before it turns into a "works on my machine".
+func Pinned(gitDir string) map[domain.Hook]string {
+	out := map[domain.Hook]string{}
+	for _, h := range domain.AllHooks {
+		data, err := os.ReadFile(filepath.Join(gitDir, "hooks", string(h)))
+		if err != nil || !strings.Contains(string(data), managedMarker) {
+			continue
+		}
+		if v := pinnedVersion(string(data)); v != "" {
+			out[h] = v
+		}
+	}
+	return out
+}
+
+// pinnedVersion extracts the "# pinned: <version>" value from a shim body.
+func pinnedVersion(body string) string {
+	for line := range strings.SplitSeq(body, "\n") {
+		if rest, ok := strings.CutPrefix(line, pinnedPrefix); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
