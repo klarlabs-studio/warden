@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-25
+
 ### Changed
 
 - **A successful pre-push now exits 0.** Warden performs the push itself and
