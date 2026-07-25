@@ -43,7 +43,7 @@ func TestStepName(t *testing.T) {
 	if got := DefaultSteps(PreCommit); len(got) != 1 || got[0] != StepLint {
 		t.Errorf("pre-commit default = %v", got)
 	}
-	if got := DefaultSteps(PrePush); len(got) != 6 {
+	if got := DefaultSteps(PrePush); len(got) != 7 {
 		t.Errorf("pre-push default = %v", got)
 	}
 	if DefaultSteps(Hook("x")) != nil {

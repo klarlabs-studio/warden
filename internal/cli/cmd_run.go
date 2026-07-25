@@ -22,6 +22,38 @@ import (
 	"go.klarlabs.de/warden/internal/tui"
 )
 
+// Exit codes for a run that was stopped by the MACHINE rather than by the
+// change. Git only cares whether the code is zero, so these are for the humans
+// and the wrappers reading warden's exit status: a CI job or a retry loop must
+// be able to tell "wait and try again" from "your code is wrong" from "this
+// checkout was never set up", without parsing warden's prose.
+//
+// The values follow sysexits(3), which is what a retry wrapper is most likely to
+// already understand.
+const (
+	// exitContention: a tool refused to start because another process holds its
+	// machine-global lock, and it was still held when warden's wait budget ran
+	// out. EX_TEMPFAIL — the canonical "nothing is wrong, retry later".
+	exitContention = 75
+	// exitEnvironment: a step's toolchain or dependencies are not installed.
+	// EX_CONFIG — deliberately NOT in the retryable range, because retrying an
+	// unprepared checkout produces the identical failure forever.
+	exitEnvironment = 78
+)
+
+// exitForBlocker maps a run's blocker to its process exit code, or falls back to
+// notBlocked for an ordinary verdict about the change.
+func exitForBlocker(b domain.Blocker, notBlocked int) int {
+	switch b {
+	case domain.BlockerContention:
+		return exitContention
+	case domain.BlockerEnvironment:
+		return exitEnvironment
+	default:
+		return notBlocked
+	}
+}
+
 // cmdRun handles `warden run <hook>`, the entry point the installed hook shims
 // call. Its exit code drives git: a pre-commit pass exits 0 so the commit
 // proceeds; a pre-push pass exits 0 when warden stood aside and left the push to
@@ -179,12 +211,13 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	maybeNotify(svc, res, time.Since(start))
 	// The TUI already rendered the outcome as its final frame — don't reprint
 	// it. Exit 0 only when git is completing the push itself; otherwise warden
-	// already pushed and must fail the hook so git's stale push is stopped.
+	// already pushed and must fail the hook so git's stale push is stopped — and
+	// a run stopped by the environment says so in its code (see runPrePushExit).
 	noteGitPushError(stdout, res)
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
 	}
-	return 1
+	return exitForBlocker(res.Blocker, 1)
 }
 
 // noteGitPushError, on a SUCCESSFUL pre-push that warden pushed ITSELF, prints
@@ -342,7 +375,7 @@ func passLine(ran, prePush []domain.StepName) string {
 func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, stderr io.Writer) int {
 	if res.Outcome != domain.OutcomePassed {
 		fmt.Fprintf(stderr, "warden: %s\n", res.Message)
-		return 1
+		return exitForBlocker(res.Blocker, 1)
 	}
 	if res.FixPatch != "" {
 		if err := svc.ApplyFixPatch(res.FixPatch); err != nil {
@@ -369,6 +402,11 @@ func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, 
 // "did it push?" is answerable from the exit code alone. Otherwise warden
 // already pushed and MUST fail the hook so git's stale push cannot proceed (see
 // noteGitPushError) — the one case where a success still exits non-zero.
+//
+// A run BLOCKED by the environment swaps the 1 for a code that says WHY. Even
+// after #89 the 1 is overloaded — a warden-performed success shares it with a
+// failure — so it can carry no more information, and a retry wrapper needs to
+// tell a lock it should wait out from a verdict it must not retry.
 func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	msg := res.Message
 	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
@@ -379,7 +417,7 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
 	}
-	return 1
+	return exitForBlocker(res.Blocker, 1)
 }
 
 func printFindings(w io.Writer, findings []domain.Finding) {

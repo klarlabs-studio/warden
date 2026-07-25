@@ -6,7 +6,7 @@ import (
 )
 
 func TestResolvedPolicy_Batches(t *testing.T) {
-	full := DefaultSteps(PrePush) // intent, rebase, review, document, test, lint
+	full := DefaultSteps(PrePush) // intent, rebase, review, document, test, lint, credentials
 
 	tests := []struct {
 		name string
@@ -19,14 +19,14 @@ func TestResolvedPolicy_Batches(t *testing.T) {
 			want: [][]StepName{
 				{StepIntent}, // followed by the rebase barrier
 				{StepRebase}, // rewrites history → barrier
-				{StepReview, StepDocument, StepTest, StepLint}, // agents + checks, each in its own worktree
+				{StepReview, StepDocument, StepTest, StepLint, StepCredentials}, // agents + checks, each in its own worktree
 			},
 		},
 		{
 			name: "disabled parallelism keeps every step sequential",
 			pol:  ResolvedPolicy{Steps: full, Parallel: false},
 			want: [][]StepName{
-				{StepIntent}, {StepRebase}, {StepReview}, {StepDocument}, {StepTest}, {StepLint},
+				{StepIntent}, {StepRebase}, {StepReview}, {StepDocument}, {StepTest}, {StepLint}, {StepCredentials},
 			},
 		},
 		{
