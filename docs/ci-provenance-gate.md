@@ -272,6 +272,16 @@ required checks) keeps the visibility and the trusted-signed signal without the
 lock-in. Start there; promote to required once the trust model (below) is solid
 and the friction is acceptable.
 
+> **warden's own repo runs it required** as of 0.19.0. It was advisory for the
+> first six months, and the thing that blocked promotion was not the trust model
+> — it was three defects that made the gate fail on *legitimate* PRs: a note
+> covered only its push's tip, so an ordinary multi-commit push read as
+> unverified; a rebased branch could not be pushed through the gate at all,
+> forcing a `--no-verify` bypass that wrote no provenance; and the `rebase` step
+> targeted the branch's own remote ref. Promote when the gate stops failing on
+> work that *is* properly gated — not merely when you trust the idea of it. A
+> required check people routinely override is worse than an advisory one.
+
 ## Operating the roster: keys, backup, automation
 
 - **Back up your signer.** warden's key is per-machine (`signing.key` in the
