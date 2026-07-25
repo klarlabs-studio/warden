@@ -90,6 +90,10 @@ type Config struct {
 	// PR configures optional pull-request creation after a passing push.
 	PR PRConfig `yaml:"pr"`
 
+	// Push configures how warden performs the push it owns — notably whether a
+	// rebased branch may be rewritten (see PushConfig). Nil takes the defaults.
+	Push *PushConfig `yaml:"push"`
+
 	// TrustedKeys is the committed roster of signer fingerprints (or full base64
 	// public keys) whose provenance the repo trusts. When non-empty, a bare
 	// `warden verify` / `verify --range` (no `--key` flag) escalates from
@@ -203,7 +207,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid trusted_keys[%d] %q: expected a 16-hex fingerprint (see `warden key show`) or a base64 ed25519 public key", i, k)
 		}
 	}
-	return nil
+	return c.validatePush()
 }
 
 // validateDuration reports why a config duration string is unusable, or nil if

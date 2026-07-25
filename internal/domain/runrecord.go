@@ -46,7 +46,19 @@ type RunRecord struct {
 	// collapsed). The evidence below is carried over from that run and this record
 	// is re-signed locally, so a re-attestation is transparent: it asserts "the
 	// same validated content, under a new commit id" — never a fresh validation.
-	ReattestedFrom    string              `json:"reattested_from,omitempty"`
+	ReattestedFrom string `json:"reattested_from,omitempty"`
+	// CoversFrom is the commit this push started from: everything in
+	// (CoversFrom, CommitSHA] was published by the same gated push. It is part of
+	// the signed payload, so the span cannot be widened after the fact.
+	//
+	// A run validates ONE tree — the tip's, in the worktree. Attesting each
+	// commit in a push individually would be a lie, since the intermediate trees
+	// were never checked out. But recording only the commit throws away the other
+	// half of what happened: a trusted signer ran the policy and vouched for the
+	// span it pushed. Without the span, `verify --range` demands per-commit
+	// provenance the gate never produces, so a perfectly ordinary
+	// commit-commit-commit-push reads as two unverified commits forever (#86).
+	CoversFrom        string              `json:"covers_from,omitempty"`
 	Agent             map[StepName]string `json:"agent"`
 	StepsRun          []StepName          `json:"steps_run"`
 	MatchedRules      []string            `json:"matched_rules"`

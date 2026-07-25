@@ -105,7 +105,60 @@ func (s *Service) VerifyRange(base, head string, opts RangeVerifyOptions) (Range
 	for _, sha := range shas {
 		res.Commits = append(res.Commits, s.verdictFor(sha, opts))
 	}
+	s.applySpanCoverage(&res, shas, opts)
 	return res, nil
+}
+
+// applySpanCoverage rescues commits that carry no note of their own but fall
+// inside the signed span of one that does.
+//
+// A run validates one tree — the tip's — so warden deliberately does NOT
+// attest each commit of a multi-commit push individually; that would assert
+// checks which never ran against those trees. What it does assert is the span:
+// a trusted signer ran the policy and published (CoversFrom, CommitSHA]
+// together. Reading that back is what makes the range gate check a claim warden
+// actually makes, instead of demanding per-commit notes it never writes (#86).
+//
+// This is not a weakening. A covering note must itself pass the full gate at
+// its own commit — same signature and trust requirements — so only a signer
+// already trusted to attest commits can cover a span, and the span is bounded
+// by real git history (`rev-list base..tip`) rather than by anything the note
+// claims about reachability. A commit outside every trusted span keeps its
+// original verdict.
+func (s *Service) applySpanCoverage(res *RangeVerifyResult, shas []string, opts RangeVerifyOptions) {
+	gaps := map[string]int{} // sha → index into res.Commits
+	for i, c := range res.Commits {
+		if c.Reason == domain.ReasonMissing {
+			gaps[c.SHA] = i
+		}
+	}
+	if len(gaps) == 0 {
+		return
+	}
+	for _, sha := range shas {
+		if _, isGap := gaps[sha]; isGap {
+			continue // a commit with no note cannot vouch for anything
+		}
+		rec, err := s.repo.ReadNote(sha)
+		if err != nil || rec == nil || rec.CoversFrom == "" {
+			continue
+		}
+		// The covering note must clear the very same bar it is being used to
+		// satisfy — otherwise a span would be a cheaper path to "verified".
+		if v := s.verdictFor(sha, opts); !v.OK() {
+			continue
+		}
+		covered, err := s.repo.CommitsInSpan(rec.CoversFrom, sha)
+		if err != nil {
+			continue
+		}
+		for _, c := range covered {
+			if i, isGap := gaps[c]; isGap {
+				res.Commits[i] = domain.CommitVerdict{SHA: c, CoveredBy: sha}
+				delete(gaps, c)
+			}
+		}
+	}
 }
 
 // verdictFor classifies one commit against the gate's strictness. The order of

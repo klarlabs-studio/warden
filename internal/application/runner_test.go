@@ -38,17 +38,22 @@ func (w *fakeWorktree) Clone(bool) (Worktree, error) {
 }
 
 type fakeGit struct {
-	root         string
-	branch       string
-	branchErr    error
-	head         string
-	pushed       bool
-	notesPushed  bool
-	wroteNote    bool
-	note         domain.RunRecord
-	ffErr        error
-	mergeBaseErr error
-	wt           *fakeWorktree
+	root            string
+	branch          string
+	branchErr       error
+	head            string
+	pushed          bool
+	pushForce       domain.PushForce
+	rewritesHistory bool
+	rewritesErr     error
+	spanBase        string
+	spanBaseErr     error
+	notesPushed     bool
+	wroteNote       bool
+	note            domain.RunRecord
+	ffErr           error
+	mergeBaseErr    error
+	wt              *fakeWorktree
 }
 
 func (g *fakeGit) Root() string                     { return g.root }
@@ -64,7 +69,23 @@ func (g *fakeGit) SeedWorktreeFromBranch(string, bool) (Worktree, error) {
 	return g.wt, nil
 }
 func (g *fakeGit) FastForwardTo(_, _, _ string) error { return g.ffErr }
-func (g *fakeGit) Push(string, string) error          { g.pushed = true; return nil }
+func (g *fakeGit) Push(_, _ string, force domain.PushForce) error {
+	g.pushed = true
+	g.pushForce = force
+	return nil
+}
+
+// PushRewritesHistory scripts whether the branch needs a force; rewrites is
+// false by default, so existing tests exercise the ordinary fast-forward path.
+func (g *fakeGit) PushRewritesHistory(string, string) (bool, error) {
+	return g.rewritesHistory, g.rewritesErr
+}
+
+// PushSpanBase scripts the commit the push starts from; "" (the default) means
+// the run claims no span, matching a first push with nothing behind it.
+func (g *fakeGit) PushSpanBase(string, string) (string, error) {
+	return g.spanBase, g.spanBaseErr
+}
 func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	g.wroteNote = true
 	g.note = rec
@@ -725,4 +746,62 @@ func TestRunner_ParallelBatchFirstStepFails(t *testing.T) {
 	if git.pushed {
 		t.Error("a failing step must block the push")
 	}
+}
+
+// Warden owns the push, so git's --force flag never reaches it. The force
+// decision therefore has to come from detected ancestry plus policy — and must
+// stay off for an ordinary push, so a normal run carries no extra power.
+func TestRunner_PushForce(t *testing.T) {
+	t.Run("a fast-forward never forces, whatever the policy says", func(t *testing.T) {
+		r := &Runner{Git: &fakeGit{rewritesHistory: false}, Settings: Settings{Remote: "origin"}}
+		for _, cfg := range []domain.Config{
+			{},
+			{Push: &domain.PushConfig{Force: domain.ForceLease}},
+			{Push: &domain.PushConfig{Force: domain.ForceNever}},
+		} {
+			got, err := r.pushForce(cfg, "feature")
+			if err != nil {
+				t.Fatalf("cfg %+v: %v", cfg.Push, err)
+			}
+			if got != domain.ForceNever {
+				t.Errorf("cfg %+v: force = %q, want %q for a fast-forward", cfg.Push, got, domain.ForceNever)
+			}
+		}
+	})
+
+	t.Run("a rewrite uses the lease by default", func(t *testing.T) {
+		r := &Runner{Git: &fakeGit{rewritesHistory: true}, Settings: Settings{Remote: "origin"}}
+		got, err := r.pushForce(domain.Config{}, "feature")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != domain.ForceLease {
+			t.Errorf("force = %q, want %q", got, domain.ForceLease)
+		}
+	})
+
+	t.Run("push.force never refuses, naming the knob", func(t *testing.T) {
+		r := &Runner{Git: &fakeGit{rewritesHistory: true}, Settings: Settings{Remote: "origin"}}
+		_, err := r.pushForce(domain.Config{Push: &domain.PushConfig{Force: domain.ForceNever}}, "feature")
+		if !errors.Is(err, ErrPushRewritesHistory) {
+			t.Fatalf("err = %v, want ErrPushRewritesHistory", err)
+		}
+		if !strings.Contains(err.Error(), "push.force") {
+			t.Errorf("the message must name the knob that unblocks it: %q", err)
+		}
+	})
+
+	t.Run("unreadable ancestry never forces on a guess", func(t *testing.T) {
+		r := &Runner{
+			Git:      &fakeGit{rewritesHistory: true, rewritesErr: errors.New("no such ref")},
+			Settings: Settings{Remote: "origin"},
+		}
+		got, err := r.pushForce(domain.Config{}, "feature")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != domain.ForceNever {
+			t.Errorf("force = %q, want %q — an error is not a license to rewrite", got, domain.ForceNever)
+		}
+	})
 }

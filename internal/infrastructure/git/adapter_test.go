@@ -88,7 +88,7 @@ func TestAdapterWorktreeAndPublish(t *testing.T) {
 
 	// Push a branch, then write + push a note, all through the port.
 	gitRun(t, dir, "branch", "feature", "main")
-	if err := a.Push("origin", "feature"); err != nil {
+	if err := a.Push("origin", "feature", domain.ForceNever); err != nil {
 		t.Errorf("Push: %v", err)
 	}
 	if err := a.WriteNote(sha, domain.RunRecord{RunID: "adapter-run"}); err != nil {

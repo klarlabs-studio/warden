@@ -211,6 +211,7 @@ notify_after: 10s   # default — a *passing* run only notifies once it ran at l
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
+push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:
   - match: { branch: main }
     then: { require_approval: true, auto_fix: { test: 1 } }
@@ -376,6 +377,35 @@ warden: step lint could not run (lock contention)
 
 Only a narrow set of known contention messages is retried, so a genuine failure
 fails immediately and keeps the tool's own output.
+
+## Rebasing a gated branch (`push.force`)
+
+Warden **performs the push itself** — it validates, then pushes, then fails the
+hook so git's own (now redundant) push can't race it. A consequence: git hands
+the pre-push hook no signal that you typed `--force`, so warden has to decide
+for itself how to push a branch whose history you rewrote.
+
+It detects the rewrite (the remote tip is no longer an ancestor of yours) and,
+by default, pushes with `--force-with-lease` **pinned to your remote-tracking
+ref** — the value you last fetched. A commit someone else pushed since then
+invalidates the lease and the push is refused, so a rewrite can only ever
+discard history you have actually seen.
+
+```yaml
+push:
+  force: lease   # default — rewrite with a lease when the branch was rebased
+  # force: never # refuse instead; the push fails as git would
+```
+
+An ordinary fast-forward never forces, whatever the setting — the flag is
+reserved for the case that needs it.
+
+**Why `lease` is the default.** Because warden owns the push, refusing to
+rewrite doesn't leave you with git's usual "use `--force`" nudge; it leaves you
+with `git push --no-verify`, which skips the gate entirely and writes **no
+provenance**. A default that pushes people toward bypassing the gate is worse
+for the thing warden protects than one that rewrites a branch you already
+rewrote locally. Set `force: never` if your repo would rather the push fail.
 
 ## Bypass provenance (`warden doctor`)
 
