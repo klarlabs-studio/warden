@@ -162,3 +162,39 @@ func TestAuditReport_Counts(t *testing.T) {
 		t.Errorf("Counts = %d,%d,%d want 2,1,1", v, i, u)
 	}
 }
+
+func TestCommitStatus_Reattestable(t *testing.T) {
+	// The squash-merge case: no note of its own, but a validated commit
+	// reproduces its tree — recoverable, not a real hole.
+	gap := CommitStatus{SHA: "new", ReattestableFrom: "old"}
+	if !gap.Reattestable() {
+		t.Error("un-noted commit with a validated tree-identical source must be reattestable")
+	}
+	// A commit that already carries a note is not a gap, whatever else is set.
+	noted := CommitStatus{SHA: "new", HasNote: true, ReattestableFrom: "old"}
+	if noted.Reattestable() {
+		t.Error("a commit with its own note is not a re-attestation target")
+	}
+	// The genuine "never gated" case: nothing content-identical is validated.
+	hole := CommitStatus{SHA: "new"}
+	if hole.Reattestable() {
+		t.Error("no source means no recovery")
+	}
+}
+
+func TestAuditReport_Reattestable(t *testing.T) {
+	r := AuditReport{Commits: []CommitStatus{
+		{SHA: "a", HasNote: true, ChainIntact: true},
+		{SHA: "b", ReattestableFrom: "b-src"},
+		{SHA: "c"}, // never gated — must not be offered
+		{SHA: "d", ReattestableFrom: "d-src"},
+	}}
+	got := r.Reattestable()
+	if len(got) != 2 || got[0].SHA != "b" || got[1].SHA != "d" {
+		t.Fatalf("Reattestable = %+v, want the two recoverable commits in branch order", got)
+	}
+	// It reports a subset of the unverified count, never more.
+	if _, _, unverified := r.Counts(); len(got) > unverified {
+		t.Errorf("reattestable (%d) exceeds unverified (%d)", len(got), unverified)
+	}
+}

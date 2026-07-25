@@ -14,7 +14,19 @@ type CommitStatus struct {
 	ChainIntact bool
 	RunID       string
 	Steps       []StepName
+	// ReattestableFrom names a validated commit that reproduces this commit's
+	// tree exactly, when one exists and this commit has no note of its own — the
+	// squash-merge signature. It turns a bare UNVERIFIED into an actionable one:
+	// the content WAS gated, under a different commit id, and `warden reattest`
+	// can bind that proof to this SHA. Empty when nothing content-identical is
+	// validated, which is the genuine "never gated" case.
+	ReattestableFrom string
 }
+
+// Reattestable reports whether this commit is an un-noted commit whose content
+// a validated commit already covers — i.e. the gap is recoverable rather than a
+// real hole in the history.
+func (c CommitStatus) Reattestable() bool { return !c.HasNote && c.ReattestableFrom != "" }
 
 // NewCommitStatus classifies a commit from its metadata and optional note.
 // A nil note means no provenance exists — the commit is unverified (a
@@ -42,10 +54,10 @@ type AuditReport struct {
 
 // Counts tallies verified/intact/unverified commits for the summary line.
 func (r AuditReport) Counts() (verified, intact, unverified int) {
-	for _, c := range r.Commits {
-		if c.HasNote {
+	for i := range r.Commits {
+		if r.Commits[i].HasNote {
 			verified++
-			if c.ChainIntact {
+			if r.Commits[i].ChainIntact {
 				intact++
 			}
 		} else {
@@ -53,4 +65,16 @@ func (r AuditReport) Counts() (verified, intact, unverified int) {
 		}
 	}
 	return
+}
+
+// Reattestable returns the un-noted commits a validated tree-identical commit
+// can vouch for, oldest first — the recoverable share of the unverified count.
+func (r AuditReport) Reattestable() []CommitStatus {
+	var out []CommitStatus
+	for i := range r.Commits {
+		if r.Commits[i].Reattestable() {
+			out = append(out, r.Commits[i])
+		}
+	}
+	return out
 }

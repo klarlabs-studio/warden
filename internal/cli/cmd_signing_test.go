@@ -10,6 +10,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/service"
 )
 
@@ -161,6 +162,10 @@ type fakeCfgSvc struct {
 }
 
 func (f fakeCfgSvc) Config() (domain.Config, error) { return f.cfg, f.err }
+
+// Repo returns nil: maybeNotify treats repo context as decoration, so the
+// notification must still fire without it.
+func (f fakeCfgSvc) Repo() *git.Repo { return nil }
 
 func TestMaybeNotify_RespectsConfigAndVerdict(t *testing.T) {
 	// These calls exercise the gating logic; notify.Send is a best-effort no-op

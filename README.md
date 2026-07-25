@@ -280,6 +280,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
 | `warden attest [--commit c]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop) |
 | `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |
+| `warden reattest --all [--branch b] [--push]` | sweep a branch: re-attest every recoverable squash-merge gap since adoption |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |

@@ -128,7 +128,8 @@ the provenance across locally — no bot, no CI signing key:
 
 ```bash
 git checkout main && git pull
-warden reattest --push          # re-attest HEAD from its tree-identical validated source
+warden reattest --all --push    # close every recoverable gap on the branch
+warden reattest --push          # or just HEAD, right after a single merge
 ```
 
 `reattest` finds a commit whose tree SHA matches HEAD and whose note is intact,
@@ -141,6 +142,33 @@ tree-identical commit) from being laundered into a locally-trusted
 re-attestation. It **fails safe**: if nothing content-identical is validated by
 a trusted signer, it writes nothing — a re-attestation only relocates a real,
 trusted validation onto byte-identical content, it never manufactures one.
+
+**Do the sweep, not the SHA.** `--all` walks the branch from the adoption point
+and re-attests every commit that has a validated tree-identical source, then
+pushes the notes once. It exists because the per-merge form does not survive
+contact with reality: a repo can run the gate on every PR and still show a
+majority-unverified `main`, simply because nobody remembered to relocate a note
+after each squash. `--all` applies exactly the same trust rules per commit — it
+is a batch of the same safe operation, never a weaker one — and skips anything
+that has no trusted source. Re-running it on a clean branch writes nothing.
+
+`warden doctor` now points at this directly. A commit whose content *was* gated
+under a different id reads as a recoverable binding gap rather than an
+unchecked commit:
+
+```
+branch main since adoption a33fb962c94c:
+  ✗ b573c53b6f31  docs: adopt Agent OS memory system (#26)   UNVERIFIED (reattestable from 9f2c1ab84d05)
+  ✓ f8ae27d41f39  fix(config): keep secrets out of the config file (#25)  (run_2026…, 2 steps, chain-intact)
+2 verified (2 chain-intact), 4 unverified since adoption
+3 of the 4 were gated under a different commit id (squash-merge); recover them with:
+  warden reattest --all --branch main --push
+```
+
+Doctor applies the *same* trust rule reattest does, so it never advertises a
+repair reattest would then refuse, and never presents an untrusted note as
+provenance. A commit with no trusted tree-identical source keeps reading
+`UNVERIFIED (no warden note)` — that is a real hole, not a binding gap.
 
 ### Interop: export provenance as an in-toto attestation (`warden attest`)
 
