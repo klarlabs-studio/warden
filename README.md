@@ -351,6 +351,31 @@ Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
 
+### Tools that refuse to run concurrently
+
+Some checkers guard a shared resource with a mutex and refuse to start while
+another copy of themselves is running — `golangci-lint` ("parallel
+golangci-lint is running"), `cargo`'s build lock, and friends. That refusal is
+**not a verdict on your tree**: the check never ran. It is also easy to trigger
+by accident — run the linter in one terminal, commit from another.
+
+Warden waits it out rather than reporting a lint error that doesn't exist. On a
+recognized contention message the step retries (up to a minute), saying so once:
+
+```
+warden: another process holds lint's lock, waiting…
+```
+
+If the lock is still held when that budget runs out, the gate still fails —
+"I could not check" is not "the tree is clean" — but it says which:
+
+```
+warden: step lint could not run (lock contention)
+```
+
+Only a narrow set of known contention messages is retried, so a genuine failure
+fails immediately and keeps the tool's own output.
+
 ## Bypass provenance (`warden doctor`)
 
 `git ... --no-verify` bypasses any hook by design; Warden does not fight that,
