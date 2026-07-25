@@ -35,7 +35,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
 `})
-		pin, found, err := DiscoverPin(root, "nox", "")
+		pin, found, err := DiscoverPin(context.Background(), root, "nox", "")
 		if err != nil || !found {
 			t.Fatalf("DiscoverPin = (found %v, err %v), want a pin", found, err)
 		}
@@ -57,7 +57,7 @@ jobs:
           NOX_VERSION: v1.15.0
         run: nox scan .
 `})
-		pin, found, _ := DiscoverPin(root, "nox", "")
+		pin, found, _ := DiscoverPin(context.Background(), root, "nox", "")
 		if !found || pin.Version != "1.15.0" {
 			t.Errorf("DiscoverPin = %+v (found %v), want 1.15.0 — a `v` prefix is the same pin", pin, found)
 		}
@@ -71,7 +71,7 @@ jobs:
     with:
       nox-version: "1.15.0"
 `})
-		pin, found, _ := DiscoverPin(root, "nox", "")
+		pin, found, _ := DiscoverPin(context.Background(), root, "nox", "")
 		if !found || pin.Version != "1.15.0" {
 			t.Errorf("DiscoverPin = %+v (found %v), want the reusable-workflow input to count as the pin", pin, found)
 		}
@@ -81,20 +81,20 @@ jobs:
 		// Most repos pin nothing. Warden must not fail their pushes over a
 		// comparison it cannot make.
 		root := repoWithWorkflows(t, map[string]string{"ci.yml": "jobs:\n  build:\n    runs-on: ubuntu-latest\n"})
-		if _, found, err := DiscoverPin(root, "nox", ""); found || err != nil {
+		if _, found, err := DiscoverPin(context.Background(), root, "nox", ""); found || err != nil {
 			t.Errorf("DiscoverPin = (found %v, err %v), want (false, nil)", found, err)
 		}
 	})
 
 	t.Run("no workflows at all is silence", func(t *testing.T) {
-		if _, found, err := DiscoverPin(t.TempDir(), "nox", ""); found || err != nil {
+		if _, found, err := DiscoverPin(context.Background(), t.TempDir(), "nox", ""); found || err != nil {
 			t.Errorf("DiscoverPin = (found %v, err %v), want (false, nil)", found, err)
 		}
 	})
 
 	t.Run("`latest` names no version", func(t *testing.T) {
 		root := repoWithWorkflows(t, map[string]string{"ci.yml": "env:\n  NOX_VERSION: latest\n"})
-		if _, found, _ := DiscoverPin(root, "nox", ""); found {
+		if _, found, _ := DiscoverPin(context.Background(), root, "nox", ""); found {
 			t.Error("`latest` was treated as a pin; there is no version to compare against")
 		}
 	})
@@ -104,7 +104,7 @@ jobs:
 			"ci.yml":      "env:\n  NOX_VERSION: \"1.3.0\"\n",
 			"release.yml": "env:\n  NOX_VERSION: \"1.15.0\"\n",
 		})
-		_, _, err := DiscoverPin(root, "nox", "")
+		_, _, err := DiscoverPin(context.Background(), root, "nox", "")
 		if err == nil {
 			t.Fatal("conflicting pins were silently resolved to one of them")
 		}
@@ -118,7 +118,7 @@ jobs:
 			"ci.yml":      "env:\n  NOX_VERSION: \"1.15.0\"\n",
 			"release.yml": "env:\n  NOX_VERSION: v1.15.0\n",
 		})
-		if _, found, err := DiscoverPin(root, "nox", ""); err != nil || !found {
+		if _, found, err := DiscoverPin(context.Background(), root, "nox", ""); err != nil || !found {
 			t.Errorf("DiscoverPin = (found %v, err %v), want the agreed pin", found, err)
 		}
 	})
@@ -126,7 +126,7 @@ jobs:
 	t.Run("an explicit pin_file that does not exist is an error", func(t *testing.T) {
 		// A silently skipped check is worse than a loud one: the operator asked
 		// for the pin to be read from a specific file.
-		if _, _, err := DiscoverPin(t.TempDir(), "nox", ".github/workflows/nope.yml"); err == nil {
+		if _, _, err := DiscoverPin(context.Background(), t.TempDir(), "nox", ".github/workflows/nope.yml"); err == nil {
 			t.Error("a missing pin_file was ignored")
 		}
 	})
@@ -136,7 +136,7 @@ jobs:
 			"ci.yml":      "env:\n  NOX_VERSION: \"1.3.0\"\n",
 			"release.yml": "env:\n  NOX_VERSION: \"1.15.0\"\n",
 		})
-		pin, found, err := DiscoverPin(root, "nox", ".github/workflows/release.yml")
+		pin, found, err := DiscoverPin(context.Background(), root, "nox", ".github/workflows/release.yml")
 		if err != nil || !found || pin.Version != "1.15.0" {
 			t.Errorf("DiscoverPin = (%+v, %v, %v), want only release.yml's 1.15.0", pin, found, err)
 		}
