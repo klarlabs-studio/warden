@@ -16,10 +16,16 @@ commands:
   # the ones this change introduced fail it (security_scan.mode, default delta).
   security-scan: "nox scan . -severity-threshold high"
 steps:
-  # pre-commit stays fast: quality gate only.
-  pre_commit: [lint]
-  # pre-push mirrors CI order: quality -> security -> tests.
-  pre_push: [rebase, lint, security-scan, test]
+  # `credentials` runs FIRST and in BOTH hooks. First because it is the only
+  # step whose failure is unrecoverable by re-running: once a secret is in a
+  # commit object it is in the reflog, and once pushed it is compromised
+  # regardless of what the next commit removes. In both hooks because pre-commit
+  # is the last point where "don't commit it" is still cheap advice — catching
+  # it at pre-push means the secret already exists in history. It only reads the
+  # files the change touched, so it costs nothing in the fast path.
+  pre_commit: [credentials, lint]
+  # pre-push mirrors CI order: secrets -> quality -> security -> tests.
+  pre_push: [credentials, rebase, lint, security-scan, test]
 risk:
   diff_lines_high: 400
   files_touched_high: 15
