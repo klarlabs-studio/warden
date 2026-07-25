@@ -199,3 +199,72 @@ func TestMergeBase(t *testing.T) {
 		t.Errorf("MergeBase = %s, want %s", got, base)
 	}
 }
+
+// TestUnmergedRemoteCommits draws the line push.force:lease could not: our own
+// rebased commits (safe to replace) versus someone else's (destroyed by a force).
+func TestUnmergedRemoteCommits(t *testing.T) {
+	dir := newTestRepo(t)
+	repo := &Repo{Dir: dir}
+	bare := setupBareRemote(t, dir)
+
+	t.Run("no remote branch: nothing can be lost", func(t *testing.T) {
+		got, err := repo.UnmergedRemoteCommits("origin", "nope")
+		if err != nil || len(got) != 0 {
+			t.Errorf("got %v, %v; want empty", got, err)
+		}
+	})
+
+	gitRun(t, dir, "checkout", "-q", "-b", "shared")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "--no-verify", "-m", "mine")
+	gitRun(t, dir, "push", "-q", "origin", "shared")
+
+	t.Run("in sync: nothing remote-only", func(t *testing.T) {
+		gitRun(t, dir, "fetch", "-q", "origin")
+		got, err := repo.UnmergedRemoteCommits("origin", "shared")
+		if err != nil || len(got) != 0 {
+			t.Errorf("got %v, %v; want empty", got, err)
+		}
+	})
+
+	t.Run("our own commit rebased: the remote form has an equivalent, so nothing is lost", func(t *testing.T) {
+		// Rewrite our commit (new sha, same patch) as a rebase onto a new base would.
+		gitRun(t, dir, "commit", "-q", "--amend", "--no-verify", "--allow-empty", "-m", "mine, reworded")
+		gitRun(t, dir, "fetch", "-q", "origin")
+		got, err := repo.UnmergedRemoteCommits("origin", "shared")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Both are empty commits, so they are patch-equivalent: git cherry marks
+		// the remote's copy '-' and a force-push loses nothing.
+		if len(got) != 0 {
+			t.Errorf("got %v, want empty — replacing our own commit destroys nothing", got)
+		}
+	})
+
+	t.Run("a colleague's commit is reported, so the force can be refused", func(t *testing.T) {
+		other := t.TempDir()
+		gitRun(t, other, "clone", "-q", bare, ".")
+		gitRun(t, other, "config", "user.email", "you@t.co")
+		gitRun(t, other, "config", "user.name", "you")
+		gitRun(t, other, "checkout", "-q", "shared")
+		if err := os.WriteFile(filepath.Join(other, "theirs.txt"), []byte("theirs\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitRun(t, other, "add", "-A")
+		gitRun(t, other, "commit", "-q", "--no-verify", "-m", "COLLEAGUE WORK")
+		gitRun(t, other, "push", "-q", "origin", "shared")
+
+		gitRun(t, dir, "fetch", "-q", "origin")
+		got, err := repo.UnmergedRemoteCommits("origin", "shared")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) == 0 {
+			t.Fatal("a colleague's commit must be reported as remote-only")
+		}
+		joined := strings.Join(got, "\n")
+		if !strings.Contains(joined, "COLLEAGUE WORK") {
+			t.Errorf("got %q, want it to name the colleague's commit", joined)
+		}
+	})
+}

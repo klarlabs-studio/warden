@@ -56,6 +56,9 @@ func (a *Adapter) PushRewritesHistory(remote, branch string) (bool, error) {
 func (a *Adapter) PushSpanBase(remote, branch string) (string, error) {
 	return a.repo.PushSpanBase(remote, branch)
 }
+func (a *Adapter) UnmergedRemoteCommits(remote, branch string) ([]string, error) {
+	return a.repo.UnmergedRemoteCommits(remote, branch)
+}
 func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 	return a.repo.WriteNote(sha, rec)
 }

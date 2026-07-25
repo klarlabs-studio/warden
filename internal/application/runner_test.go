@@ -48,12 +48,16 @@ type fakeGit struct {
 	rewritesErr     error
 	spanBase        string
 	spanBaseErr     error
-	notesPushed     bool
-	wroteNote       bool
-	note            domain.RunRecord
-	ffErr           error
-	mergeBaseErr    error
-	wt              *fakeWorktree
+	// unmergedRemote is work that exists only on the remote — a colleague's
+	// commits on a shared branch, which a force-push would destroy.
+	unmergedRemote    []string
+	unmergedRemoteErr error
+	notesPushed       bool
+	wroteNote         bool
+	note              domain.RunRecord
+	ffErr             error
+	mergeBaseErr      error
+	wt                *fakeWorktree
 }
 
 func (g *fakeGit) Root() string                     { return g.root }
@@ -86,6 +90,13 @@ func (g *fakeGit) PushRewritesHistory(string, string) (bool, error) {
 func (g *fakeGit) PushSpanBase(string, string) (string, error) {
 	return g.spanBase, g.spanBaseErr
 }
+
+// UnmergedRemoteCommits scripts commits present only on the remote. Empty (the
+// default) means a force discards nothing but our own pre-rewrite history.
+func (g *fakeGit) UnmergedRemoteCommits(string, string) ([]string, error) {
+	return g.unmergedRemote, g.unmergedRemoteErr
+}
+
 func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	g.wroteNote = true
 	g.note = rec
@@ -915,5 +926,102 @@ func TestRunner_PushesItselfWhenAStepRewroteTheBranch(t *testing.T) {
 	}
 	if res.GitCompletesPush {
 		t.Error("git cannot be trusted to complete a push whose ref warden moved")
+	}
+}
+
+// TestRunner_RefusesToForceOverSomeoneElsesWork is the guard for the data-loss
+// path: push.force:lease let warden delete a colleague's commit from a shared
+// branch, silently, because --force-with-lease is satisfied once you have
+// fetched it. Reproduced against a real remote before this fix.
+func TestRunner_RefusesToForceOverSomeoneElsesWork(t *testing.T) {
+	git := &fakeGit{
+		root: t.TempDir(), branch: "shared", head: "sha1",
+		wt:              &fakeWorktree{dir: "/wt", headSHA: "sha1"},
+		rewritesHistory: true, // the remote tip is not an ancestor of ours
+		unmergedRemote:  []string{"47393a2 COLLEAGUE WORK"},
+	}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg()
+	cfg.Push = &domain.PushConfig{Force: "lease"}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome == domain.OutcomePassed {
+		t.Fatal("a push that would delete a colleague's commit must not pass")
+	}
+	// The message is what the developer actually reads, so it must name the
+	// commit at risk rather than say "push failed".
+	if !strings.Contains(res.Message, "COLLEAGUE WORK") {
+		t.Errorf("the refusal must name what would be lost: %s", res.Message)
+	}
+	if !strings.Contains(res.Message, "git pull --rebase") {
+		t.Errorf("the refusal must say how to proceed: %s", res.Message)
+	}
+	if git.pushed {
+		t.Error("warden must not push when the force would discard remote-only work")
+	}
+
+	// And the error identity is available to callers that check it.
+	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
+	if _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+		t.Errorf("pushForce err = %v, want ErrPushDiscardsRemoteWork", err)
+	}
+}
+
+// A rebased branch with nothing remote-only still publishes: that is the whole
+// point of push.force: lease (#85), and this guard must not undo it.
+func TestRunner_LeaseStillPublishesAPureRewrite(t *testing.T) {
+	git := &fakeGit{
+		root: t.TempDir(), branch: "feature", head: "sha1",
+		wt:              &fakeWorktree{dir: "/wt", headSHA: "sha1"},
+		rewritesHistory: true,
+		unmergedRemote:  nil, // the remote holds only our own pre-rewrite commits
+	}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg()
+	cfg.Push = &domain.PushConfig{Force: "lease"}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if !git.pushed || git.pushForce != domain.ForceLease {
+		t.Errorf("expected a leased force push, got pushed=%v force=%q", git.pushed, git.pushForce)
+	}
+}
+
+// An unreadable comparison must not be treated as "nothing to lose".
+func TestRunner_RefusesToForceWhenItCannotTell(t *testing.T) {
+	git := &fakeGit{
+		root: t.TempDir(), branch: "shared", head: "sha1",
+		wt:                &fakeWorktree{dir: "/wt", headSHA: "sha1"},
+		rewritesHistory:   true,
+		unmergedRemoteErr: errors.New("git cherry exploded"),
+	}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	cfg := prePushCfg()
+	cfg.Push = &domain.PushConfig{Force: "lease"}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome == domain.OutcomePassed {
+		t.Fatal("an unreadable comparison must not be treated as nothing-to-lose")
+	}
+	if git.pushed {
+		t.Error("must not force on a guess")
+	}
+	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
+	if _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+		t.Errorf("pushForce err = %v, want ErrPushDiscardsRemoteWork", err)
 	}
 }
