@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/notify"
 )
 
 // cmdStatus handles the bare `warden` invocation. The spec envisions a TUI that
@@ -58,8 +59,26 @@ func cmdStatus(stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "\n%s\n", tip)
 		}
 	}
+	if line := notifyAdviceLine(svc); line != "" {
+		fmt.Fprintf(stdout, "\n%s\n", line)
+	}
 	fmt.Fprintln(stdout, "\nrun `warden policy explain` for the fully resolved policy.")
 	return 0
+}
+
+// notifyAdviceLine warns when desktop notifications are enabled but will be
+// degraded on this machine. It stays silent for a repo that turned them off —
+// there is nothing to fix — and for a config it cannot read, since a diagnostic
+// must never be the thing that fails `warden status`.
+func notifyAdviceLine(svc interface{ Config() (domain.Config, error) }) string {
+	cfg, err := svc.Config()
+	if err != nil || (cfg.Notify != nil && !*cfg.Notify) {
+		return ""
+	}
+	if advice := notify.Advice(); advice != "" {
+		return "note: " + advice
+	}
+	return ""
 }
 
 // pinSkewLine reports hooks whose pinned version differs from the binary that

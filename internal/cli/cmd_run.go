@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/attach"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/notify"
 	"go.klarlabs.de/warden/internal/tui"
 )
@@ -231,11 +233,51 @@ func shouldNotify(cfg domain.Config, outcome domain.Outcome, elapsed time.Durati
 	return elapsed >= notifyThreshold(cfg)
 }
 
+// notifySource is the run context a notification needs to be worth reading:
+// which repo and which branch the verdict is about.
+type notifySource interface {
+	Config() (domain.Config, error)
+	Repo() *git.Repo
+}
+
+// buildNotification composes the desktop notification for a finished run. The
+// verdict alone ("failed") is not enough to act on when it arrives minutes
+// later on a machine with several repos open: the title says which hook reached
+// which verdict, the subtitle scopes it to repo and branch, and the body
+// carries the actionable detail (which step, or what was pushed). Pure, so the
+// wording is unit-testable without a desktop.
+func buildNotification(res application.RunResult, repo, branch string) notify.Notification {
+	verdict := string(res.Outcome)
+	n := notify.Notification{
+		Title:  fmt.Sprintf("warden: %s %s", res.Hook, verdict),
+		Body:   res.Message,
+		Urgent: res.Outcome != domain.OutcomePassed,
+		Group:  "warden-" + repo,
+	}
+	switch {
+	case repo != "" && branch != "":
+		n.Subtitle = repo + " · " + branch
+	case repo != "":
+		n.Subtitle = repo
+	case branch != "":
+		n.Subtitle = branch
+	}
+	// A bare "passed" says nothing about what stands behind it; name the checks,
+	// the same way the terminal lines now do.
+	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
+		n.Body = fmt.Sprintf("%s (%s)", n.Body, domain.JoinSteps(res.Policy.Steps))
+	}
+	if n.Body == "" {
+		n.Body = verdict
+	}
+	return n
+}
+
 // maybeNotify fires a desktop notification with the run's verdict when the run
 // was long enough to have lost the developer's attention (see shouldNotify), so
 // someone who tabbed away during a long pre-push learns the outcome — without
 // spamming a notification after every fast gate.
-func maybeNotify(svc interface{ Config() (domain.Config, error) }, res application.RunResult, elapsed time.Duration) {
+func maybeNotify(svc notifySource, res application.RunResult, elapsed time.Duration) {
 	cfg, err := svc.Config()
 	if err != nil {
 		return
@@ -243,11 +285,14 @@ func maybeNotify(svc interface{ Config() (domain.Config, error) }, res applicati
 	if !shouldNotify(cfg, res.Outcome, elapsed) {
 		return
 	}
-	title := "warden: passed"
-	if res.Outcome != domain.OutcomePassed {
-		title = "warden: " + string(res.Outcome)
+	// Repo/branch are context, not correctness: a failure to read either costs
+	// the subtitle, never the notification.
+	var repo, branch string
+	if r := svc.Repo(); r != nil {
+		repo = filepath.Base(r.Dir)
+		branch, _ = r.CurrentBranch()
 	}
-	notify.Send(title, res.Message)
+	notify.Send(buildNotification(res, repo, branch))
 }
 
 // preCommitReporter is the slice of the service a finished pre-commit needs:
