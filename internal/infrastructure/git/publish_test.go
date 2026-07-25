@@ -141,7 +141,7 @@ func TestPushAndNotesRoundTrip(t *testing.T) {
 
 	// Push a fresh branch so Push's own code path is exercised.
 	gitRun(t, dir, "branch", "feature", "main")
-	if err := repo.Push("origin", "feature"); err != nil {
+	if err := repo.Push("origin", "feature", domain.ForceNever); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 	if got := gitRev(t, bare, "refs/heads/feature"); got != sha {

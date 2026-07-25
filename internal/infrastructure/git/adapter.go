@@ -47,7 +47,12 @@ func (a *Adapter) SeedWorktreeFromBranch(branch string, materializeDeps bool) (a
 func (a *Adapter) FastForwardTo(branch, sha, expectedTip string) error {
 	return a.repo.FastForwardTo(branch, sha, expectedTip)
 }
-func (a *Adapter) Push(remote, branch string) error { return a.repo.Push(remote, branch) }
+func (a *Adapter) Push(remote, branch string, force domain.PushForce) error {
+	return a.repo.Push(remote, branch, force)
+}
+func (a *Adapter) PushRewritesHistory(remote, branch string) (bool, error) {
+	return a.repo.PushRewritesHistory(remote, branch)
+}
 func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 	return a.repo.WriteNote(sha, rec)
 }

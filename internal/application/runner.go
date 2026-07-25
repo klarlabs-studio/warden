@@ -91,7 +91,7 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 	case domain.PreCommit:
 		return r.runPreCommit(ctx, resolved, branch, diff)
 	case domain.PrePush:
-		return r.runPrePush(ctx, resolved, branch, diff, cfg.PR)
+		return r.runPrePush(ctx, resolved, branch, diff, cfg)
 	default:
 		return RunResult{}, fmt.Errorf("unsupported hook %q", hook)
 	}
@@ -150,9 +150,46 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	return r.result(run, patch), nil
 }
 
+// ErrPushRewritesHistory is returned when a push would discard commits the
+// remote has and the repo's policy forbids rewriting (push.force: never).
+var ErrPushRewritesHistory = errors.New("push would rewrite the remote branch's history")
+
+// pushForce decides how to push a branch whose history may no longer
+// fast-forward from the remote — the ordinary result of rebasing onto an
+// updated base.
+//
+// Warden performs the push itself, so git's pre-push hook is handed no signal
+// that the developer typed --force and a plain push fails as non-fast-forward
+// regardless. The rewrite therefore has to be detected (the remote tip is not
+// an ancestor of ours) and decided by policy rather than inherited from the
+// command line.
+//
+// A fast-forward never forces, whatever the policy says: the force flag is
+// reserved for the case that actually needs it, so an ordinary push carries no
+// extra power. When a rewrite IS needed and policy forbids it, the run fails
+// with a message naming the knob — the alternative the developer would
+// otherwise reach for is `git push --no-verify`, which skips the gate and
+// writes no provenance at all.
+func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, error) {
+	rewrites, err := r.Git.PushRewritesHistory(r.Settings.Remote, branch)
+	if err != nil || !rewrites {
+		// An unreadable ancestry is not a license to force: fall back to the plain
+		// push and let git refuse it, as it would without warden.
+		return domain.ForceNever, nil
+	}
+	mode := cfg.PushForceMode()
+	if mode == domain.ForceNever {
+		return "", fmt.Errorf("%w: %s has been rebased or amended, and this repo sets push.force: never. "+
+			"Rewrite it deliberately (git push --force-with-lease) or allow it with push.force: lease in .warden.yaml",
+			ErrPushRewritesHistory, branch)
+	}
+	return mode, nil
+}
+
 // runPrePush runs the full pipeline in a worktree cloned from the branch tip,
 // then fast-forwards back and pushes on approval (§4.3).
-func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, prCfg domain.PRConfig) (RunResult, error) {
+func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, cfg domain.Config) (RunResult, error) {
+	prCfg := cfg.PR
 	seedTip, err := r.Git.HeadSHA()
 	if err != nil {
 		return RunResult{}, err
@@ -176,7 +213,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		if err := r.Git.FastForwardTo(branch, finalSHA, seedTip); err != nil {
 			return domain.StepResult{}, fmt.Errorf("%w: %v", ErrBranchMoved, err)
 		}
-		if err := r.Git.Push(r.Settings.Remote, branch); err != nil {
+		force, err := r.pushForce(cfg, branch)
+		if err != nil {
+			return domain.StepResult{}, err
+		}
+		if err := r.Git.Push(r.Settings.Remote, branch, force); err != nil {
 			return domain.StepResult{}, fmt.Errorf("push: %w", err)
 		}
 		return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil

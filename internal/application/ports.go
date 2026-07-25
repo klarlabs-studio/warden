@@ -36,7 +36,13 @@ type Git interface {
 	// FastForwardTo advances branch to sha only if branch still points at
 	// expectedTip, else returns a branch-moved error (the mid-run guard).
 	FastForwardTo(branch, sha, expectedTip string) error
-	Push(remote, branch string) error
+	// Push publishes branch to remote. force selects how a branch whose history
+	// no longer fast-forwards is handled — warden owns the push, so git's own
+	// --force flag never reaches it (see domain.PushForce).
+	Push(remote, branch string, force domain.PushForce) error
+	// PushRewritesHistory reports whether pushing branch would discard commits
+	// the remote has, i.e. whether a force is needed at all.
+	PushRewritesHistory(remote, branch string) (bool, error)
 	WriteNote(sha string, rec domain.RunRecord) error
 	PushNotes(remote string) error
 }

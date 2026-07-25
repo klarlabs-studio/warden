@@ -60,9 +60,54 @@ func (r *Repo) ApplyPatch(patch string) error {
 // itself only after its own pipeline has already validated the change, so the
 // pre-push hook must be bypassed — otherwise the push would re-trigger Warden
 // and recurse indefinitely (§4.3).
-func (r *Repo) Push(remote, branch string) error {
-	_, err := r.run("push", "--no-verify", remote, branch)
+func (r *Repo) Push(remote, branch string, force domain.PushForce) error {
+	args := []string{"push", "--no-verify"}
+	// A rewrite needs an explicit force, because warden owns the push: git's
+	// pre-push hook is told nothing about the developer's --force flag, so a
+	// plain push here fails as non-fast-forward no matter what they typed.
+	if force == domain.ForceLease {
+		if lease, err := r.remoteTrackingSHA(remote, branch); err == nil && lease != "" {
+			// Pin the lease to the REMOTE-TRACKING ref — what this clone last
+			// fetched — not to the remote's live value. Pinning to the live value
+			// would make the lease vacuously true and degrade it to a bare --force,
+			// discarding exactly the protection it exists for: a commit someone
+			// else pushed since our last fetch must invalidate the rewrite.
+			args = append(args, "--force-with-lease="+branch+":"+lease)
+		}
+	}
+	_, err := r.run(append(args, remote, branch)...)
 	return err
+}
+
+// remoteTrackingSHA returns this clone's last-fetched value for remote/branch,
+// or "" when no such ref exists (a branch that has never been pushed).
+func (r *Repo) remoteTrackingSHA(remote, branch string) (string, error) {
+	out, err := r.run("rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+branch)
+	if err != nil {
+		return "", nil // absent tracking ref is a clean miss, not a failure
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// PushRewritesHistory reports whether pushing branch to remote would discard
+// commits the remote currently has — i.e. the remote tip is not an ancestor of
+// the local tip. That is the signal warden uses in place of the --force flag it
+// never sees. A branch with no remote-tracking ref (never pushed) rewrites
+// nothing. Errors resolve to false: warden must not force on a guess.
+func (r *Repo) PushRewritesHistory(remote, branch string) (bool, error) {
+	remoteTip, err := r.remoteTrackingSHA(remote, branch)
+	if err != nil || remoteTip == "" {
+		return false, err
+	}
+	local, err := r.run("rev-parse", "--verify", branch)
+	if err != nil {
+		return false, err
+	}
+	// Exit 0 means remoteTip is an ancestor of local: an ordinary fast-forward.
+	if _, err := r.run("merge-base", "--is-ancestor", remoteTip, strings.TrimSpace(local)); err != nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 // WriteNote attaches rec as JSON to commit sha under refs/notes/warden. The -f
