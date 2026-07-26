@@ -1,0 +1,49 @@
+# TEMPORARY diagnostic. Delete with the branch.
+#
+# The tap push 403s and the three plausible causes need different fixes:
+# wrong resource owner (re-mint), Contents:Read (edit), or a stale token
+# string in the secret (re-paste). This distinguishes them without anyone
+# handling the token: it runs inside Actions, where the secret is already
+# available, and prints only booleans. GitHub masks secret values in logs,
+# and none of the API responses echoed here contain the credential.
+name: Tap token probe
+on:
+  push:
+    branches: ["chore/tap-token-probe"]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe tap credential capability
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "VERDICT: secret is EMPTY — not readable by this repo"
+            exit 0
+          fi
+          echo "secret is present (length hidden)"
+
+          code=$(curl -sS -o /tmp/repo.json -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/felixgeelhaar/homebrew-tap)
+          echo "GET /repos/felixgeelhaar/homebrew-tap -> HTTP $code"
+
+          if [ "$code" = "404" ]; then
+            echo "VERDICT: token CANNOT SEE the tap — wrong resource owner. Not fixable by editing; re-mint under felixgeelhaar."
+            exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "VERDICT: unexpected status $code"
+            jq -r '.message // "no message"' /tmp/repo.json
+            exit 0
+          fi
+
+          push=$(jq -r '.permissions.push // "absent"' /tmp/repo.json)
+          echo "permissions.push = $push"
+          if [ "$push" = "true" ]; then
+            echo "VERDICT: token CAN WRITE. The 403 then means the org secret holds a DIFFERENT/OLDER token string — re-paste it."
+          else
+            echo "VERDICT: token sees the repo but CANNOT WRITE — Contents is Read, not Read and write. Editable."
+          fi
