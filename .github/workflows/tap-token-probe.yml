@@ -40,10 +40,26 @@ jobs:
             exit 0
           fi
 
-          push=$(jq -r '.permissions.push // "absent"' /tmp/repo.json)
-          echo "permissions.push = $push"
-          if [ "$push" = "true" ]; then
-            echo "VERDICT: token CAN WRITE. The 403 then means the org secret holds a DIFFERENT/OLDER token string — re-paste it."
-          else
-            echo "VERDICT: token sees the repo but CANNOT WRITE — Contents is Read, not Read and write. Editable."
-          fi
+          # .permissions reflects what the ACCOUNT can do, not what this TOKEN
+          # is granted -- a Contents:Read fine-grained PAT still reports
+          # push=true here. So probe the write path directly, with a request
+          # that cannot modify anything: PUT an existing file with a
+          # deliberately wrong blob sha.
+          #   403 -> no write grant (Contents is Read, or repo not selected)
+          #   409/422 -> write IS granted; only the sha was rejected
+          sha=$(jq -r '.sha' /tmp/repo.json >/dev/null 2>&1; echo "0000000000000000000000000000000000000000")
+          body=$(printf '{"message":"probe (never applied)","content":"cHJvYmU=","sha":"%s"}' "$sha")
+          wcode=$(curl -sS -o /tmp/w.json -w '%{http_code}' -X PUT \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -d "$body" \
+            https://api.github.com/repos/felixgeelhaar/homebrew-tap/contents/Casks/warden.rb)
+          echo "PUT (intentionally-bad sha) -> HTTP $wcode"
+          jq -r '.message // "no message"' /tmp/w.json
+
+          case "$wcode" in
+            403) echo "VERDICT: NO WRITE GRANT. Contents is Read, or the tap is not in the token's selected repositories." ;;
+            409|422) echo "VERDICT: WRITE IS GRANTED (only the sha was rejected). The 403 in goreleaser then means the org secret holds a DIFFERENT token string -- re-paste it." ;;
+            200|201) echo "VERDICT: WRITE GRANTED and the file was MODIFIED -- unexpected, check the tap." ;;
+            *) echo "VERDICT: unexpected status $wcode" ;;
+          esac
