@@ -51,11 +51,16 @@ npx @klarlabs-studio/warden init
 curl -fsSL https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.sh | sh
 
 # Homebrew
-brew install felixgeelhaar/tap/warden
+brew trust klarlabs-studio/tap        # first time only
+brew install --cask klarlabs-studio/tap/warden
 
 # Go devs
 go install go.klarlabs.de/warden@latest   # or: go run go.klarlabs.de/warden@latest init
 ```
+
+Homebrew refuses to load a cask from a third-party tap it has not been told
+to trust, so the first install of anything from this tap needs
+`brew trust klarlabs-studio/tap` once — per machine, not per tool.
 
 On Windows: `irm https://raw.githubusercontent.com/klarlabs-studio/warden/main/scripts/install.ps1 | iex`.
 
