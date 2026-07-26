@@ -6,6 +6,44 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-07-26
+
+No user-facing change. warden behaves identically to 0.20.0; this release
+exists to carry internal quality and release-plumbing work, and to prove the
+rotated Homebrew tap credential end to end after 0.19.0 shipped with a 401 and
+0.20.0 with a 403.
+
+### Changed
+
+- **Adopted the two linters warden was missing** from the org's golden
+  `golangci.reference.yml`, `errcheck` and `unparam` (#121). 54 findings, no
+  bugs — the one that looked dangerous, an unchecked `f.Close` after a write in
+  `writeTarFile`, was already correct because the function returns a checked
+  `f.Close`. 46 unchecked returns are now explicit at the call site rather than
+  suppressed by configuration.
+- **`remoteTrackingSHA` no longer claims a failure mode it does not have.** It
+  returned `(string, error)` with an error that was always nil, so two callers
+  carried conditions that could never be false and a `return false, err` that
+  could only return nil. It returns a plain string now. Behaviour is unchanged;
+  the signature stops lying about it. Similarly `runStdin` returned combined
+  output no caller read, and `exitForBlocker` took a parameter every call site
+  set to `1`.
+- **The scanner version-drift check now resolves the central nox pin** (#119).
+  warden's nox version is pinned once in the shared reusable workflow, so
+  scanning this repo for a pin found nothing and the check was silently inert
+  here. `security_scan.pin_file` names where that pin lives.
+- **The release workflow reads the tap credential from an org secret** (#122).
+  The same credential previously lived under three names across the repos
+  publishing to the tap, so rotating it meant updating all of them and missing
+  one stayed silent until that repo's next release.
+
+### Documentation
+
+- **Closed the 0.18.x gap in this changelog** (#120). Seventeen released
+  versions had no entry, so the history read as truncated between 0.19.0 and
+  0.17.0. They were all npm OIDC trusted-publishing iteration plus two
+  dependency bumps — recorded as one entry rather than seventeen empty ones.
+
 ## [0.20.0] — 2026-07-25
 
 ### Fixed
