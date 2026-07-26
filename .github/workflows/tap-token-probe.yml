@@ -1,0 +1,26 @@
+# TEMPORARY. Deleted with the branch.
+name: Tap token probe
+on:
+  push:
+    branches: ["chore/tap-token-probe"]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Can the tap credential write?
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          # Write-path probe with a deliberately wrong blob sha: it cannot
+          # modify anything. 403 = no write grant, 409/422 = write granted.
+          w=$(curl -sS -o /tmp/w.json -w '%{http_code}' -X PUT \
+            -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            -d '{"message":"probe (never applied)","content":"cHJvYmU=","sha":"0000000000000000000000000000000000000000"}' \
+            https://api.github.com/repos/felixgeelhaar/homebrew-tap/contents/Casks/warden.rb)
+          echo "PUT -> HTTP $w : $(jq -r '.message // "-"' /tmp/w.json)"
+          case "$w" in
+            403) echo "VERDICT: STILL NO WRITE GRANT — Contents is still Read." ;;
+            409|422) echo "VERDICT: WRITE GRANTED — token is fixed, safe to re-drive the release." ;;
+            *) echo "VERDICT: unexpected $w" ;;
+          esac
