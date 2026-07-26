@@ -58,6 +58,14 @@ release:
   github:
     owner: klarlabs-studio
     name: warden
+  # Make a re-drive idempotent. release.yml has workflow_dispatch specifically
+  # so a release whose brew push failed can be re-run without re-tagging -- but
+  # with the default mode goreleaser re-uploads every asset and dies on
+  # `422 already_exists` BEFORE reaching the homebrew step, so the recovery path
+  # could never actually recover. It failed exactly that way on v0.20.1, and
+  # unblocking it meant deleting nine assets by hand, which is the manual
+  # tap-fixing the dispatch trigger exists to avoid.
+  mode: replace
 
 homebrew_casks:
   - repository:
