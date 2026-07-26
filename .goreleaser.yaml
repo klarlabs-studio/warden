@@ -60,12 +60,19 @@ release:
     name: warden
   # Make a re-drive idempotent. release.yml has workflow_dispatch specifically
   # so a release whose brew push failed can be re-run without re-tagging -- but
-  # with the default mode goreleaser re-uploads every asset and dies on
-  # `422 already_exists` BEFORE reaching the homebrew step, so the recovery path
-  # could never actually recover. It failed exactly that way on v0.20.1, and
-  # unblocking it meant deleting nine assets by hand, which is the manual
-  # tap-fixing the dispatch trigger exists to avoid.
+  # by default goreleaser re-uploads every asset and dies on `422 already_exists`
+  # BEFORE reaching the homebrew step, so the recovery path could never actually
+  # recover. It failed exactly that way on v0.20.1, and unblocking it meant
+  # deleting nine assets by hand -- the manual tap-fixing the dispatch trigger
+  # exists to avoid.
+  #
+  # These are two different settings and only the second one does that job:
+  # `mode` governs the release NOTES (keep-existing/append/prepend/replace),
+  # while `replace_existing_artifacts` governs the uploaded ASSETS. Setting only
+  # `mode: replace` left the artifact behaviour at its default, so the v0.20.2
+  # re-drive failed identically to v0.20.1 -- the same 422, on every asset.
   mode: replace
+  replace_existing_artifacts: true
 
 homebrew_casks:
   # The cask belongs to the tap owned by the org that owns this repo, which

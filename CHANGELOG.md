@@ -6,6 +6,19 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A re-driven release now actually replaces its artifacts.** 0.20.2 claimed
+  #125 had made the re-drive idempotent. It had not: `release.mode` governs the
+  release *notes* (`keep-existing`/`append`/`prepend`/`replace`), while the
+  uploaded *assets* are governed by a separate `replace_existing_artifacts`
+  key. Only the first was set, so the v0.20.2 re-drive failed identically to
+  v0.20.1 — `422 already_exists` on every asset, before reaching the homebrew
+  step it was re-driven for. Both keys are set now.
+
+  The claim in 0.20.2 below is left as written rather than rewritten, since it
+  describes what was believed at the time; this entry is the correction.
+
 ## [0.20.2] — 2026-07-26
 
 Fixes a gate deadlock that could make a branch unpushable through warden, and
