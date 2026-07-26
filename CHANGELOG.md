@@ -6,6 +6,64 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.2] — 2026-07-26
+
+Fixes a gate deadlock that could make a branch unpushable through warden, and
+completes the tap move 0.20.1 was cutting the ground for.
+
+### Fixed
+
+- **The push guard no longer refuses your own rebased commit** (#127). A branch
+  that went `BEHIND`, was replayed by warden's own pre-push `rebase` step, and
+  then pushed could be refused as *"push would discard commits that exist only
+  on the remote"* — naming a commit you wrote. The advice it printed, `git pull
+  --rebase`, could not help: the next push rebases again and reproduces the
+  divergence, so the branch became unpushable and the only way out was `git push
+  --no-verify`, a bypass with no provenance — the precise outcome
+  `push.force: lease` exists to prevent.
+
+  The guard asked `git cherry` whether the remote's copy had a patch-equivalent
+  locally. patch-id ignores hunk line numbers but **not** the context lines
+  quoted around a hunk, so a base commit editing anything within three lines of
+  your change moves the patch-id while leaving the change itself untouched.
+  Adjacent edits are ordinary, so this fired often rather than rarely — #125,
+  landing directly above the cask block, is what triggered it here.
+
+  When patch-id cannot match, a commit is now treated as yours to replace only
+  if it was once reachable from this branch locally (its reflog) **and** is
+  committed by you. Either test alone is too generous: the reflog would let a
+  colleague's commit be discarded after you pulled it in and dropped it during
+  an interactive rebase, and the identity says nothing about whether the commit
+  was ever on this branch. Anything unreadable — no reflog, no configured
+  identity — leaves the commit reported, because refusing to force is the safe
+  direction.
+
+  The pre-existing test for this path rebased an **empty** commit, whose
+  patch-id cannot diverge, so it passed either way. The new one rebases a real
+  change across an insertion inside its context window, and asserts the
+  patch-ids actually diverge so the scenario cannot silently stop reproducing.
+
+- **A re-driven release no longer dies before it reaches the step it was
+  re-driven for** (#125). `release.yml` has `workflow_dispatch` precisely so a
+  release whose brew push failed can be re-run without re-tagging, but with
+  goreleaser's default mode every asset was re-uploaded and the run died on
+  `422 already_exists` before reaching the homebrew step — so the recovery path
+  could never recover. `release.mode: replace` makes it idempotent. Note the npm
+  job is still not: it refuses with *"cannot publish over the previously
+  published versions"*, which is correct for a re-drive and harmless, but it
+  means a re-driven run still ends red.
+
+### Changed
+
+- **The cask publishes to `klarlabs-studio/homebrew-tap`** (#126). warden is a
+  klarlabs-studio repo and the tap credential is a klarlabs-studio org secret,
+  but the cask was published to a personal tap that secret cannot reach. That is
+  the other half of the history recorded in 0.20.1: consolidating onto one org
+  secret fixed the credential living under three names, and left the
+  *destination* outside the credential's scope. Existing
+  `brew install felixgeelhaar/tap/warden` users are carried over by a
+  `tap_migrations.json` entry in the old tap.
+
 ## [0.20.1] — 2026-07-26
 
 No user-facing change. warden behaves identically to 0.20.0; this release
