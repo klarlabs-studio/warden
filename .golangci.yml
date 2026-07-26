@@ -13,6 +13,8 @@ linters:
     - gocritic
     - unconvert
     - unused
+    - errcheck
+    - unparam
   settings:
     misspell:
       locale: US

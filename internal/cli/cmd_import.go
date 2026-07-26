@@ -32,20 +32,20 @@ func cmdImport(args []string, stdout, stderr io.Writer) int {
 	}
 
 	for _, note := range notes {
-		fmt.Fprintf(stdout, "- %s\n", note)
+		_, _ = fmt.Fprintf(stdout, "- %s\n", note)
 	}
 
 	if len(cfg.Commands) == 0 {
 		return 0
 	}
 
-	fmt.Fprintln(stdout, "\ndetected commands:")
+	_, _ = fmt.Fprintln(stdout, "\ndetected commands:")
 	for _, name := range sortedKeys(cfg.Commands) {
-		fmt.Fprintf(stdout, "  %-14s %s\n", name, cfg.Commands[name])
+		_, _ = fmt.Fprintf(stdout, "  %-14s %s\n", name, cfg.Commands[name])
 	}
 
 	if *write {
-		fmt.Fprintln(stdout, "\nwrote .warden.yaml")
+		_, _ = fmt.Fprintln(stdout, "\nwrote .warden.yaml")
 		return 0
 	}
 
@@ -54,7 +54,7 @@ func cmdImport(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "\nwould write .warden.yaml (re-run with --write to save):\n\n%s", data)
+	_, _ = fmt.Fprintf(stdout, "\nwould write .warden.yaml (re-run with --write to save):\n\n%s", data)
 	return 0
 }
 

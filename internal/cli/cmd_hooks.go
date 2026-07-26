@@ -10,7 +10,7 @@ import (
 // cmdHooks handles `warden hooks enable|disable <hook>`.
 func cmdHooks(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 2 {
-		fmt.Fprintln(stderr, "usage: warden hooks enable|disable <pre-commit|pre-push>")
+		_, _ = fmt.Fprintln(stderr, "usage: warden hooks enable|disable <pre-commit|pre-push>")
 		return 2
 	}
 	action := args[0]
@@ -26,7 +26,7 @@ func cmdHooks(args []string, stdout, stderr io.Writer) int {
 	case "disable":
 		enabled = false
 	default:
-		fmt.Fprintf(stderr, "warden: unknown action %q (want enable or disable)\n", action)
+		_, _ = fmt.Fprintf(stderr, "warden: unknown action %q (want enable or disable)\n", action)
 		return 2
 	}
 
@@ -37,6 +37,6 @@ func cmdHooks(args []string, stdout, stderr io.Writer) int {
 	if err := svc.SetHook(hook, enabled); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "warden: %s %sd\n", hook, action)
+	_, _ = fmt.Fprintf(stdout, "warden: %s %sd\n", hook, action)
 	return 0
 }

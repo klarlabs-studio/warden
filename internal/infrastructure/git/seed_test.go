@@ -54,7 +54,7 @@ func TestCreateWorktreeFromHead_TrailingBlankContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeding must not corrupt the staged patch: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// The worktree must carry the staged edits.
 	got, err := os.ReadFile(filepath.Join(wt.Dir, "f.txt"))
@@ -102,7 +102,7 @@ func TestCreateWorktreeFromHead_StagedBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeding a staged binary file must succeed: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	got, err := os.ReadFile(filepath.Join(wt.Dir, "logo.png"))
 	if err != nil {
@@ -161,7 +161,7 @@ func TestCreateWorktree_LinksNodeModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	for _, nm := range []string{"node_modules", filepath.Join("web", "node_modules")} {
 		// The default exposes deps as a symlink (fast, O(1)).
@@ -222,7 +222,7 @@ func TestCreateWorktree_MaterializesNodeModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// node_modules must be a real directory, NOT a symlink.
 	fi, err := os.Lstat(filepath.Join(wt.Dir, "node_modules"))
@@ -303,7 +303,7 @@ func TestCreateWorktree_ExposesSymlinkedNodeModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// The deps must be reachable through the disposable worktree even though the
 	// source node_modules was a symlink.
@@ -343,7 +343,7 @@ func TestWorktree_Clone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorktreeFromHead: %v", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Simulate a prior barrier mutating the canonical worktree (uncommitted).
 	if err := os.WriteFile(filepath.Join(wt.Dir, "committed.txt"), []byte("v2-modified\n"), 0o644); err != nil {

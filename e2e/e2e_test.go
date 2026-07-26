@@ -44,11 +44,11 @@ func TestMain(m *testing.M) {
 	build := exec.Command("go", "build", "-o", wardenBin, ".")
 	build.Dir = ".." // repo root
 	if out, err := build.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		panic("build warden: " + err.Error() + "\n" + string(out))
 	}
 	code := m.Run()
-	os.RemoveAll(dir) // os.Exit skips defers, so clean up explicitly
+	_ = os.RemoveAll(dir) // os.Exit skips defers, so clean up explicitly
 	os.Exit(code)
 }
 
@@ -287,7 +287,7 @@ func TestE2E_PrePushSkipsNonBranchPush(t *testing.T) {
 
 func TestE2E_DoctorDetectsBypass(t *testing.T) {
 	remote := t.TempDir()
-	exec.Command("git", "init", "--bare", remote).Run()
+	_ = exec.Command("git", "init", "--bare", remote).Run()
 	h := newHarness(t)
 	h.git("remote", "add", "origin", remote)
 	h.write("a.txt", "hello\n")

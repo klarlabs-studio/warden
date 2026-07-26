@@ -14,7 +14,7 @@ import (
 // misconfigured rule silently gutting the gate (§5.2).
 func cmdPolicy(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 || args[0] != "explain" {
-		fmt.Fprintln(stderr, "usage: warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]")
+		_, _ = fmt.Fprintln(stderr, "usage: warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]")
 		return 2
 	}
 
@@ -47,7 +47,7 @@ func cmdPolicy(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(stderr, err)
 		}
-		fmt.Fprintln(stdout, chart)
+		_, _ = fmt.Fprintln(stdout, chart)
 		return 0
 	}
 
@@ -56,50 +56,50 @@ func cmdPolicy(args []string, stdout, stderr io.Writer) int {
 }
 
 func printPolicy(w io.Writer, p domain.ResolvedPolicy) {
-	fmt.Fprintf(w, "hook:            %s\n", p.Hook)
-	fmt.Fprintf(w, "risk:            %s\n", p.Risk)
-	fmt.Fprintf(w, "require_approval: %v\n", p.RequireApproval)
-	fmt.Fprintf(w, "steps:          ")
+	_, _ = fmt.Fprintf(w, "hook:            %s\n", p.Hook)
+	_, _ = fmt.Fprintf(w, "risk:            %s\n", p.Risk)
+	_, _ = fmt.Fprintf(w, "require_approval: %v\n", p.RequireApproval)
+	_, _ = fmt.Fprintf(w, "steps:          ")
 	for _, s := range p.Steps {
-		fmt.Fprintf(w, " %s", s)
+		_, _ = fmt.Fprintf(w, " %s", s)
 		if a := p.AgentFor(s); a != "" {
-			fmt.Fprintf(w, "(agent=%s)", a)
+			_, _ = fmt.Fprintf(w, "(agent=%s)", a)
 		}
 		if b := p.AutoFixBudget(s); b > 0 {
-			fmt.Fprintf(w, "(auto_fix=%d)", b)
+			_, _ = fmt.Fprintf(w, "(auto_fix=%d)", b)
 		}
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Schedule: show which steps run concurrently vs. as sequential barriers, so
 	// the effect of `parallel` and auto-fix budgets is visible.
-	fmt.Fprintf(w, "schedule:       ")
+	_, _ = fmt.Fprintf(w, "schedule:       ")
 	for i, batch := range p.Batches() {
 		if i > 0 {
-			fmt.Fprintf(w, " → ")
+			_, _ = fmt.Fprintf(w, " → ")
 		}
 		if len(batch) == 1 {
-			fmt.Fprintf(w, "%s", batch[0])
+			_, _ = fmt.Fprintf(w, "%s", batch[0])
 			continue
 		}
-		fmt.Fprintf(w, "[")
+		_, _ = fmt.Fprintf(w, "[")
 		for j, s := range batch {
 			if j > 0 {
-				fmt.Fprintf(w, " ∥ ")
+				_, _ = fmt.Fprintf(w, " ∥ ")
 			}
-			fmt.Fprintf(w, "%s", s)
+			_, _ = fmt.Fprintf(w, "%s", s)
 		}
-		fmt.Fprintf(w, "]")
+		_, _ = fmt.Fprintf(w, "]")
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	if len(p.MatchedRules) > 0 {
-		fmt.Fprintf(w, "matched rules:  ")
+		_, _ = fmt.Fprintf(w, "matched rules:  ")
 		for _, r := range p.MatchedRules {
-			fmt.Fprintf(w, " [%s]", r)
+			_, _ = fmt.Fprintf(w, " [%s]", r)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	} else {
-		fmt.Fprintln(w, "matched rules:   (none)")
+		_, _ = fmt.Fprintln(w, "matched rules:   (none)")
 	}
 }

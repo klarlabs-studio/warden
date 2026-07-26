@@ -52,7 +52,7 @@ func TestRun_ProgramLoopDrivesToCompletion(t *testing.T) {
 	// A blocking input reader (never written) keeps bubbletea from EOF-quitting
 	// before the run finishes; output is captured for assertion.
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	var out bytes.Buffer
 
 	done := make(chan application.RunResult, 1)

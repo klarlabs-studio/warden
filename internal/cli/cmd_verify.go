@@ -52,7 +52,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 
 	if !*quiet {
 		if fromRoster {
-			fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
+			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
 		}
 		printVerify(stdout, res, len(trusted) > 0)
 	}
@@ -94,7 +94,7 @@ func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fr
 func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, skipMerges, jsonOut, quiet bool, stdout, stderr io.Writer) int {
 	base, head, ok := parseRange(spec)
 	if !ok {
-		fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
+		_, _ = fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
 		return 2
 	}
 	opts := service.RangeVerifyOptions{
@@ -112,7 +112,7 @@ func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, s
 	}
 	if !quiet {
 		if res.RosterFromBase && !jsonOut {
-			fmt.Fprintf(stdout, "warden: requiring a trusted signer from %s:.warden.yaml (%d key(s))\n", base, len(res.Effective.TrustedKeys))
+			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from %s:.warden.yaml (%d key(s))\n", base, len(res.Effective.TrustedKeys))
 		}
 		if jsonOut {
 			if code := printRangeJSON(stdout, stderr, res); code != 0 {
@@ -146,28 +146,28 @@ func parseRange(spec string) (base, head string, ok bool) {
 // printVerify renders a verify result, including signature provenance.
 func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 	if res.Validated {
-		fmt.Fprintf(w, "validated %s", short(res.SHA))
+		_, _ = fmt.Fprintf(w, "validated %s", short(res.SHA))
 		if res.Record != nil {
-			fmt.Fprintf(w, " (%s, %d steps, chain-intact", res.Record.RunID, len(res.Record.StepsRun))
-			fmt.Fprintf(w, "%s)", signerNote(res))
+			_, _ = fmt.Fprintf(w, " (%s, %d steps, chain-intact", res.Record.RunID, len(res.Record.StepsRun))
+			_, _ = fmt.Fprintf(w, "%s)", signerNote(res))
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 		return
 	}
 	// Give a specific reason when a pinned key is what failed.
 	if pinned && res.Signed && res.SignatureValid && !res.Trusted {
-		fmt.Fprintf(w, "unverified %s — signed by untrusted key %s; run the checks\n", short(res.SHA), res.Signer)
+		_, _ = fmt.Fprintf(w, "unverified %s — signed by untrusted key %s; run the checks\n", short(res.SHA), res.Signer)
 		return
 	}
 	if pinned && res.Signed && !res.SignatureValid {
-		fmt.Fprintf(w, "unverified %s — signature does not verify; run the checks\n", short(res.SHA))
+		_, _ = fmt.Fprintf(w, "unverified %s — signature does not verify; run the checks\n", short(res.SHA))
 		return
 	}
 	if pinned && !res.Signed {
-		fmt.Fprintf(w, "unverified %s — note is unsigned but a trusted key was required; run the checks\n", short(res.SHA))
+		_, _ = fmt.Fprintf(w, "unverified %s — note is unsigned but a trusted key was required; run the checks\n", short(res.SHA))
 		return
 	}
-	fmt.Fprintf(w, "unverified %s — no intact warden note; run the checks\n", short(res.SHA))
+	_, _ = fmt.Fprintf(w, "unverified %s — no intact warden note; run the checks\n", short(res.SHA))
 }
 
 // gateDepth names, for the human summary, how strict this gate was — so a green
@@ -218,19 +218,19 @@ func countCovered(res service.RangeVerifyResult) int {
 func printRange(w io.Writer, res service.RangeVerifyResult) {
 	fails := res.Failures()
 	for _, v := range fails {
-		fmt.Fprintf(w, "  ✗ %s — %s\n", short(v.SHA), reasonHint(v.Reason))
+		_, _ = fmt.Fprintf(w, "  ✗ %s — %s\n", short(v.SHA), reasonHint(v.Reason))
 	}
 	if len(fails) == 0 {
-		fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
+		_, _ = fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
 		// Say how many passed by span rather than by their own note, so a reader
 		// can tell "individually attested" from "published by a gated push" —
 		// green should not hide which claim is being made.
 		if n := countCovered(res); n > 0 {
-			fmt.Fprintf(w, "  (%d covered by a gated push's signed span, not individually attested)\n", n)
+			_, _ = fmt.Fprintf(w, "  (%d covered by a gated push's signed span, not individually attested)\n", n)
 		}
 		return
 	}
-	fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
+	_, _ = fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
 }
 
 // rangeExport is the stable JSON shape a CI job or the Phase-2 action consumes.

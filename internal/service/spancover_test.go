@@ -9,8 +9,8 @@ import (
 
 // spanRecord builds a record that attests tip and claims the push span
 // (from, tip].
-func spanRecord(from, tip, runID string) domain.RunRecord {
-	rec := attestRecord(tip, runID)
+func spanRecord(from, tip string) domain.RunRecord {
+	rec := attestRecord(tip, "r1")
 	rec.CoversFrom = from
 	return rec
 }
@@ -39,7 +39,7 @@ func TestVerifyRange_SpanCoversTheRestOfThePush(t *testing.T) {
 	tip := commit(t, dir, svc, "C (the push tip)")
 
 	// One note, on the tip, claiming the span it published.
-	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(base, tip, "r1"))); err != nil {
+	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(base, tip))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,7 +76,7 @@ func TestVerifyRange_UntrustedSpanCoversNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Repo().WriteNote(tip, sign(t, spanRecord(base, tip, "r1"), pub, priv)); err != nil {
+	if err := svc.Repo().WriteNote(tip, sign(t, spanRecord(base, tip), pub, priv)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +104,7 @@ func TestVerifyRange_UnsignedSpanCoversNothingWhenSignatureRequired(t *testing.T
 	a := commit(t, dir, svc, "A")
 	tip := commit(t, dir, svc, "B (tip)")
 
-	if err := svc.Repo().WriteNote(tip, spanRecord(base, tip, "r1")); err != nil { // unsigned
+	if err := svc.Repo().WriteNote(tip, spanRecord(base, tip)); err != nil { // unsigned
 		t.Fatal(err)
 	}
 
@@ -139,7 +139,7 @@ func TestVerifyRange_SpanCannotReachUnrelatedHistory(t *testing.T) {
 
 	// Claim a span starting at the tip itself: (tip, tip] is empty, so nothing is
 	// covered however trusted the signer.
-	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(tip, tip, "r1"))); err != nil {
+	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(tip, tip))); err != nil {
 		t.Fatal(err)
 	}
 	res, err := svc.VerifyRange(base, tip, RangeVerifyOptions{RequireSigned: true})
@@ -164,7 +164,7 @@ func TestVerifyRange_CommitOutsideEverySpanStillFails(t *testing.T) {
 	if err := svc.Repo().WriteNote(spanStart, signAs(t, svc, attestRecord(spanStart, "r0"))); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(spanStart, tip, "r1"))); err != nil {
+	if err := svc.Repo().WriteNote(tip, signAs(t, svc, spanRecord(spanStart, tip))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,7 +213,7 @@ func TestRunRecord_SpanIsCoveredBySignature(t *testing.T) {
 	base := commit(t, dir, svc, "base")
 	tip := commit(t, dir, svc, "tip")
 
-	rec := signAs(t, svc, spanRecord(base, tip, "r1"))
+	rec := signAs(t, svc, spanRecord(base, tip))
 	if !rec.VerifySignature() {
 		t.Fatal("freshly signed record should verify")
 	}

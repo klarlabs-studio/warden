@@ -76,7 +76,7 @@ func (s AgentStep) invoke(ctx context.Context, command string, sc application.St
 		Timeout:     30 * time.Second,
 		ReadyToTrip: func(c circuitbreaker.Counts) bool { return c.ConsecutiveFailures >= 3 },
 	})
-	defer cb.Close()
+	defer func() { _ = cb.Close() }()
 	r := retry.New[string](retry.Config{
 		MaxAttempts:  3,
 		InitialDelay: 500 * time.Millisecond,

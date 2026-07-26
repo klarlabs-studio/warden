@@ -37,7 +37,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 }
 
 func printDoctor(w io.Writer, r domain.AuditReport) {
-	fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, short(r.Adoption))
+	_, _ = fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, short(r.Adoption))
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		switch {
@@ -46,23 +46,23 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 			if !c.ChainIntact {
 				state = "TAMPERED"
 			}
-			fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
+			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
 		case c.Reattestable():
 			// The content WAS gated — under the pre-squash commit id. Say which
 			// one, so the reader sees a recoverable binding gap rather than an
 			// unchecked commit.
-			fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
+			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.ReattestableFrom))
 		default:
-			fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (no warden note)\n",
+			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (no warden note)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
 	verified, intact, unverified := r.Counts()
-	fmt.Fprintf(w, "%d verified (%d chain-intact), %d unverified since adoption\n", verified, intact, unverified)
+	_, _ = fmt.Fprintf(w, "%d verified (%d chain-intact), %d unverified since adoption\n", verified, intact, unverified)
 	if n := len(r.Reattestable()); n > 0 {
-		fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
+		_, _ = fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
 			"  warden reattest --all --branch %s --push\n", n, unverified, r.Branch)
 	}
 }

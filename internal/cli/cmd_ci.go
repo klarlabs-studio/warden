@@ -42,7 +42,7 @@ func cmdCI(args []string, stdout, stderr io.Writer) int {
 			return ciExit(status.State)
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(stderr, "warden: timed out waiting for CI")
+			_, _ = fmt.Fprintln(stderr, "warden: timed out waiting for CI")
 			return 1
 		}
 		time.Sleep(10 * time.Second)
@@ -61,6 +61,6 @@ func ciExit(s domain.CIState) int {
 }
 
 func printCI(w io.Writer, s domain.CIStatus) {
-	fmt.Fprintf(w, "CI %s — %d checks: %d passed, %d failed, %d pending\n",
+	_, _ = fmt.Fprintf(w, "CI %s — %d checks: %d passed, %d failed, %d pending\n",
 		s.State, s.Total, s.Passed, s.Failed, s.Pending)
 }

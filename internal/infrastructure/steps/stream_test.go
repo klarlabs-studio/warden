@@ -16,9 +16,9 @@ func TestLineWriter_SplitsLinesAndFlushesPartial(t *testing.T) {
 	w := newLineWriter(func(l string) { got = append(got, l) })
 
 	// Lines can arrive split across writes; a line is emitted only once complete.
-	w.Write([]byte("hello\nwor"))
-	w.Write([]byte("ld\n"))
-	w.Write([]byte("partial")) // no newline yet — not emitted until Close
+	_, _ = w.Write([]byte("hello\nwor"))
+	_, _ = w.Write([]byte("ld\n"))
+	_, _ = w.Write([]byte("partial")) // no newline yet — not emitted until Close
 	if want := []string{"hello", "world"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("mid-stream lines = %v, want %v", got, want)
 	}

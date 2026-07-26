@@ -23,7 +23,7 @@ func TestExitForBlocker(t *testing.T) {
 		{domain.BlockerEnvironment, exitEnvironment},
 	}
 	for _, tc := range cases {
-		if got := exitForBlocker(tc.blocker, 1); got != tc.want {
+		if got := exitForBlocker(tc.blocker); got != tc.want {
 			t.Errorf("exitForBlocker(%q) = %d, want %d", tc.blocker, got, tc.want)
 		}
 	}

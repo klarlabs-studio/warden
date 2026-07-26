@@ -38,14 +38,14 @@ func cmdWatch(_ []string, stdout, stderr io.Writer) int {
 
 	cmds := watchCommands(cfg)
 	if len(cmds) == 0 {
-		fmt.Fprintln(stderr, "warden: no pre-commit commands configured to watch; add commands + steps.pre_commit")
+		_, _ = fmt.Fprintln(stderr, "warden: no pre-commit commands configured to watch; add commands + steps.pre_commit")
 		return 1
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	fmt.Fprintf(stdout, "warden: watching %s (ctrl+c to stop) — %d check(s)\n", dir, len(cmds))
+	_, _ = fmt.Fprintf(stdout, "warden: watching %s (ctrl+c to stop) — %d check(s)\n", dir, len(cmds))
 	runWatchChecks(ctx, stdout, dir, cmds) // run once up front
 
 	last := watch.Fingerprint(dir)
@@ -54,7 +54,7 @@ func cmdWatch(_ []string, stdout, stderr io.Writer) int {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(stdout, "\nwarden: watch stopped.")
+			_, _ = fmt.Fprintln(stdout, "\nwarden: watch stopped.")
 			return 0
 		case <-ticker.C:
 			if watch.Fingerprint(dir) != last {
@@ -93,7 +93,7 @@ func watchCommands(cfg domain.Config) []namedCommand {
 // runWatchChecks runs each command in dir and prints a pass/fail line with
 // timing. On failure it prints the command's output so the developer sees why.
 func runWatchChecks(ctx context.Context, w io.Writer, dir string, cmds []namedCommand) {
-	fmt.Fprintf(w, "\n── %s ──\n", time.Now().Format("15:04:05"))
+	_, _ = fmt.Fprintf(w, "\n── %s ──\n", time.Now().Format("15:04:05"))
 	for _, c := range cmds {
 		start := time.Now()
 		cmd := exec.CommandContext(ctx, "sh", "-c", c.command)
@@ -104,12 +104,12 @@ func runWatchChecks(ctx context.Context, w io.Writer, dir string, cmds []namedCo
 			if ctx.Err() != nil {
 				return // interrupted mid-check
 			}
-			fmt.Fprintf(w, "  ✗ %s (%.1fs)\n", c.step, elapsed)
+			_, _ = fmt.Fprintf(w, "  ✗ %s (%.1fs)\n", c.step, elapsed)
 			if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
-				fmt.Fprintf(w, "    %s\n", strings.ReplaceAll(trimmed, "\n", "\n    "))
+				_, _ = fmt.Fprintf(w, "    %s\n", strings.ReplaceAll(trimmed, "\n", "\n    "))
 			}
 			continue
 		}
-		fmt.Fprintf(w, "  ✓ %s (%.1fs)\n", c.step, elapsed)
+		_, _ = fmt.Fprintf(w, "  ✓ %s (%.1fs)\n", c.step, elapsed)
 	}
 }

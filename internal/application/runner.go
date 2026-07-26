@@ -128,7 +128,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote})
 	run := r.newRun(domain.PreCommit, resolved, branch)
@@ -261,7 +261,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base})
 	run := r.newRun(domain.PrePush, resolved, branch)

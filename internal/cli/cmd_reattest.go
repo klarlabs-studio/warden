@@ -38,17 +38,17 @@ func cmdReattest(args []string, stdout, stderr io.Writer) int {
 	}
 	switch {
 	case res.AlreadyHad:
-		fmt.Fprintf(stdout, "warden: %s already carries a valid note; nothing to re-attest.\n", short(res.Target))
+		_, _ = fmt.Fprintf(stdout, "warden: %s already carries a valid note; nothing to re-attest.\n", short(res.Target))
 		return 0
 	case res.Wrote:
 		suffix := ""
 		if *push {
 			suffix = " and pushed"
 		}
-		fmt.Fprintf(stdout, "warden: re-attested %s from tree-identical validated %s%s.\n", short(res.Target), short(res.Source), suffix)
+		_, _ = fmt.Fprintf(stdout, "warden: re-attested %s from tree-identical validated %s%s.\n", short(res.Target), short(res.Source), suffix)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "warden: no validated commit reproduces %s's tree; not re-attesting.\n", short(res.Target))
+		_, _ = fmt.Fprintf(stdout, "warden: no validated commit reproduces %s's tree; not re-attesting.\n", short(res.Target))
 		return 1
 	}
 }
@@ -71,16 +71,16 @@ func reattestAll(svc *service.Service, branch string, push bool, stdout, stderr 
 		if push {
 			msg += "\nwarden: pushed notes to the remote (no-op if it was already current)."
 		}
-		fmt.Fprintln(stdout, msg)
+		_, _ = fmt.Fprintln(stdout, msg)
 		return 0
 	}
 	for _, r := range results {
-		fmt.Fprintf(stdout, "warden: re-attested %s from tree-identical validated %s.\n", short(r.Target), short(r.Source))
+		_, _ = fmt.Fprintf(stdout, "warden: re-attested %s from tree-identical validated %s.\n", short(r.Target), short(r.Source))
 	}
 	suffix := "run `warden reattest --all --push` to publish them"
 	if push {
 		suffix = "pushed to the remote"
 	}
-	fmt.Fprintf(stdout, "warden: %d commit(s) re-attested; %s.\n", len(results), suffix)
+	_, _ = fmt.Fprintf(stdout, "warden: %d commit(s) re-attested; %s.\n", len(results), suffix)
 	return 0
 }

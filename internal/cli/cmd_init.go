@@ -32,14 +32,14 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
-	fmt.Fprintf(stdout, "warden initialized. installed hooks:")
+	_, _ = fmt.Fprintf(stdout, "warden initialized. installed hooks:")
 	for _, h := range selected {
-		fmt.Fprintf(stdout, " %s", h)
+		_, _ = fmt.Fprintf(stdout, " %s", h)
 	}
-	fmt.Fprintln(stdout)
+	_, _ = fmt.Fprintln(stdout)
 	if lang != domain.LangUnknown {
-		fmt.Fprintf(stdout, "detected %s — pre-filled lint/test commands in .warden.yaml (adjust as needed).\n", lang)
+		_, _ = fmt.Fprintf(stdout, "detected %s — pre-filled lint/test commands in .warden.yaml (adjust as needed).\n", lang)
 	}
-	fmt.Fprintln(stdout, "adoption point recorded at current HEAD; edit .warden.yaml to configure policy.")
+	_, _ = fmt.Fprintln(stdout, "adoption point recorded at current HEAD; edit .warden.yaml to configure policy.")
 	return 0
 }

@@ -16,7 +16,7 @@ import (
 // consuming it spends ~40% fewer tokens on the uniform result shapes.
 func cmdAxi(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "usage: warden axi <policy-explain|steps|run-trigger> [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: warden axi <policy-explain|steps|run-trigger> [flags]")
 		return 2
 	}
 	verb, rest := args[0], args[1:]
@@ -34,7 +34,7 @@ func cmdAxi(args []string, stdout, stderr io.Writer) int {
 	case "run-trigger":
 		return axiRunTrigger(f, rest, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "warden axi: unknown verb %q\n", verb)
+		_, _ = fmt.Fprintf(stderr, "warden axi: unknown verb %q\n", verb)
 		return 2
 	}
 }
@@ -111,7 +111,7 @@ func emitTOON(stdout, stderr io.Writer, v any) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintln(stdout, out)
+	_, _ = fmt.Fprintln(stdout, out)
 	return 0
 }
 
