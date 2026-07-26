@@ -1,0 +1,27 @@
+# TEMPORARY. Deleted with the branch.
+name: Tap token probe
+on:
+  push:
+    branches: ["chore/tap-token-probe"]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Which taps can the org secret write?
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          for tap in felixgeelhaar/homebrew-tap klarlabs-studio/homebrew-tap; do
+            w=$(curl -sS -o /tmp/w.json -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+              -d '{"message":"probe (never applied)","content":"cHJvYmU=","sha":"0000000000000000000000000000000000000000"}' \
+              "https://api.github.com/repos/$tap/contents/README.md")
+            case "$w" in
+              403) v="NO WRITE GRANT" ;;
+              404) v="CANNOT SEE (wrong resource owner)" ;;
+              409|422) v="WRITE GRANTED" ;;
+              *) v="unexpected" ;;
+            esac
+            echo "RESULT $tap -> HTTP $w : $v"
+          done

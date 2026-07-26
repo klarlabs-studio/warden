@@ -37,7 +37,6 @@ security_scan:
   # Requires warden >= 0.20.0: older versions read pin_file as a repo-relative
   # path and fail the step outright.
   pin_file: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
-
 risk:
   diff_lines_high: 400
   files_touched_high: 15
@@ -46,8 +45,8 @@ risk:
 # note signed by one of these. Add yours with `warden key show`; list with
 # `warden key list`.
 trusted_keys:
-  - 139e6eb9e2611c76   # felix — primary dev machine
-  - b3746e61c4d49512   # recovery key — seed stored offline; restore into WARDEN_CONFIG_DIR to sign from a new machine
+  - 139e6eb9e2611c76 # felix — primary dev machine
+  - b3746e61c4d49512 # recovery key — seed stored offline; restore into WARDEN_CONFIG_DIR to sign from a new machine
 rules:
   # Large changes on main get a human approval gate at push time.
   - match:
