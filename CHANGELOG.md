@@ -8,6 +8,22 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **The discard guard now has a proportionate override** (#124). Refusing a
+  force-push that would delete remote-only commits is right, but its only
+  escape was `git push --no-verify` — which skips test, lint *and*
+  security-scan and writes no provenance. A guard whose sole escape hatch is
+  the nuclear one teaches people to reach for the nuclear one, so the scan
+  stops running exactly on the branches that just absorbed someone else's
+  changes. `WARDEN_ALLOW_DISCARD=1` now bypasses **this check alone**, names
+  the commits it force-pushed over, and leaves every other step running. It is
+  an environment variable rather than a flag because the developer types
+  `git push` — warden runs as the hook and has no command line of its own. It
+  deliberately does **not** override `push.force: never`, which is a repo
+  policy decision rather than a per-push safety check.
+
+
+### Fixed
+
 - **A re-driven release now actually replaces its artifacts.** 0.20.2 claimed
   #125 had made the re-drive idempotent. It had not: `release.mode` governs the
   release *notes* (`keep-existing`/`append`/`prepend`/`replace`), while the

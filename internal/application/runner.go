@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,12 @@ type RunResult struct {
 	// the developer to ignore git's resulting `error:` line (#89).
 	GitCompletesPush bool
 	Message          string
+	// Warnings are non-fatal notices the run wants the developer to see —
+	// currently only a WARDEN_ALLOW_DISCARD override naming the commits it
+	// force-pushed over. Kept out of Message so the verdict line stays the
+	// verdict, and out of the application layer's own stdout so delivery
+	// keeps owning I/O.
+	Warnings []string
 	// Blocker names the environmental obstacle that ended a failed run (a tool's
 	// lock, a missing toolchain) rather than the change itself. BlockerNone means
 	// the verdict is about the change. Delivery maps it to a distinct exit code.
@@ -191,16 +198,16 @@ var ErrPushDiscardsRemoteWork = errors.New("push would discard commits that exis
 // with a message naming the knob — the alternative the developer would
 // otherwise reach for is `git push --no-verify`, which skips the gate and
 // writes no provenance at all.
-func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, error) {
+func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, string, error) {
 	rewrites, err := r.Git.PushRewritesHistory(r.Settings.Remote, branch)
 	if err != nil || !rewrites {
 		// An unreadable ancestry is not a license to force: fall back to the plain
 		// push and let git refuse it, as it would without warden.
-		return domain.ForceNever, nil
+		return domain.ForceNever, "", nil
 	}
 	mode := cfg.PushForceMode()
 	if mode == domain.ForceNever {
-		return "", fmt.Errorf("%w: %s has been rebased or amended, and this repo sets push.force: never. "+
+		return "", "", fmt.Errorf("%w: %s has been rebased or amended, and this repo sets push.force: never. "+
 			"Rewrite it deliberately (git push --force-with-lease) or allow it with push.force: lease in .warden.yaml",
 			ErrPushRewritesHistory, branch)
 	}
@@ -210,14 +217,48 @@ func (r *Runner) pushForce(cfg domain.Config, branch string) (domain.PushForce, 
 	if lost, err := r.Git.UnmergedRemoteCommits(r.Settings.Remote, branch); err != nil || len(lost) > 0 {
 		if err != nil {
 			// Cannot tell whose work is on the remote: do not force on a guess.
-			return "", fmt.Errorf("%w: could not determine whether %s/%s carries work not in your history: %v",
+			return "", "", fmt.Errorf("%w: could not determine whether %s/%s carries work not in your history: %v",
 				ErrPushDiscardsRemoteWork, r.Settings.Remote, branch, err)
 		}
-		return "", fmt.Errorf("%w: %s/%s carries %d commit(s) that are not in your history:\n  %s\n"+
-			"force-pushing would delete them; integrate first with `git pull --rebase`, then push",
+		// The scoped override. UnmergedRemoteCommits already suppresses the guard
+		// for commits it can prove are our own pre-rewrite tips (committed by us
+		// AND once reachable from this branch's reflog), which covers the ordinary
+		// rebase. It cannot prove that when the reflog is absent — a fresh clone,
+		// another machine, a rewrite older than the scan limit — or when the
+		// commit was committed by someone else, as GitHub's web UI and "Update
+		// branch" both do.
+		//
+		// Without a proportionate escape those cases leave `git push --no-verify`
+		// as the only way through, which skips test, lint AND security-scan and
+		// writes no provenance. A guard whose only override is the nuclear one
+		// teaches people to reach for the nuclear one, so the scan stops running
+		// exactly on the branches that just absorbed someone else's changes.
+		//
+		// This bypasses THIS check and nothing else: every step still runs and the
+		// note is still written. The dropped commits are named on the way past so
+		// the decision is recorded rather than silent.
+		if allowDiscard() {
+			return mode, fmt.Sprintf(
+				"WARDEN_ALLOW_DISCARD set — force-pushed over %d commit(s) on %s/%s that were not in your history:\n  %s",
+				len(lost), r.Settings.Remote, branch, strings.Join(lost, "\n  ")), nil
+		}
+		return "", "", fmt.Errorf("%w: %s/%s carries %d commit(s) that are not in your history:\n  %s\n"+
+			"If they are someone else's, integrate first: `git pull --rebase`, then push.\n"+
+			"If they are your own pre-rewrite commits that warden could not verify (a fresh clone\n"+
+			"has no reflog to check against), re-push with WARDEN_ALLOW_DISCARD=1 — that skips this\n"+
+			"one check and keeps test, lint and security-scan running, unlike --no-verify",
 			ErrPushDiscardsRemoteWork, r.Settings.Remote, branch, len(lost), strings.Join(lost, "\n  "))
 	}
-	return mode, nil
+	return mode, "", nil
+}
+
+// allowDiscard reports whether the developer has explicitly accepted losing the
+// remote-only commits on this push. Deliberately an environment variable and not
+// a flag: the developer types `git push`, and warden runs as its pre-push hook,
+// so there is no warden command line to put a flag on.
+func allowDiscard() bool {
+	v := strings.TrimSpace(os.Getenv("WARDEN_ALLOW_DISCARD"))
+	return v != "" && v != "0" && !strings.EqualFold(v, "false")
 }
 
 // delegateToGit reports whether the push git is ALREADY about to perform is
@@ -272,6 +313,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	var spanBase string
 	// gitCompletes records that warden left the push to git — see delegateToGit.
 	var gitCompletes bool
+	// discardWarning carries a WARDEN_ALLOW_DISCARD override up to the caller so
+	// delivery can print which commits were force-pushed over.
+	var discardWarning string
 	// willOpenPR is resolved once, before the gate, because the delegation
 	// decision is made inside the push closure but PR creation happens after it.
 	willOpenPR := prCfg.Enabled && r.Forge != nil && r.Forge.Available()
@@ -289,9 +333,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		// Best-effort: a span we cannot determine is simply not claimed, leaving
 		// the note attesting its tip alone. Provenance never fails the gate.
 		spanBase, _ = r.Git.PushSpanBase(r.Settings.Remote, branch)
-		force, err := r.pushForce(cfg, branch)
+		force, warn, err := r.pushForce(cfg, branch)
 		if err != nil {
 			return domain.StepResult{}, err
+		}
+		if warn != "" {
+			discardWarning = warn
 		}
 		if r.delegateToGit(finalSHA, seedTip, force, willOpenPR) {
 			gitCompletes = true
@@ -356,6 +403,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 
 	res := r.result(run, "")
 	res.GitCompletesPush = gitCompletes
+	if discardWarning != "" {
+		res.Warnings = append(res.Warnings, discardWarning)
+	}
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
 	if willOpenPR {
