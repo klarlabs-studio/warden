@@ -60,8 +60,11 @@ release:
     name: warden
 
 homebrew_casks:
+  # The cask belongs to the tap owned by the org that owns this repo, which
+  # is also the scope the org secret behind TAP_GITHUB_TOKEN can write to.
+  # A personal tap sits outside that scope and answers 403.
   - repository:
-      owner: felixgeelhaar
+      owner: klarlabs-studio
       name: homebrew-tap
       # The default GITHUB_TOKEN is scoped to this repo only and cannot push to
       # the separate tap repo (403); use the dedicated tap PAT.
