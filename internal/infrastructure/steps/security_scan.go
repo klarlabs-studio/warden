@@ -62,9 +62,11 @@ func (s SecurityScanStep) Run(ctx context.Context, sc application.StepContext) (
 	dir := stepDir(sc, s.name)
 	cfg := sc.SecurityScan
 
-	if res, refused := s.refuseOnVersionDrift(ctx, dir, scan.Binary, cfg); refused {
-		return res, nil
-	}
+	// Version drift is DETECTED here but not acted on yet. It is a proxy for the
+	// thing that actually matters — whether the committed baseline still matches
+	// what the scanner reports — and that can only be known after scanning. See
+	// resolveVersionDrift below.
+	versionDrift := s.detectVersionDrift(ctx, dir, scan.Binary, cfg)
 
 	reportDir, err := os.MkdirTemp("", "warden-scan-")
 	if err != nil {
@@ -82,7 +84,13 @@ func (s SecurityScanStep) Run(ctx context.Context, sc application.StepContext) (
 	}
 
 	gating := report.Gating(scan.Threshold)
-	warnings := s.baselineDriftFindings(dir, report, len(gating))
+	baselineDrifted, warnings := s.baselineDriftFindings(dir, report, len(gating))
+
+	if res, refused := s.resolveVersionDrift(versionDrift, baselineDrifted); refused {
+		return res, nil
+	} else if versionDrift.drifted {
+		warnings = append(warnings, note(versionDrift.toleratedMessage()))
+	}
 
 	if len(gating) == 0 {
 		if runErr != nil {
@@ -171,16 +179,17 @@ func (s SecurityScanStep) baseFingerprints(ctx context.Context, sc application.S
 // fails or passes on the findings themselves, but instead of "240 new
 // criticals" the developer is told the baseline and the scanner have stopped
 // agreeing, which is a five-minute fix rather than a month of red releases.
-func (s SecurityScanStep) baselineDriftFindings(dir string, report scanner.Report, gatingCount int) []domain.Finding {
+func (s SecurityScanStep) baselineDriftFindings(dir string, report scanner.Report, gatingCount int) (bool, []domain.Finding) {
 	baseline, found, err := scanner.ReadBaseline(dir)
 	if err != nil || !found {
-		return nil
+		return false, nil
 	}
 	drifted, _ := scanner.BaselineDrift(baseline, report)
 	if !drifted {
-		return nil
+		return false, nil
 	}
-	return []domain.Finding{note(fmt.Sprintf(
+
+	return true, []domain.Finding{note(fmt.Sprintf(
 		"baseline drift: not one of the %d entries in %s matches any of the %d findings this scan reported "+
 			"(%d of them unwaived). That is the signature of a scanner version change renumbering its rules, "+
 			"not of the tree suddenly regressing — check that the scanner here is the version CI pins, then "+
@@ -188,32 +197,92 @@ func (s SecurityScanStep) baselineDriftFindings(dir string, report scanner.Repor
 		len(baseline.Fingerprints), scanner.BaselinePath, len(report.Findings), gatingCount))}
 }
 
-// refuseOnVersionDrift fails the step when the local scanner is not the version
-// CI pins. Refusing here is the point: the mismatch is cheap to fix at pre-push
-// and expensive at a release tag, where a CI job that only runs on tags turns a
-// stale pin into a month of failing releases before anyone sees it.
-func (s SecurityScanStep) refuseOnVersionDrift(ctx context.Context, dir, binary string, cfg domain.SecurityScanConfig) (domain.StepResult, bool) {
+// versionDrift records that the local scanner is not the version CI pins.
+type versionDrift struct {
+	drifted bool
+	err     string // pin discovery failed; refuse regardless, we know nothing
+	binary  string
+	local   string
+	pin     scanner.Pin
+}
+
+// detectVersionDrift reports whether the local scanner differs from the pin. It
+// does NOT decide anything — see resolveVersionDrift.
+func (s SecurityScanStep) detectVersionDrift(ctx context.Context, dir, binary string, cfg domain.SecurityScanConfig) versionDrift {
 	if !cfg.VersionCheckEnabled() {
-		return domain.StepResult{}, false
+		return versionDrift{}
 	}
 	pin, found, err := scanner.DiscoverPin(ctx, dir, binary, cfg.PinFile)
 	if err != nil {
-		return s.refusal(err.Error()), true
+		return versionDrift{drifted: true, err: err.Error()}
 	}
 	if !found {
 		// Nothing pins the scanner, so there is nothing to disagree with.
-		return domain.StepResult{}, false
+		return versionDrift{}
 	}
 	local := scanner.LocalVersion(ctx, dir, binary)
 	if local == "" || scanner.SameVersion(local, pin.Version) {
+		return versionDrift{}
+	}
+
+	return versionDrift{drifted: true, binary: binary, local: local, pin: pin}
+}
+
+// resolveVersionDrift decides what a version difference means, using the only
+// evidence that settles it: whether the committed baseline still matches.
+//
+// # WHY THIS IS NOT A PRE-SCAN REFUSAL ANY MORE
+//
+// It used to refuse the moment the version strings differed, before scanning.
+// The reasoning was sound — a scanner that renumbers rules between releases
+// invalidates every baseline fingerprint, and discovering that at a release tag
+// is expensive. But the check asserted a PROXY, and the proxy is wrong far more
+// often than it is right: releases mostly do not renumber rules, so the
+// baseline usually keeps matching perfectly across versions.
+//
+// Measured on one repo, same tree and same committed baseline:
+//
+//	nox 1.17.0 -> 0 findings, 969 suppressed
+//	nox 1.20.0 -> 0 findings, 969 suppressed
+//	nox 1.22.0 -> 0 findings, 969 suppressed
+//
+// Identical. Yet every push was refused, and the only ways past were to
+// hand-install a matching binary or to bump the pin — which does not hold
+// either, because a brew-installed scanner auto-upgrades and drifts again
+// within hours. A gate that fails on something the developer cannot keep
+// stable, for a harm that is not occurring, is a gate people learn to bypass
+// with --no-verify. That disables the tests and the security scan too, so the
+// check makes the tree less safe than not having it.
+//
+// So: scan first, then judge on the outcome. A version difference with a
+// baseline that still matches is a NOTE. A version difference that HAS broken
+// the baseline is a refusal — and now it can say so as fact rather than
+// suspicion. The expensive-at-release-tag case is still caught, because that
+// case is precisely the one where the baseline stops matching.
+func (s SecurityScanStep) resolveVersionDrift(v versionDrift, baselineDrifted bool) (domain.StepResult, bool) {
+	switch {
+	case v.err != "":
+		return s.refusal(v.err), true
+	case !v.drifted || !baselineDrifted:
 		return domain.StepResult{}, false
 	}
+
 	return s.refusal(fmt.Sprintf(
-		"%s here is %s but %s pins %s=%s. Refusing to scan: %s renumbers its rule IDs between releases, so the "+
-			"same hit gets a different fingerprint under each version and every %s entry silently stops matching "+
-			"— the gate then reports the whole accepted backlog as new. Install %s %s, or bump the pin and "+
-			"regenerate the baseline in the same commit (set security_scan.version_check: false to skip this check).",
-		binary, local, pin.Source, pin.Key, pin.Version, binary, scanner.BaselinePath, binary, pin.Version)), true
+		"%s here is %s but %s pins %s=%s, AND the committed %s now matches nothing this scan reported. That is the "+
+			"combination the pin exists to prevent: %s renumbered its rule IDs, so every accepted entry silently "+
+			"stopped matching and the gate is about to report the whole backlog as new. Install %s %s, or bump the "+
+			"pin and regenerate the baseline in the same commit (set security_scan.version_check: false to skip).",
+		v.binary, v.local, v.pin.Source, v.pin.Key, v.pin.Version, scanner.BaselinePath,
+		v.binary, v.binary, v.pin.Version)), true
+}
+
+// toleratedMessage explains a version difference that did no harm.
+func (v versionDrift) toleratedMessage() string {
+	return fmt.Sprintf(
+		"%s here is %s but %s pins %s=%s. Allowed: the committed %s still matches this scan, so the rule "+
+			"fingerprints did not move between these versions. Worth aligning anyway — the next release might "+
+			"renumber, and then this becomes a refusal.",
+		v.binary, v.local, v.pin.Source, v.pin.Key, v.pin.Version, scanner.BaselinePath)
 }
 
 func (s SecurityScanStep) refusal(msg string) domain.StepResult {

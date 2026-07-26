@@ -265,14 +265,53 @@ func TestSecurityScanStep_VersionDrift(t *testing.T) {
 		writeFile(t, dir, ".github/workflows/ci.yml", "env:\n  NOX_VERSION: \""+version+"\"\n")
 	}
 
-	t.Run("refuses to scan when the local scanner is not CI's pin", func(t *testing.T) {
-		dir := repoWithBaseAndHead(t, report(), report())
+	// A version difference ALONE is not harm. This check used to refuse on it
+	// before scanning, and the proxy was wrong far more often than right:
+	// measured on one real repo, nox 1.17.0, 1.20.0 and 1.22.0 all produced
+	// "0 findings, 969 suppressed" against the same committed baseline. Every
+	// push was refused for a harm that was not occurring, and the only ways past
+	// were hand-installing a binary or bumping a pin that drifts again within
+	// hours (brew auto-upgrades it). A gate you cannot satisfy is a gate people
+	// escape with --no-verify, which also disables the tests and the scan.
+	t.Run("a version difference the baseline survived is allowed, with a note", func(t *testing.T) {
+		dir := repoWithBaseAndHead(t, report("kept"), report("kept"))
+		writeFile(t, dir, "nox-exit", "0")
+		// The baseline still matches what the scan reports — the fingerprints did
+		// not move between these versions, so nothing is broken.
+		writeFile(t, dir, ".nox/baseline.json",
+			`{"schema_version":"1.0.0","entries":[{"fingerprint":"kept"}]}`)
+		pin(t, dir, "1.3.0")
+		commitAll(t, dir, "pin")
+		t.Setenv("FAKE_NOX_VERSION", "1.15.0")
+
+		res := runScan(t, scanContext(dir, domain.SecurityScanConfig{}))
+		if res.Status != domain.StepFail && res.Status != domain.StepPass {
+			t.Fatalf("unexpected status %s", res.Status)
+		}
+		if res.Status == domain.StepFail {
+			t.Fatalf("status = fail, want the push allowed: the baseline still matches, so the "+
+				"version difference did no harm; findings=%s", findingsText(res))
+		}
+		msg := findingsText(res)
+		if !strings.Contains(msg, "1.15.0") || !strings.Contains(msg, "1.3.0") {
+			t.Errorf("message = %q, want both versions still named — allowed is not the same as unmentioned", msg)
+		}
+	})
+
+	// The case the pin exists for: the versions differ AND the baseline has
+	// stopped matching. Now it can be asserted as fact rather than suspected.
+	t.Run("refuses when the version difference has broken the baseline", func(t *testing.T) {
+		// The report must be non-empty and share nothing with the baseline: that
+		// total miss is the evidence the rule ids were renumbered.
+		dir := repoWithBaseAndHead(t, report("renamed"), report("renamed"))
+		writeFile(t, dir, ".nox/baseline.json",
+			`{"schema_version":"1.0.0","entries":[{"fingerprint":"gone1"},{"fingerprint":"gone2"}]}`)
 		pin(t, dir, "1.3.0")
 		t.Setenv("FAKE_NOX_VERSION", "1.15.0")
 
 		res := runScan(t, scanContext(dir, domain.SecurityScanConfig{}))
 		if res.Status != domain.StepFail {
-			t.Fatalf("status = %s, want fail: a stale pin invalidates every baseline entry", res.Status)
+			t.Fatalf("status = %s, want fail: a renumbered ruleset invalidates every baseline entry", res.Status)
 		}
 		msg := findingsText(res)
 		// Naming both versions is the whole value: the fix is obvious once you
