@@ -776,7 +776,7 @@ func TestRunner_PushForce(t *testing.T) {
 			{Push: &domain.PushConfig{Force: domain.ForceLease}},
 			{Push: &domain.PushConfig{Force: domain.ForceNever}},
 		} {
-			got, err := r.pushForce(cfg, "feature")
+			got, _, err := r.pushForce(cfg, "feature")
 			if err != nil {
 				t.Fatalf("cfg %+v: %v", cfg.Push, err)
 			}
@@ -788,7 +788,7 @@ func TestRunner_PushForce(t *testing.T) {
 
 	t.Run("a rewrite uses the lease by default", func(t *testing.T) {
 		r := &Runner{Git: &fakeGit{rewritesHistory: true}, Settings: Settings{Remote: "origin"}}
-		got, err := r.pushForce(domain.Config{}, "feature")
+		got, _, err := r.pushForce(domain.Config{}, "feature")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -799,7 +799,7 @@ func TestRunner_PushForce(t *testing.T) {
 
 	t.Run("push.force never refuses, naming the knob", func(t *testing.T) {
 		r := &Runner{Git: &fakeGit{rewritesHistory: true}, Settings: Settings{Remote: "origin"}}
-		_, err := r.pushForce(domain.Config{Push: &domain.PushConfig{Force: domain.ForceNever}}, "feature")
+		_, _, err := r.pushForce(domain.Config{Push: &domain.PushConfig{Force: domain.ForceNever}}, "feature")
 		if !errors.Is(err, ErrPushRewritesHistory) {
 			t.Fatalf("err = %v, want ErrPushRewritesHistory", err)
 		}
@@ -813,7 +813,7 @@ func TestRunner_PushForce(t *testing.T) {
 			Git:      &fakeGit{rewritesHistory: true, rewritesErr: errors.New("no such ref")},
 			Settings: Settings{Remote: "origin"},
 		}
-		got, err := r.pushForce(domain.Config{}, "feature")
+		got, _, err := r.pushForce(domain.Config{}, "feature")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -966,7 +966,7 @@ func TestRunner_RefusesToForceOverSomeoneElsesWork(t *testing.T) {
 
 	// And the error identity is available to callers that check it.
 	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
-	if _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+	if _, _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
 		t.Errorf("pushForce err = %v, want ErrPushDiscardsRemoteWork", err)
 	}
 }
@@ -1021,7 +1021,67 @@ func TestRunner_RefusesToForceWhenItCannotTell(t *testing.T) {
 		t.Error("must not force on a guess")
 	}
 	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
-	if _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+	if _, _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
 		t.Errorf("pushForce err = %v, want ErrPushDiscardsRemoteWork", err)
+	}
+}
+
+// TestRunner_AllowDiscardIsScopedToThisGuard covers the override added for #124:
+// the guard's only escape used to be `git push --no-verify`, which skips test,
+// lint AND security-scan. An override that disproportionate teaches people to
+// reach for it routinely, so the scan stops running precisely on the branches
+// that just absorbed someone else's changes.
+func TestRunner_AllowDiscardIsScopedToThisGuard(t *testing.T) {
+	git := &fakeGit{rewritesHistory: true, unmergedRemote: []string{"abc1234 COLLEAGUE WORK"}}
+	cfg := prePushCfg()
+	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
+
+	// Without the override the guard holds.
+	if _, _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+		t.Fatalf("without the override the guard must hold, got %v", err)
+	}
+
+	t.Setenv("WARDEN_ALLOW_DISCARD", "1")
+	force, warn, err := rr.pushForce(cfg, "shared")
+	if err != nil {
+		t.Fatalf("with the override the push must proceed, got %v", err)
+	}
+	if force == domain.ForceNever {
+		t.Error("the override must still force; it exists to allow this push")
+	}
+	// Loud, not silent: the commits being dropped have to be named, or the
+	// override becomes the same silent discard the guard exists to prevent.
+	if !strings.Contains(warn, "COLLEAGUE WORK") {
+		t.Errorf("the override must name what it dropped, got %q", warn)
+	}
+	if !strings.Contains(warn, "WARDEN_ALLOW_DISCARD") {
+		t.Errorf("the warning must say why it proceeded, got %q", warn)
+	}
+}
+
+// TestRunner_AllowDiscardDoesNotOverrideForceNever keeps the override scoped:
+// push.force: never is a repo POLICY decision, not a per-push safety check, and
+// an env var must not be able to overrule it.
+func TestRunner_AllowDiscardDoesNotOverrideForceNever(t *testing.T) {
+	t.Setenv("WARDEN_ALLOW_DISCARD", "1")
+	git := &fakeGit{rewritesHistory: true, unmergedRemote: []string{"abc1234 COLLEAGUE WORK"}}
+	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
+	cfg := domain.Config{Push: &domain.PushConfig{Force: domain.ForceNever}}
+	if _, _, err := rr.pushForce(cfg, "shared"); !errors.Is(err, ErrPushRewritesHistory) {
+		t.Errorf("push.force: never must still refuse, got %v", err)
+	}
+}
+
+// TestRunner_AllowDiscardRejectsFalseyValues stops `WARDEN_ALLOW_DISCARD=0`
+// from reading as consent — an exported-but-unset variable is a plausible
+// accident, and this guard should fail closed.
+func TestRunner_AllowDiscardRejectsFalseyValues(t *testing.T) {
+	for _, v := range []string{"", "0", "false", "FALSE", "  "} {
+		t.Setenv("WARDEN_ALLOW_DISCARD", v)
+		git := &fakeGit{rewritesHistory: true, unmergedRemote: []string{"abc1234 COLLEAGUE WORK"}}
+		rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
+		if _, _, err := rr.pushForce(prePushCfg(), "shared"); !errors.Is(err, ErrPushDiscardsRemoteWork) {
+			t.Errorf("WARDEN_ALLOW_DISCARD=%q must not grant consent, got %v", v, err)
+		}
 	}
 }

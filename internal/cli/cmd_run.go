@@ -232,11 +232,22 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	// it. Exit 0 only when git is completing the push itself; otherwise warden
 	// already pushed and must fail the hook so git's stale push is stopped — and
 	// a run stopped by the environment says so in its code (see runPrePushExit).
+	printWarnings(stdout, res)
 	noteGitPushError(stdout, res)
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
 	}
 	return exitForBlocker(res.Blocker)
+}
+
+// printWarnings surfaces non-fatal notices from a run — currently only a
+// WARDEN_ALLOW_DISCARD override naming the commits it force-pushed over. They
+// are printed whatever the outcome: an override that dropped someone's work is
+// exactly the thing that must not be swallowed by a failing run.
+func printWarnings(w io.Writer, res application.RunResult) {
+	for _, warn := range res.Warnings {
+		_, _ = fmt.Fprintf(w, "warden: %s\n", warn)
+	}
 }
 
 // noteGitPushError, on a SUCCESSFUL pre-push that warden pushed ITSELF, prints
@@ -432,6 +443,7 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 		msg = fmt.Sprintf("%s (%s)", msg, domain.JoinSteps(res.Policy.Steps))
 	}
 	_, _ = fmt.Fprintf(stdout, "warden: %s\n", msg)
+	printWarnings(stdout, res)
 	noteGitPushError(stdout, res)
 	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
 		return 0
