@@ -188,13 +188,80 @@ func (r *Repo) UnmergedRemoteCommits(remote, branch string) ([]string, error) {
 		if !ok {
 			continue // "- <sha>": an equivalent patch is already in our history
 		}
-		subject, err := r.run("log", "-1", "--format=%h %s", strings.TrimSpace(sha))
+		sha = strings.TrimSpace(sha)
+		if r.isOurPreRewriteCommit(branch, sha) {
+			continue
+		}
+		subject, err := r.run("log", "-1", "--format=%h %s", sha)
 		if err != nil {
 			subject = sha
 		}
 		lost = append(lost, strings.TrimSpace(subject))
 	}
 	return lost, nil
+}
+
+// reflogScanLimit bounds how far back a branch's reflog is searched. Its own
+// pre-rewrite tips are the most recent entries, so the answer is found in the
+// first few; the limit exists so a long-lived branch cannot turn this into a
+// walk of thousands of ancestry checks.
+const reflogScanLimit = 50
+
+// isOurPreRewriteCommit reports whether sha is our own earlier form of work
+// rather than somebody else's, for a commit git cherry could not match by
+// patch-id.
+//
+// patch-id is not a reliable test of "same change". It ignores hunk line
+// numbers but NOT the context lines quoted around a hunk, so rebasing onto a
+// base that edited anything within three lines of our change alters the patch-id
+// even though the change itself is untouched. That is the ordinary case: a
+// branch goes BEHIND, warden's own pre-push rebase step replays it onto the
+// updated base, the patch-id moves, and git cherry reports our own pre-rewrite
+// commit as work that exists only on the remote. The push is then refused, and
+// the advice it prints (`git pull --rebase`) cannot break the cycle because the
+// next push rebases again and diverges again. The branch becomes unpushable
+// through the gate, which pushes the developer toward `--no-verify` — a gate
+// bypass with no provenance, the exact outcome the lease exists to prevent.
+//
+// Two conditions must BOTH hold, because either alone is too generous:
+//
+//   - the commit was once reachable from this branch locally (its reflog), so it
+//     is a state this branch actually passed through rather than something
+//     fetched from the remote; and
+//   - it is committed by us, so a colleague's commit that we pulled in and then
+//     dropped during an interactive rebase is still protected — the reflog alone
+//     would have let that one be discarded.
+//
+// Anything unreadable — no reflog, no configured identity — answers false and
+// the commit stays reported. Refusing to force is always the safe direction.
+func (r *Repo) isOurPreRewriteCommit(branch, sha string) bool {
+	self, err := r.run("config", "user.email")
+	if err != nil || strings.TrimSpace(self) == "" {
+		return false
+	}
+	committer, err := r.run("log", "-1", "--format=%ce", sha)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(committer), strings.TrimSpace(self)) {
+		return false
+	}
+	out, err := r.run("reflog", "show", "--format=%H", branch)
+	if err != nil {
+		return false
+	}
+	seen := 0
+	for line := range strings.SplitSeq(out, "\n") {
+		tip := strings.TrimSpace(line)
+		if tip == "" {
+			continue
+		}
+		seen++
+		if seen > reflogScanLimit {
+			break
+		}
+		if _, err := r.run("merge-base", "--is-ancestor", sha, tip); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // WriteNote attaches rec as JSON to commit sha under refs/notes/warden. The -f

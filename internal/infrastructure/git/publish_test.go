@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -267,4 +268,95 @@ func TestUnmergedRemoteCommits(t *testing.T) {
 			t.Errorf("got %q, want it to name the colleague's commit", joined)
 		}
 	})
+}
+
+// TestUnmergedRemoteCommitsRebaseShiftsContext covers the case that deadlocked
+// the gate in practice: our own commit, rebased onto a base that edited lines
+// NEAR ours, so the diff context moves and the patch-id changes with it.
+//
+// git cherry then marks the remote's pre-rewrite copy '+' rather than '-', the
+// push is refused as "discards remote work", and the advice it prints (`git
+// pull --rebase`) cannot help — the next push rebases again and reproduces the
+// same divergence. The branch becomes unpushable through the gate.
+//
+// The pre-existing rebase case above uses empty commits, whose patch-ids cannot
+// diverge, so it passes whether or not this works.
+func TestUnmergedRemoteCommitsRebaseShiftsContext(t *testing.T) {
+	dir := newTestRepo(t)
+	repo := &Repo{Dir: dir}
+	setupBareRemote(t, dir)
+
+	// A file with room above the line we will change, so a later edit above it
+	// shifts our hunk's context without touching our line.
+	write := func(t *testing.T, lines []string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// patch-id ignores hunk line numbers, so a pure shift changes nothing. What
+	// changes it is the CONTENT of the context: the insertion below lands inside
+	// the three-line window git quotes around our change, while leaving two
+	// untouched lines between the two edits so the rebase still applies cleanly.
+	base := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "target: old", "omega"}
+	write(t, base)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "--no-verify", "-m", "base")
+	gitRun(t, dir, "push", "-q", "origin", "main")
+
+	// Our work: change the target line, on a branch, pushed.
+	gitRun(t, dir, "checkout", "-q", "-b", "feature")
+	ours := append([]string(nil), base...)
+	ours[6] = "target: new"
+	write(t, ours)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "--no-verify", "-m", "OUR WORK: retarget")
+	gitRun(t, dir, "push", "-q", "origin", "feature")
+
+	// main advances, inserting lines directly above ours — the ordinary reason a
+	// branch goes BEHIND and has to be rebased.
+	gitRun(t, dir, "checkout", "-q", "main")
+	advanced := []string{"alpha", "beta", "gamma", "delta", "inserted: one", "epsilon", "zeta", "target: old", "omega"}
+	write(t, advanced)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "--no-verify", "-m", "main moves")
+
+	// Rebase our branch onto it, exactly as warden's pre-push rebase step does.
+	gitRun(t, dir, "checkout", "-q", "feature")
+	gitRun(t, dir, "rebase", "-q", "main")
+	gitRun(t, dir, "fetch", "-q", "origin")
+
+	// Guard rail: if these ever agree, the scenario has stopped reproducing and
+	// this test is no longer testing anything.
+	if before, after := patchID(t, dir, "origin/feature"), patchID(t, dir, "feature"); before == after {
+		t.Fatalf("patch-ids did not diverge (%s) — scenario no longer reproduces", before)
+	}
+
+	got, err := repo.UnmergedRemoteCommits("origin", "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty — the remote holds the pre-rewrite form of OUR commit, "+
+			"so replacing it destroys nothing and the push must not be refused", got)
+	}
+}
+
+// patchID returns the patch-id of rev's tip, the identity git cherry compares.
+func patchID(t *testing.T, dir, rev string) string {
+	t.Helper()
+	show := exec.Command("git", "show", rev)
+	show.Dir = dir
+	out, err := show.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := exec.Command("git", "patch-id", "--stable")
+	id.Dir = dir
+	id.Stdin = bytes.NewReader(out)
+	res, err := id.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(res))[0]
 }
