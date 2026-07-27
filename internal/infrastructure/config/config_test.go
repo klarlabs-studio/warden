@@ -130,6 +130,201 @@ commands:
 	}
 }
 
+// The churn this guards against is cosmetic in effect but not in consequence:
+// it dirties the working tree during unrelated work, and the noisiest part of
+// the diff lands on trusted_keys — the one block where a reviewer scanning for
+// a changed key should see nothing but real changes (#134).
+func TestRepository_SetHooksLeavesFileByteIdenticalOnNoOp(t *testing.T) {
+	dir := t.TempDir()
+	// Reproduces the shape of warden's own .warden.yaml: a blank separator line
+	// and aligned trailing comments, neither of which survives a yaml.Node
+	// re-encode.
+	const original = `agent: auto
+hooks:
+  pre_commit: true
+  pre_push: true
+
+security_scan:
+  pin_file: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
+
+trusted_keys:
+  - 139e6eb9e2611c76   # felix — primary dev machine
+  - b3746e61c4d49512   # recovery key — seed stored offline
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	// Both hooks are ALREADY enabled: this is the no-op that `warden hooks
+	// enable` performs when re-pinning after an upgrade.
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != original {
+		t.Errorf("no-op SetHooks rewrote the file.\n--- got ---\n%s\n--- want ---\n%s", out, original)
+	}
+}
+
+// A real toggle must change the hook line and nothing else — the blank line and
+// comment alignment elsewhere are not ours to normalize.
+func TestRepository_SetHooksTogglesWithoutReformattingTheRest(t *testing.T) {
+	dir := t.TempDir()
+	const original = `agent: auto
+hooks:
+  pre_commit: true
+  pre_push: true
+
+trusted_keys:
+  - 139e6eb9e2611c76   # felix — primary dev machine
+`
+	const want = `agent: auto
+hooks:
+  pre_commit: false
+  pre_push: true
+
+trusted_keys:
+  - 139e6eb9e2611c76   # felix — primary dev machine
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: false, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != want {
+		t.Errorf("SetHooks reformatted beyond the toggled key.\n--- got ---\n%s\n--- want ---\n%s", out, want)
+	}
+}
+
+// A trailing comment on the hook line itself documents WHY the hook is set the
+// way it is, so it must survive the value changing underneath it.
+func TestRepository_SetHooksKeepsCommentOnTheToggledLine(t *testing.T) {
+	dir := t.TempDir()
+	const original = `hooks:
+  pre_commit: true   # fast checks only
+  pre_push: false
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: false, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "# fast checks only") {
+		t.Errorf("SetHooks dropped the trailing comment:\n%s", got)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hooks.PreCommit || !cfg.Hooks.PrePush {
+		t.Errorf("hooks not updated: %+v", cfg.Hooks)
+	}
+}
+
+// The splice deliberately cannot create keys, so a config that predates the
+// hooks block must still fall back to the node encoder and come out correct.
+// Reformatting is the acceptable cost there; losing the setting is not.
+func TestRepository_SetHooksFallsBackWhenKeysAbsent(t *testing.T) {
+	dir := t.TempDir()
+	const original = `# keep me
+agent: auto
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: false}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Hooks.PreCommit || cfg.Hooks.PrePush {
+		t.Errorf("fallback did not apply the selection: %+v", cfg.Hooks)
+	}
+	if cfg.Agent != "auto" {
+		t.Errorf("fallback disturbed agent: %q", cfg.Agent)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "keep me") {
+		t.Errorf("fallback stripped comments:\n%s", out)
+	}
+}
+
+// Flow style puts both values on one line, where splicing the first would
+// invalidate the second's column. The fallback must take over and still be
+// correct — a wrong splice would corrupt config rather than merely reflow it.
+func TestRepository_SetHooksHandlesFlowStyle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("hooks: {pre_commit: true, pre_push: true}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: false, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hooks.PreCommit || !cfg.Hooks.PrePush {
+		t.Errorf("flow-style config not updated correctly: %+v", cfg.Hooks)
+	}
+}
+
+// A file whose last line has no trailing newline must round-trip without one
+// being invented — splitLinesKeepEnds is what makes the join lossless.
+func TestRepository_SetHooksPreservesMissingTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	const original = "hooks:\n  pre_commit: true\n  pre_push: false"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "hooks:\n  pre_commit: true\n  pre_push: true"; string(out) != want {
+		t.Errorf("trailing-newline handling changed the file:\n got %q\nwant %q", out, want)
+	}
+}
+
 func TestRepository_SetHooksCreatesWhenAbsent(t *testing.T) {
 	repo := NewRepository(t.TempDir())
 	if err := repo.SetHooks(domain.HookConfig{PrePush: true}); err != nil {

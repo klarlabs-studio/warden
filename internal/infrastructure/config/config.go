@@ -236,11 +236,19 @@ func (r *Repository) Save(cfg domain.Config) error {
 }
 
 // SetHooks updates only the hooks selection in an existing .warden.yaml,
-// preserving the rest of the file byte-for-byte where possible — comments,
-// ordering, and formatting — by editing the YAML node tree in place rather than
-// re-serializing the whole domain Config. `warden hooks enable/disable` and
-// `init` route through here so toggling a hook never strips a user's inline
-// documentation. When no file exists yet it falls back to a minimal Save.
+// preserving the rest of the file byte-for-byte — comments, ordering, blank
+// lines, and comment alignment — so `warden hooks enable/disable` and `init`
+// never strip a user's inline documentation. When no file exists yet it falls
+// back to a minimal Save.
+//
+// It tries a byte-level splice of the two hook values first, because editing
+// the YAML node tree is NOT enough: yaml.Node round-trips comments but not
+// blank lines or intra-line spacing, so re-encoding the document reflows the
+// whole file (#134). That churn is cosmetic in effect but not in consequence —
+// it dirties the working tree during unrelated work, and the noisiest part of
+// the resulting diff lands on trusted_keys, the one block where a reviewer
+// should see nothing but real changes. The node encoder remains the fallback
+// for the case the splice cannot handle: a key that must be *created*.
 func (r *Repository) SetHooks(h domain.HookConfig) error {
 	path := filepath.Join(r.root, FileName)
 	data, err := os.ReadFile(path)
@@ -259,6 +267,21 @@ func (r *Repository) SetHooks(h domain.HookConfig) error {
 		return r.Save(domain.Config{Hooks: h})
 	}
 	root := doc.Content[0]
+
+	if out, ok := spliceHooks(data, root, h); ok {
+		if bytes.Equal(out, data) {
+			// Already correct. Writing identical bytes would still bump mtime and
+			// make the file look touched to every watcher and build cache, so the
+			// honest no-op is to not write at all — and re-pinning hooks after an
+			// upgrade is exactly this case.
+			return nil
+		}
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+		return nil
+	}
+
 	hooks := findOrCreateMap(root, "hooks")
 	setScalarBool(hooks, "pre_commit", h.PreCommit)
 	setScalarBool(hooks, "pre_push", h.PrePush)
@@ -274,6 +297,84 @@ func (r *Repository) SetHooks(h domain.HookConfig) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// spliceHooks rewrites the two hook values directly in the original bytes,
+// leaving every other byte exactly as the author wrote it. It reports false
+// when the file does not already carry both scalars — creating a key is a
+// structural edit, which is the node encoder's job, not a splice's.
+func spliceHooks(data []byte, root *yaml.Node, h domain.HookConfig) ([]byte, bool) {
+	hooks := mapValue(root, "hooks")
+	if hooks == nil || hooks.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	preCommit := mapValue(hooks, "pre_commit")
+	prePush := mapValue(hooks, "pre_push")
+	if !spliceable(preCommit) || !spliceable(prePush) {
+		return nil, false
+	}
+	// Flow style (`hooks: {pre_commit: true, pre_push: false}`) puts both values
+	// on one line, where the first edit invalidates the second's column. Bail
+	// rather than reason about the shift; the fallback handles it correctly.
+	if preCommit.Line == prePush.Line {
+		return nil, false
+	}
+
+	lines := splitLinesKeepEnds(data)
+	if !replaceScalar(lines, preCommit, strconv.FormatBool(h.PreCommit)) ||
+		!replaceScalar(lines, prePush, strconv.FormatBool(h.PrePush)) {
+		return nil, false
+	}
+	return bytes.Join(lines, nil), true
+}
+
+// spliceable reports whether n is a plain boolean scalar we can rewrite in
+// place. A non-bool tag means the user wrote something we did not expect there,
+// and quietly overwriting it would be worse than reflowing the file.
+func spliceable(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!bool"
+}
+
+// replaceScalar swaps n's value token for want within its own line, keeping
+// anything before it (indentation, the key) and after it (a trailing comment).
+//
+// It verifies the computed span actually holds the value the parser reported
+// before writing. yaml.Node columns are the parser's view, not a byte offset we
+// derived ourselves, so a mismatch means our arithmetic does not apply to this
+// file — and a bad splice would corrupt config rather than merely reformat it.
+// Reporting false there routes the caller to the safe fallback.
+func replaceScalar(lines [][]byte, n *yaml.Node, want string) bool {
+	idx := n.Line - 1
+	if idx < 0 || idx >= len(lines) {
+		return false
+	}
+	line := lines[idx]
+	start, end := n.Column-1, n.Column-1+len(n.Value)
+	if start < 0 || end > len(line) || string(line[start:end]) != n.Value {
+		return false
+	}
+	out := make([]byte, 0, len(line)-len(n.Value)+len(want))
+	out = append(out, line[:start]...)
+	out = append(out, want...)
+	out = append(out, line[end:]...)
+	lines[idx] = out
+	return true
+}
+
+// splitLinesKeepEnds splits data into lines that each retain their trailing
+// newline, so re-joining them reproduces the input byte-for-byte — including a
+// final line with no newline of its own.
+func splitLinesKeepEnds(data []byte) [][]byte {
+	var out [][]byte
+	for len(data) > 0 {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			return append(out, data)
+		}
+		out = append(out, data[:i+1])
+		data = data[i+1:]
+	}
+	return out
 }
 
 // mapValue returns the value node for key in a mapping node, or nil.
