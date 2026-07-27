@@ -58,15 +58,15 @@ pre-1.0; once it reaches `v1.0.0` the release publishes a `@v1` tag and `@v0` is
 frozen at its last `v0.x`.
 
 Because warden is itself a supply-chain tool, a security-critical gate is better
-served by an **immutable** reference — pin an exact version (`@v0.16.0`) or,
+served by an **immutable** reference — pin an exact version (`@v0.20.4`) or,
 strongest, the tag's commit SHA and let Dependabot bump it:
 
 ```yaml
-      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0.16.0 # or a commit SHA
+      - uses: klarlabs-studio/warden/.github/actions/warden-gate@v0.20.4 # or a commit SHA
 ```
 
 Both forms are supported. The trade-off is convenience — `@v0` tracks new
-releases — versus an audited, unchanging reference (`@v0.16.0` or a SHA).
+releases — versus an audited, unchanging reference (`@v0.20.4` or a SHA).
 
 ## What "trustworthy" means, and how to tune it
 
