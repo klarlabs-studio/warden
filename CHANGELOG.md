@@ -6,6 +6,23 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Toggling a hook no longer reflows the whole config** (#134). `warden hooks
+  enable` rewrote formatting it had no business touching: a blank separator
+  line was dropped and the aligned trailing comments on `trusted_keys` were
+  collapsed to single-space. The intent was already right — `SetHooks` edits
+  the YAML node tree rather than re-serializing the config, precisely so
+  comments survive — but `yaml.Node` round-trips comments and *not* blank lines
+  or intra-line spacing, so the closing re-encode reflowed the document anyway.
+
+  The hook values are now spliced directly into the original bytes, and a
+  toggle that changes nothing does not write at all — re-pinning hooks after an
+  upgrade is exactly that case, and an identical write still bumps mtime for
+  every watcher and build cache. Configs that predate the `hooks` block, or use
+  flow style, still route to the node encoder: reformatting is an acceptable
+  cost when the alternative is failing to record the setting.
+
 ## [0.20.3] — 2026-07-27
 
 Two gates stop refusing work they should have allowed, and the release re-drive
