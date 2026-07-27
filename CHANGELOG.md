@@ -6,7 +6,30 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.3] — 2026-07-27
+
+Two gates stop refusing work they should have allowed, and the release re-drive
+gets the fix 0.20.2 claimed but did not deliver.
+
 ### Fixed
+
+- **The scanner version check now judges drift by its effect, not by the version
+  string** (#131). The check refused to scan the moment the local binary
+  differed from the version CI pins. The reasoning was sound — a scanner that
+  renumbers rule ids between releases invalidates every baseline fingerprint at
+  once — but it asserted a *proxy*, and the proxy is wrong far more often than
+  it is right: releases mostly do not renumber rules. Measured on one repo,
+  same tree, same committed baseline, nox 1.17.0, 1.20.0 and 1.22.0 all
+  produced 0 findings and 969 suppressed. Identical. Every push in between was
+  refused for a harm that was not occurring.
+
+  It was also unsatisfiable in practice. The scanner is brew-installed and
+  auto-upgrades — it moved 1.20.0 → 1.22.0 during a single working session, an
+  hour after the pin had been bumped to match. The only ways past were to
+  hand-install a version-matched binary or to bump a pin that drifts again by
+  morning. A gate that cannot be satisfied is a gate people escape with
+  `--no-verify`, which also disables the tests and the security scan — leaving
+  the tree *less* protected than not having the check at all.
 
 - **The discard guard now has a proportionate override** (#124). Refusing a
   force-push that would delete remote-only commits is right, but its only
@@ -21,11 +44,8 @@ All notable changes to warden are documented here. The format follows
   deliberately does **not** override `push.force: never`, which is a repo
   policy decision rather than a per-push safety check.
 
-
-### Fixed
-
-- **A re-driven release now actually replaces its artifacts.** 0.20.2 claimed
-  #125 had made the re-drive idempotent. It had not: `release.mode` governs the
+- **A re-driven release now actually replaces its artifacts** (#129). 0.20.2
+  claimed #125 had made the re-drive idempotent. It had not: `release.mode` governs the
   release *notes* (`keep-existing`/`append`/`prepend`/`replace`), while the
   uploaded *assets* are governed by a separate `replace_existing_artifacts`
   key. Only the first was set, so the v0.20.2 re-drive failed identically to
@@ -33,7 +53,20 @@ All notable changes to warden are documented here. The format follows
   step it was re-driven for. Both keys are set now.
 
   The claim in 0.20.2 below is left as written rather than rewritten, since it
-  describes what was believed at the time; this entry is the correction.
+  describes what was believed at the time; this entry is the correction. This
+  release is what proves it: a `workflow_dispatch` re-drive reads the config at
+  the *tag*, so v0.20.2 could never have exercised the fix.
+
+### Documentation
+
+- **The README installs from the org tap, and trusts it first** (#132). The
+  documented install pointed at `felixgeelhaar/tap`, whose copy of the formula
+  was removed when the casks moved to the org tap — it still resolved only via
+  a `tap_migrations.json` redirect, one deprecation away from breaking. And
+  Homebrew refuses to load a cask from a third-party tap it has not been told
+  to trust, so the command as written failed outright on any machine that had
+  not already trusted this one. That gate arrived *with* the move to the org
+  tap, and its error explains the refusal without explaining the move.
 
 ## [0.20.2] — 2026-07-26
 
