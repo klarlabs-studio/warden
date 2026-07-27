@@ -6,6 +6,10 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.20.4] — 2026-07-27
+
+A single fix, to the one warden command that was editing your config badly.
+
 ### Fixed
 
 - **Toggling a hook no longer reflows the whole config** (#134). `warden hooks
