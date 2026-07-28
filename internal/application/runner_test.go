@@ -934,6 +934,13 @@ func TestRunner_PushesItselfWhenAStepRewroteTheBranch(t *testing.T) {
 // branch, silently, because --force-with-lease is satisfied once you have
 // fetched it. Reproduced against a real remote before this fix.
 func TestRunner_RefusesToForceOverSomeoneElsesWork(t *testing.T) {
+	// The override must not leak in from the environment. warden runs `test` as
+	// a pre-push step in its own repo, so a developer legitimately pushing with
+	// WARDEN_ALLOW_DISCARD=1 — the exact case the override exists for — would
+	// otherwise fail this test during that very push, and the override would be
+	// self-defeating. Found doing precisely that (#138).
+	t.Setenv("WARDEN_ALLOW_DISCARD", "")
+
 	git := &fakeGit{
 		root: t.TempDir(), branch: "shared", head: "sha1",
 		wt:              &fakeWorktree{dir: "/wt", headSHA: "sha1"},
@@ -1032,6 +1039,13 @@ func TestRunner_RefusesToForceWhenItCannotTell(t *testing.T) {
 // reach for it routinely, so the scan stops running precisely on the branches
 // that just absorbed someone else's changes.
 func TestRunner_AllowDiscardIsScopedToThisGuard(t *testing.T) {
+	// Clear it explicitly: this test asserts the guard's behavior with the
+	// override ABSENT, and the developer most likely to run the suite with it
+	// set in the environment is the one using it for a real push. See
+	// TestRunner_RefusesToForceOverSomeoneElsesWork for why that is not
+	// hypothetical.
+	t.Setenv("WARDEN_ALLOW_DISCARD", "")
+
 	git := &fakeGit{rewritesHistory: true, unmergedRemote: []string{"abc1234 COLLEAGUE WORK"}}
 	cfg := prePushCfg()
 	rr := &Runner{Git: git, Settings: Settings{Remote: "origin"}}
