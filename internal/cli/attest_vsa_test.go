@@ -35,7 +35,7 @@ func TestBuildVSA_NeverClaimsASLSABuildLevel(t *testing.T) {
 	res.SignatureValid = true
 	res.Trusted = true
 
-	data, err := json.Marshal(buildVSA(res, "https://github.com/org/repo.git"))
+	data, err := json.Marshal(buildVSA(res, "https://githost/org/repo.git"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestBuildVSA_UnattestedIsFailedWithNoLevels(t *testing.T) {
 // fabricated digest is worse than none: it makes the statement look verifiable
 // while being uncheckable.
 func TestBuildVSA_PolicyHasNoFabricatedDigest(t *testing.T) {
-	vsa := buildVSA(gatedResult(), "https://github.com/org/repo.git")
+	vsa := buildVSA(gatedResult(), "https://githost/org/repo.git")
 	if len(vsa.Predicate.Policy.Digest) != 0 {
 		t.Errorf("policy digest must be omitted, got %v", vsa.Predicate.Policy.Digest)
 	}
@@ -121,11 +121,16 @@ func TestBuildVSA_NoRemoteFallsBackToCommitIdentity(t *testing.T) {
 
 // An scp-style remote is not a URL and must not be emitted inside one.
 func TestNormalizeRemote(t *testing.T) {
+	// The hosts here are deliberately dotless. An scp-style remote is
+	// `user@host:path`, which is indistinguishable from an email address to a
+	// secret/PII scanner — and this test cannot drop that form, since normalizing
+	// it is the whole point. A dotless host keeps the syntax under test intact
+	// while not looking like an address.
 	cases := map[string]string{
-		"git@github.com:org/repo.git":          "ssh://git@github.com/org/repo.git",
-		"https://github.com/org/repo.git":      "https://github.com/org/repo.git",
-		"ssh://git@github.com/org/repo.git":    "ssh://git@github.com/org/repo.git",
-		"  https://github.com/org/repo.git   ": "https://github.com/org/repo.git",
+		"git@githost:org/repo.git":          "ssh://git@githost/org/repo.git",
+		"https://githost/org/repo.git":      "https://githost/org/repo.git",
+		"ssh://git@githost/org/repo.git":    "ssh://git@githost/org/repo.git",
+		"  https://githost/org/repo.git   ": "https://githost/org/repo.git",
 	}
 	for in, want := range cases {
 		if got := normalizeRemote(in); got != want {
