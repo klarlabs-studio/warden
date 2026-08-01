@@ -28,6 +28,9 @@ func (a *Adapter) DiffStats(base string) (domain.DiffStats, error) {
 // StagedPaths, but it returns full DiffStats).
 func (a *Adapter) StagedDiffStats() (domain.DiffStats, error) { return a.repo.StagedPaths() }
 
+// GitDir exposes the repository's .git directory to the application layer.
+func (a *Adapter) GitDir() (string, error) { return a.repo.GitDir() }
+
 func (a *Adapter) SeedWorktreeFromHead(materializeDeps bool) (application.Worktree, error) {
 	wt, err := a.repo.CreateWorktreeFromHead(materializeDeps)
 	if err != nil {

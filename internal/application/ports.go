@@ -19,6 +19,10 @@ type ConfigRepository interface {
 type Git interface {
 	CurrentBranch() (string, error)
 	HeadSHA() (string, error)
+	// GitDir is the repository's .git directory. It is the stable per-clone
+	// location warden roots local, never-committed state at — notably the build
+	// cache that lets a compiled language reuse work across runs.
+	GitDir() (string, error)
 	// MergeBase returns the merge-base of HEAD and ref (e.g. "origin/main"),
 	// used as the diff base for risk. Empty ref falls back to HEAD's parent.
 	MergeBase(ref string) (string, error)

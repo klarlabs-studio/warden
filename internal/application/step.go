@@ -50,6 +50,11 @@ type StepContext struct {
 	// SecurityScan is the resolved security-scan gate configuration (delta vs
 	// total, base ref, scanner version check).
 	SecurityScan domain.SecurityScanConfig
+	// BuildCacheDir is a warden-owned directory, stable across runs, where a
+	// toolchain's build cache is redirected so a fresh worktree does not force a
+	// cold rebuild. Empty disables the redirection entirely — it is an
+	// optimization, and a step must behave identically without it.
+	BuildCacheDir string
 	// PriorFindings carries findings from earlier steps, so a step can react
 	// to what came before (mirrors the wire protocol's prior_findings).
 	PriorFindings []domain.Finding

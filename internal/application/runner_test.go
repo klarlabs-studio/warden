@@ -38,6 +38,7 @@ func (w *fakeWorktree) Clone(bool) (Worktree, error) {
 }
 
 type fakeGit struct {
+	gitDir          string
 	root            string
 	branch          string
 	branchErr       error
@@ -60,9 +61,14 @@ type fakeGit struct {
 	wt                *fakeWorktree
 }
 
-func (g *fakeGit) Root() string                     { return g.root }
-func (g *fakeGit) CurrentBranch() (string, error)   { return g.branch, g.branchErr }
-func (g *fakeGit) HeadSHA() (string, error)         { return g.head, nil }
+func (g *fakeGit) Root() string                   { return g.root }
+func (g *fakeGit) CurrentBranch() (string, error) { return g.branch, g.branchErr }
+func (g *fakeGit) HeadSHA() (string, error)       { return g.head, nil }
+
+// GitDir returns gitDir, empty by default. An empty git dir is a supported
+// state — it disables build-cache reuse, which is an optimization a run must
+// behave identically without.
+func (g *fakeGit) GitDir() (string, error)          { return g.gitDir, nil }
 func (g *fakeGit) MergeBase(string) (string, error) { return "base", g.mergeBaseErr }
 func (g *fakeGit) DiffStats(string) (domain.DiffStats, error) {
 	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2}, nil
