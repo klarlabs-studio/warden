@@ -190,3 +190,86 @@ func gitAt(dir string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// printFleet is the human surface, and every branch in it is a different verdict
+// a reader acts on differently — so each one is rendered here.
+func TestPrintFleet_RendersEveryVerdict(t *testing.T) {
+	rep := fleetReport{
+		Adopted: 3, Skipped: 2, Stalled: 1,
+		Commits: 10, Verified: 5, Bypassed: 3, Reattestable: 2, BypassRate: 30,
+		Repos: []fleetRepo{
+			{Path: "/x/bypassed", Adopted: true, Commits: 4, Verified: 1, Bypassed: 3},
+			{Path: "/x/recoverable", Adopted: true, Commits: 4, Verified: 2, Reattestable: 2},
+			{Path: "/x/clean", Adopted: true, Commits: 2, Verified: 2},
+			{Path: "/x/stalled", Configured: true},
+			{Path: "/x/unrelated"},
+		},
+	}
+	var b strings.Builder
+	printFleet(&b, rep)
+	out := b.String()
+
+	for _, want := range []string{
+		"3 repos gated",
+		"1 configured but never adopted",
+		"30.0%",             // the headline rate
+		"bypassed",          // the failing repo
+		"reattestable",      // the recoverable one
+		"clean",             // the passing one
+		"run `warden init`", // the actionable stalled hint
+		"not warden-gated",  // the irrelevant one
+		"protects nothing",  // why a bypass matters
+		"are NOT bypasses",  // why a reattestable gap does not
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A clean fleet must not print the two explanatory footers — advice nobody needs
+// is noise, and noise is what makes people stop reading a report.
+func TestPrintFleet_QuietWhenNothingIsWrong(t *testing.T) {
+	var b strings.Builder
+	printFleet(&b, fleetReport{
+		Adopted: 1, Commits: 3, Verified: 3,
+		Repos: []fleetRepo{{Path: "/x/clean", Adopted: true, Commits: 3, Verified: 3}},
+	})
+	out := b.String()
+	if strings.Contains(out, "protects nothing") || strings.Contains(out, "NOT bypasses") {
+		t.Errorf("a clean fleet should print no remediation footers:\n%s", out)
+	}
+}
+
+// An empty rollup must not render a commit line claiming a clean sweep of zero.
+func TestPrintFleet_NoCommitsPrintsNoRate(t *testing.T) {
+	var b strings.Builder
+	printFleet(&b, fleetReport{Skipped: 1, Repos: []fleetRepo{{Path: "/x/none"}}})
+	if strings.Contains(b.String(), "commits since adoption") {
+		t.Errorf("no commits should not render a rate line:\n%s", b.String())
+	}
+}
+
+// A genuinely gated repo exercises the counting path end to end, and a bypassed
+// commit must make the command exit non-zero so it composes as a CI check.
+func TestFleet_ExitsNonZeroOnARealBypass(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	dir := gitRepo(t)
+	writeConfig(t, dir, "hooks: { pre_push: true }\nsteps: { pre_push: [lint] }\ncommands: { lint: \"true\" }\nrules: []\n")
+	if code, _, errb := run("init"); code != 0 {
+		t.Fatalf("init: %d %q", code, errb)
+	}
+	// A commit made without the gate is a bypass by construction.
+	if out, err := gitAt(dir, "commit", "--allow-empty", "--no-verify", "-m", "snuck past"); err != nil {
+		t.Fatalf("commit: %v %s", err, out)
+	}
+
+	rep := surveyFleet([]string{dir}, "")
+	if rep.Adopted != 1 {
+		t.Fatalf("the repo should be adopted: %+v", rep.Repos)
+	}
+	code, _, _ := run("fleet", "status", dir)
+	if rep.Bypassed > 0 && code == 0 {
+		t.Error("a bypassed commit must make fleet status exit non-zero")
+	}
+}
