@@ -173,8 +173,11 @@ func mkRepo(t *testing.T, dir string) {
 	}
 	for _, args := range [][]string{
 		{"init"},
-		{"config", "user.email", "t@t.co"},
-		{"config", "user.name", "t"},
+		// A non-address identity on purpose: git does not validate this field, and
+		// a literal that LOOKS like an email trips secret/PII scanners on a test
+		// fixture that contains no address at all.
+		{"config", "user.email", "warden-fleet-test"},
+		{"config", "user.name", "warden-fleet-test"},
 		{"commit", "--allow-empty", "-m", "init"},
 	} {
 		if out, err := gitAt(dir, args...); err != nil {
