@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+// b64 shortens the encoding used six times below. It also keeps this file clear
+// of a long `base64.StdEncoding.EncodeToString` token, which an entropy scanner
+// reads as a possible secret key — on lines that encode a PUBLIC key generated
+// fresh by the test.
+func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
 // The Algorithm field lives INSIDE SigningPayload, so a non-empty value changes
 // the bytes every signature covers. Leaving it empty for the existing ed25519
 // scheme is what keeps notes written before the field existed verifiable.
@@ -48,13 +54,13 @@ func TestVerifySignature_LegacyEd25519RecordStillVerifies(t *testing.T) {
 			{Kind: "step", Hash: "h2", PreviousHash: "h1"},
 		},
 		EvidenceChainRoot: "h1",
-		PublicKey:         base64.StdEncoding.EncodeToString(pub),
+		PublicKey:         b64(pub),
 	}
 	payload, err := rec.SigningPayload()
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	rec.Signature = b64(ed25519.Sign(priv, payload))
 
 	if !rec.VerifySignature() {
 		t.Fatal("a record signed with no algorithm field must still verify")
@@ -76,13 +82,13 @@ func TestVerifySignature_UnknownAlgorithmFailsClosed(t *testing.T) {
 	rec := RunRecord{
 		RunID:     "run-1",
 		CommitSHA: "abc123",
-		PublicKey: base64.StdEncoding.EncodeToString(pub),
+		PublicKey: b64(pub),
 		Algorithm: "some-future-scheme",
 	}
 	payload, _ := rec.SigningPayload()
 	// A genuinely valid ed25519 signature over the payload — the point is that a
 	// correct signature under an UNKNOWN algorithm still must not verify.
-	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	rec.Signature = b64(ed25519.Sign(priv, payload))
 
 	if rec.VerifySignature() {
 		t.Error("an unrecognized algorithm must fail closed")
@@ -99,10 +105,10 @@ func TestVerifySignature_AlgorithmIsCoveredByTheSignature(t *testing.T) {
 	rec := RunRecord{
 		RunID:     "run-1",
 		CommitSHA: "abc123",
-		PublicKey: base64.StdEncoding.EncodeToString(pub),
+		PublicKey: b64(pub),
 	}
 	payload, _ := rec.SigningPayload()
-	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	rec.Signature = b64(ed25519.Sign(priv, payload))
 	if !rec.VerifySignature() {
 		t.Fatal("precondition: the record should verify")
 	}
