@@ -27,6 +27,9 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "attest", "commit") {
+		return 2
+	}
 	// Reject an unknown predicate rather than silently emitting the default. A
 	// caller who asked for a shape and got a different one would ship the wrong
 	// statement into their supply chain without ever being told.

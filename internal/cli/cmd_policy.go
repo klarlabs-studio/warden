@@ -27,6 +27,9 @@ func cmdPolicy(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "policy explain", "") {
+		return 2
+	}
 
 	hook, err := domain.ParseHook(*hookFlag)
 	if err != nil {

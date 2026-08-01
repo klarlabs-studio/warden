@@ -23,6 +23,9 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "audit", "branch") {
+		return 2
+	}
 	if *formatFlag != "text" && *formatFlag != "json" && *formatFlag != "md" {
 		_, _ = fmt.Fprintf(stderr, "warden: unknown --format %q (want text, json, or md)\n", *formatFlag)
 		return 2
@@ -126,12 +129,12 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 		c := &r.Commits[i]
 		switch {
 		case c.HasNote:
-			state := "chain-intact"
+			glyph, state := "✓", "chain-intact"
 			if !c.ChainIntact {
-				state = "TAMPERED"
+				glyph, state = "⚠", noteDefectLabel(c.NoteDefect)
 			}
-			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
-				short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
+			_, _ = fmt.Fprintf(w, "  %s %s  %s  %s  (%s, %d steps, %s)\n",
+				glyph, short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
 		case c.Reattestable():
 			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.ReattestableFrom))
@@ -158,7 +161,9 @@ func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
 		case c.HasNote && c.ChainIntact:
 			status, run = "verified (chain-intact)", c.RunID
 		case c.HasNote:
-			status, run = "verified (TAMPERED)", c.RunID
+			// "verified (TAMPERED)" was doubly wrong: it called an unattested commit
+			// verified, and named the innocent cases tampering.
+			status, run = "unverified ("+c.NoteDefect+")", c.RunID
 		case c.Reattestable():
 			status, run = "unverified (reattestable)", "`"+short(c.ReattestableFrom)+"`"
 		}

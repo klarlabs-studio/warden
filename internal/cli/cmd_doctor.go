@@ -17,6 +17,9 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "doctor", "branch") {
+		return 2
+	}
 
 	svc, err := newService(autoApprover{})
 	if err != nil {
@@ -42,12 +45,18 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 		c := &r.Commits[i]
 		switch {
 		case c.HasNote:
-			state := "chain-intact"
+			// Not a blanket "TAMPERED": that word was printed for three different
+			// failures, and the commonest — a note left behind by a rebase — is not
+			// tampering at all. Only a broken chain earns it.
+			//
+			// The glyph must not contradict the label either: "✓ … TAMPERED" reads
+			// as a pass at a glance, and a glance is all most of these lines get.
+			glyph, state := "✓", "chain-intact"
 			if !c.ChainIntact {
-				state = "TAMPERED"
+				glyph, state = "⚠", noteDefectLabel(c.NoteDefect)
 			}
-			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
-				short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
+			_, _ = fmt.Fprintf(w, "  %s %s  %s  %s  (%s, %d steps, %s)\n",
+				glyph, short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
 		case c.Covered():
 			// Published by a gated push, just not individually attested — warden
 			// validates one tree per run and vouches for the span. Reporting this
@@ -83,6 +92,28 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 	if n := len(r.Reattestable()); n > 0 {
 		_, _ = fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
 			"  warden reattest --all --branch %s --push\n", n, unverified, r.Branch)
+	}
+}
+
+// noteDefectLabel renders why a note failed to attest its commit.
+//
+// "TAMPERED" is reserved for the one defect that actually suggests it. A note
+// that is internally sound but describes a different commit is what a rebase or
+// squash leaves behind, and accusing someone of tampering because they rewrote
+// their own history is the same unevidenced claim as calling an unpushed commit
+// a bypass. The verdict is unchanged — none of these count as verified.
+func noteDefectLabel(defect string) string {
+	switch defect {
+	case domain.DefectChainBroken:
+		return "TAMPERED (evidence chain broken)"
+	case domain.DefectUnbound:
+		return "UNBOUND (note describes another commit — history was rewritten)"
+	case domain.DefectNoEvidence:
+		return "NO EVIDENCE (note records no steps)"
+	default:
+		// An unrecognized defect must still read as "do not trust this", never as
+		// a blank that looks like a pass.
+		return "UNVERIFIED"
 	}
 }
 

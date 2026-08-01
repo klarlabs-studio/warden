@@ -140,6 +140,41 @@ func (r RunRecord) Attests(sha string) bool {
 	return len(r.Evidence) > 0 && r.VerifyChain() && r.BindsTo(sha)
 }
 
+// Attestation defects, in the order Attests checks them.
+const (
+	// DefectNoEvidence: the record recorded no steps at all.
+	DefectNoEvidence = "no evidence recorded"
+	// DefectChainBroken: the hash chain does not link up. This is the one that
+	// genuinely suggests the record was altered after it was written.
+	DefectChainBroken = "evidence chain broken"
+	// DefectUnbound: the record is internally sound but describes a DIFFERENT
+	// commit. The ordinary cause is a rewritten history — a rebase or a squash
+	// moved the content to a new SHA and the note stayed with the old one. It is
+	// not evidence that anyone altered anything.
+	DefectUnbound = "note is bound to a different commit"
+)
+
+// AttestDefect names why the record fails to attest sha, or "" when it attests.
+//
+// Attests folds three distinct failures into one boolean, and callers rendered
+// that boolean as "TAMPERED". Two of the three have entirely innocent causes,
+// and telling someone their history was tampered with because they rebased is
+// the same over-accusation as calling an unpushed commit a bypass: it spends the
+// reader's trust on a claim the data does not support. The gate is unchanged —
+// all three still fail Attests, and verify still refuses them.
+func (r RunRecord) AttestDefect(sha string) string {
+	switch {
+	case len(r.Evidence) == 0:
+		return DefectNoEvidence
+	case !r.VerifyChain():
+		return DefectChainBroken
+	case !r.BindsTo(sha):
+		return DefectUnbound
+	default:
+		return ""
+	}
+}
+
 // VerifySignature reports whether the record's signature is a valid ed25519
 // signature over its SigningPayload by the embedded public key. An unsigned or
 // malformed record verifies false. This proves integrity and authenticity

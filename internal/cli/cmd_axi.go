@@ -63,6 +63,9 @@ func axiVerify(f facade, args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "axi verify", "commit") {
+		return 2
+	}
 	rec, err := f.Verify(*commitFlag, splitList(*keysFlag))
 	if err != nil {
 		return fail(stderr, err)
@@ -102,6 +105,9 @@ func axiVerifyRange(f facade, args []string, stdout, stderr io.Writer) int {
 	keysFlag := fs.String("key", "", "comma-separated trusted keys or fingerprints")
 	skipMergesFlag := fs.Bool("skip-merges", true, "skip merge commits; their parents are gated individually")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if rejectExtraArgs(fs, stderr, "axi verify-range", "range") {
 		return 2
 	}
 	if *baseFlag == "" {
@@ -154,6 +160,9 @@ func axiAuditReport(report func(string) (domain.AuditReport, error), args []stri
 	fs.SetOutput(stderr)
 	branchFlag := fs.String("branch", "", "branch to report on (default current)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if rejectExtraArgs(fs, stderr, "axi audit", "branch") {
 		return 2
 	}
 	rep, err := report(*branchFlag)
@@ -219,6 +228,9 @@ func axiPolicyExplain(f facade, args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "axi policy-explain", "") {
+		return 2
+	}
 	hook, err := domain.ParseHook(*hookFlag)
 	if err != nil {
 		return fail(stderr, err)
@@ -253,6 +265,9 @@ func axiRunTrigger(f facade, args []string, stdout, stderr io.Writer) int {
 	hookFlag := fs.String("hook", "pre-push", "hook")
 	trustFlag := fs.Bool("trust", false, "trust this repo and run its configured commands (also WARDEN_MCP_ALLOW_RUN=1)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if rejectExtraArgs(fs, stderr, "axi run-trigger", "") {
 		return 2
 	}
 	// run-trigger executes repo-authored shell on the auto-approved path, so

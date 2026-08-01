@@ -12,8 +12,12 @@ type CommitStatus struct {
 	HasNote bool
 	// ChainIntact reports whether the note's evidence chain verified.
 	ChainIntact bool
-	RunID       string
-	Steps       []StepName
+	// NoteDefect names WHY a note failed to attest its commit, when one did.
+	// Empty when ChainIntact. See RunRecord.AttestDefect: "TAMPERED" was being
+	// printed for three different failures, two of them innocent.
+	NoteDefect string `json:"note_defect,omitempty"`
+	RunID      string
+	Steps      []StepName
 	// CoveredBy names a validated commit whose signed push span published this
 	// one — everything in (CoversFrom, tip] went out together, gated as a unit.
 	//
@@ -126,6 +130,9 @@ func NewCommitStatus(sha, author, date, subject string, note *RunRecord) CommitS
 	// "Intact" now requires the note to actually attest THIS commit — an intact
 	// but unbound or transplanted note (or a hand-forged `{}`) no longer counts.
 	cs.ChainIntact = note.Attests(sha)
+	if !cs.ChainIntact {
+		cs.NoteDefect = note.AttestDefect(sha)
+	}
 	return cs
 }
 

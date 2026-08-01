@@ -17,6 +17,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if rejectExtraArgs(fs, stderr, "init", "") {
+		return 2
+	}
 
 	selected, err := parseHooksFlag(*hooksFlag)
 	if err != nil {
