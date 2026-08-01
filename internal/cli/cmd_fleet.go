@@ -80,7 +80,13 @@ type fleetReport struct {
 	Commits int `json:"commits"`
 	// Verified carries a note; Bypassed has none and none is recoverable;
 	// Reattestable has none but a tree-identical validated commit exists.
-	Verified     int `json:"verified"`
+	Verified int `json:"verified"`
+	// Covered counts commits a gated push published without a note of their own.
+	// warden validates ONE tree per run and vouches for the span, so these are
+	// verified in substance — and they must be TALLIED, not merely excluded from
+	// the bypass count: the buckets are summed, so a state the report does not
+	// enumerate silently loses every commit in it.
+	Covered      int `json:"covered"`
 	Bypassed     int `json:"bypassed"`
 	Reattestable int `json:"reattestable"`
 	// Unattributable counts commits whose status cannot be determined because the
@@ -118,6 +124,7 @@ type fleetRepo struct {
 	// pre-squash commit, and counting those as bypasses would inflate the number
 	// that is supposed to trigger an intervention. Overstating the problem gets
 	// the metric dismissed as noisy, which costs more than not having it.
+	Covered        int `json:"covered"`
 	Bypassed       int `json:"bypassed"`
 	Reattestable   int `json:"reattestable"`
 	Unattributable int `json:"unattributable"`
@@ -191,6 +198,7 @@ func surveyFleet(paths []string, branch string) fleetReport {
 		rep.Adopted++
 		rep.Commits += r.Commits
 		rep.Verified += r.Verified
+		rep.Covered += r.Covered
 		rep.Bypassed += r.Bypassed
 		rep.Reattestable += r.Reattestable
 		rep.Unattributable += r.Unattributable
@@ -229,8 +237,14 @@ func surveyRepo(path, branch string) fleetRepo {
 	r.Verified = verified
 	r.Reattestable = len(report.Reattestable())
 	r.Bypassed = countBypassed(report)
+	// Every state the domain distinguishes must be counted here, or the buckets
+	// stop accounting for the commits. TestGoldenFleet_BucketsAccountForEveryCommit
+	// is what catches a state added to the domain and forgotten here.
 	for i := range report.Commits {
-		if report.Commits[i].Unattributable() {
+		switch {
+		case report.Commits[i].Covered():
+			r.Covered++
+		case report.Commits[i].Unattributable():
 			r.Unattributable++
 		}
 	}
@@ -260,8 +274,12 @@ func printFleet(w io.Writer, rep fleetReport) {
 	}
 	_, _ = fmt.Fprintln(w)
 	if rep.Commits > 0 {
-		_, _ = fmt.Fprintf(w, "%d commits since adoption: %d verified, %d bypassed (%.1f%%), %d reattestable",
-			rep.Commits, rep.Verified, rep.Bypassed, rep.BypassRate, rep.Reattestable)
+		_, _ = fmt.Fprintf(w, "%d commits since adoption: %d verified", rep.Commits, rep.Verified)
+		if rep.Covered > 0 {
+			_, _ = fmt.Fprintf(w, " (+%d covered by a gated push)", rep.Covered)
+		}
+		_, _ = fmt.Fprintf(w, ", %d bypassed (%.1f%%), %d reattestable",
+			rep.Bypassed, rep.BypassRate, rep.Reattestable)
 		if rep.Unattributable > 0 {
 			_, _ = fmt.Fprintf(w, ", %d unattributable", rep.Unattributable)
 		}
