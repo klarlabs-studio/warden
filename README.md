@@ -199,6 +199,41 @@ Because it's part of the signed, hash-chained record, a validated commit ships a
 tamper-evident, signed fingerprint of exactly which dependency sets it had —
 shown by `warden why`.
 
+### Exporting to the supply-chain ecosystem
+
+`warden attest` projects a note into an in-toto Statement so it can feed sigstore,
+GUAC or a policy engine instead of staying a warden-only shape:
+
+```bash
+warden attest                      # the full warden predicate (evidence chain + SBOM)
+warden attest --predicate vsa      # a SLSA Verification Summary Attestation
+```
+
+A warden note already says *"a verifier ran a policy against this thing, here's
+the result"* — which is exactly what a **VSA** says. SLSA defines VSA at the
+artifact layer; warden's is the same statement one layer earlier, about the
+commit the artifact is built from. Emitting it in that vocabulary means security
+teams and CI vendors don't have to learn a warden-specific predicate to answer
+"was this checked, and by whom?".
+
+It reports what warden actually verified, and nothing more:
+
+```json
+"verificationResult": "PASSED",
+"verifiedLevels": ["WARDEN_SOURCE_GATED", "WARDEN_SOURCE_SIGNED", "WARDEN_SOURCE_TRUSTED"]
+```
+
+Those levels are warden-namespaced **on purpose**. Warden does not produce a SLSA
+build level and will never claim one — a consumer looking for `SLSA_BUILD_LEVEL_3`
+correctly finds nothing here. They also accumulate: a signature proves the *note*
+was signed, never that the *commit* was gated, so `SIGNED` cannot appear without
+`GATED`, and an unattested note reports `FAILED` with no levels at all.
+
+The VSA is the interop view, not a replacement — it has nowhere to put the
+hash-chained evidence entries or the dependency SBOM, which are the parts that
+make a warden note verifiable rather than merely assertive. That's why the warden
+predicate stays the default.
+
 ## Configuration (`.warden.yaml`)
 
 ```yaml
@@ -296,7 +331,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
-| `warden attest [--commit c]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop) |
+| `warden attest [--commit c] [--predicate warden\|vsa]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop); `vsa` emits a SLSA Verification Summary Attestation |
 | `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |
 | `warden reattest --all [--branch b] [--push]` | sweep a branch: re-attest every recoverable squash-merge gap since adoption |
 | `warden key show` | print this machine's provenance signing key + fingerprint |

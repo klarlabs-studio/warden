@@ -1,0 +1,190 @@
+package cli
+
+import (
+	"strings"
+
+	"go.klarlabs.de/warden/internal/service"
+)
+
+// The SLSA Verification Summary Attestation projection.
+//
+// WHY THIS EXISTS. Warden's note already says "a verifier ran a policy against
+// this thing and here is the result" — which is precisely what a VSA says. SLSA
+// defines VSA at the ARTIFACT layer (someone verified this tarball); warden's is
+// the same statement one layer earlier, about the commit the artifact is built
+// from. Emitting it in the vocabulary security teams and CI vendors already
+// consume means they do not have to learn a warden-specific predicate to answer
+// "was this checked, and by whom?".
+//
+// WHY IT DOES NOT REPLACE THE NATIVE PREDICATE. VSA is a summary: it has nowhere
+// to put the hash-chained evidence entries or the dependency SBOM, which are the
+// parts that make warden's note verifiable rather than merely assertive. So the
+// warden predicate stays the default and the full record; VSA is the interop
+// view, requested with `--predicate vsa`.
+//
+// WHAT IT DELIBERATELY DOES NOT CLAIM. The existing predicate carries a comment
+// explaining that warden must not claim `slsa.dev/provenance`, because warden
+// attests SOURCE provenance and that predicate means BUILD provenance. The same
+// discipline applies inside a VSA, and it lands on `verifiedLevels`: warden does
+// not produce a SLSA build level and must never say it did. SlsaResult is an
+// open enum precisely so verifiers can report their own results, so warden
+// reports warden's. A consumer looking for SLSA_BUILD_LEVEL_3 correctly finds
+// nothing here.
+const vsaPredicateID = "https://slsa.dev/verification_summary/v1"
+
+// Predicate selectors for `warden attest --predicate`.
+const (
+	predicateWarden = "warden"
+	predicateVSA    = "vsa"
+)
+
+// verifierID identifies warden as the verifier that produced the summary. It is
+// a TypeURI, not a fetchable endpoint.
+const verifierID = "https://warden.klarlabs.de"
+
+// Verified levels warden can honestly assert. They are namespaced so they can
+// never be mistaken for a SLSA build level, and they are ordered by how much
+// they actually prove:
+//
+//   - GATED     the configured policy ran and passed against this exact commit
+//   - SIGNED    …and the note carries a signature that verifies
+//   - TRUSTED   …and that signature was made by a key the caller pinned
+//
+// A verifier that only checked the chain must not be able to imply it checked
+// the signer, so these accumulate rather than replace.
+const (
+	levelGated   = "WARDEN_SOURCE_GATED"
+	levelSigned  = "WARDEN_SOURCE_SIGNED"
+	levelTrusted = "WARDEN_SOURCE_TRUSTED"
+)
+
+// vsaStatement is an in-toto Statement carrying a SLSA VSA predicate.
+type vsaStatement struct {
+	Type          string          `json:"_type"`
+	Subject       []intotoSubject `json:"subject"`
+	PredicateType string          `json:"predicateType"`
+	Predicate     vsaPredicate    `json:"predicate"`
+}
+
+// vsaPredicate is the SLSA VSA v1 predicate. Optional fields warden cannot fill
+// honestly are omitted rather than guessed at — see buildVSA.
+type vsaPredicate struct {
+	Verifier           vsaVerifier   `json:"verifier"`
+	TimeVerified       string        `json:"timeVerified,omitempty"`
+	ResourceURI        string        `json:"resourceUri"`
+	Policy             vsaDescriptor `json:"policy"`
+	VerificationResult string        `json:"verificationResult"`
+	VerifiedLevels     []string      `json:"verifiedLevels"`
+}
+
+type vsaVerifier struct {
+	ID string `json:"id"`
+	// Version names the warden that produced the note, read from the signed
+	// record rather than from the binary running now — the summary describes the
+	// verification that happened, not the one that could happen today.
+	Version map[string]string `json:"version,omitempty"`
+}
+
+// vsaDescriptor is an in-toto ResourceDescriptor. Digest is omitted when warden
+// has none: a ResourceDescriptor with no digest still identifies the resource,
+// whereas a fabricated one would make the statement unverifiable in the worst
+// way — by looking verifiable.
+type vsaDescriptor struct {
+	URI    string            `json:"uri"`
+	Digest map[string]string `json:"digest,omitempty"`
+}
+
+// buildVSA projects a verified note into a SLSA VSA. Like buildStatement it
+// invents nothing: every field is read from the signed RunRecord or the
+// verification result, and anything warden does not have is left out.
+//
+// remoteURL names the repository when one is configured; it is only used to make
+// the resource and policy URIs resolvable, and a repo without a remote still
+// produces a valid statement identified by commit alone.
+func buildVSA(res service.VerifyResult, remoteURL string) vsaStatement {
+	rec := res.Record
+	attested := res.Validated || rec.Attests(res.SHA)
+
+	// verificationResult is the gate's verdict, and it turns on the same
+	// fail-closed question `warden verify` asks: does an intact note attest THIS
+	// commit? A note that exists but binds elsewhere is FAILED, not PASSED.
+	result := "FAILED"
+	levels := []string{}
+	if attested {
+		result = "PASSED"
+		levels = append(levels, levelGated)
+		// Each further level requires the previous one: an unattested note's
+		// signature proves the note was signed, not that the commit was gated.
+		if res.SignatureValid {
+			levels = append(levels, levelSigned)
+			if res.Trusted {
+				levels = append(levels, levelTrusted)
+			}
+		}
+	}
+
+	pred := vsaPredicate{
+		Verifier:           vsaVerifier{ID: verifierID},
+		TimeVerified:       rec.Timestamp,
+		ResourceURI:        commitResourceURI(remoteURL, res.SHA),
+		Policy:             vsaPolicy(remoteURL, res.SHA),
+		VerificationResult: result,
+		VerifiedLevels:     levels,
+	}
+	if rec.WardenVersion != "" {
+		pred.Verifier.Version = map[string]string{"warden": rec.WardenVersion}
+	}
+
+	return vsaStatement{
+		Type:          statementType,
+		Subject:       []intotoSubject{{Name: "git+commit", Digest: map[string]string{"gitCommit": res.SHA}}},
+		PredicateType: vsaPredicateID,
+		Predicate:     pred,
+	}
+}
+
+// commitResourceURI names the verified resource: the commit itself.
+//
+// With a remote it uses the `git+<url>@<sha>` form pip and npm already use, so
+// the identifier resolves to a real object someone else can fetch and check.
+// Without one it falls back to `git:<sha>` — less useful, but honest: a
+// local-only checkout genuinely has no globally resolvable name, and inventing a
+// URL would be worse than admitting that.
+func commitResourceURI(remoteURL, sha string) string {
+	if remoteURL == "" {
+		return "git:" + sha
+	}
+	return "git+" + normalizeRemote(remoteURL) + "@" + sha
+}
+
+// vsaPolicy points at the policy that was applied: the repository's .warden.yaml
+// AS IT WAS at the verified commit, which the fragment pins exactly.
+//
+// The digest is omitted deliberately. A VSA's policy descriptor would ideally
+// carry one, but the RunRecord does not record a hash of the config, so warden
+// cannot supply it without either re-reading a file that may since have changed
+// (which would describe a different policy than the one that ran) or fabricating
+// a value. Naming the file at that commit is precise and checkable; a wrong
+// digest would be neither.
+func vsaPolicy(remoteURL, sha string) vsaDescriptor {
+	return vsaDescriptor{URI: commitResourceURI(remoteURL, sha) + "#.warden.yaml"}
+}
+
+// normalizeRemote renders a git remote as a URL. scp-style SSH remotes
+// (`git@github.com:org/repo.git`) are not URLs, so they are rewritten to the
+// ssh:// form rather than emitted as-is inside one.
+func normalizeRemote(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if strings.Contains(remote, "://") {
+		return remote
+	}
+	// scp-style: [user@]host:path
+	if at := strings.Index(remote, "@"); at >= 0 {
+		if colon := strings.Index(remote[at:], ":"); colon >= 0 {
+			host := remote[at+1 : at+colon]
+			path := remote[at+colon+1:]
+			return "ssh://" + remote[:at+1] + host + "/" + path
+		}
+	}
+	return remote
+}
