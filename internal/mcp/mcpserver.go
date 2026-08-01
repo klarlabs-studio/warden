@@ -24,7 +24,14 @@ type Facade interface {
 	// StepsList returns built-in + configured step names grouped by hook.
 	StepsList() (preCommit, prePush []domain.StepName, err error)
 	// RunTrigger runs the pipeline for a hook and returns a compact summary.
+	// Synchronous: the axi surface is a one-shot CLI invocation where blocking
+	// until the verdict is exactly right.
 	RunTrigger(ctx context.Context, hook domain.Hook) (RunSummary, error)
+	// RunTriggerStreaming is RunTrigger with progress. onStep is called as each
+	// step finishes, from the run's own goroutine, so it must be quick and
+	// concurrency-safe. It backs the asynchronous MCP path, where a caller polls
+	// rather than waits.
+	RunTriggerStreaming(ctx context.Context, hook domain.Hook, onStep func(StepProgress)) (RunSummary, error)
 
 	// The read-only provenance surface. These interrogate notes that already
 	// exist; none of them runs repo-authored shell, so none is gated on trust.
@@ -135,6 +142,11 @@ type VerifyRangeInput struct {
 	SkipMerges *bool `json:"skip_merges,omitempty" jsonschema:"description=Skip merge commits; their parents are gated individually (default true)"`
 }
 
+// RunStatusInput identifies the run to poll.
+type RunStatusInput struct {
+	RunID string `json:"run_id" jsonschema:"required,description=Run id returned by run_trigger"`
+}
+
 // BranchInput names a branch for the audit reads; empty means the current one.
 type BranchInput struct {
 	Branch string `json:"branch,omitempty" jsonschema:"description=Branch to report on (default the current branch)"`
@@ -160,11 +172,13 @@ func AllowAllRuns() error { return nil }
 // runTriggerDescription documents that run_trigger executes repo-authored shell
 // and is gated on explicit trust, so an agent reading the tool list understands
 // the checkpoint before it calls and the refusal it may get back.
-const runTriggerDescription = "Run the pipeline for a hook and return a compact run summary. " +
+const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATELY with a run_id " +
+	"and phase=running — poll run_status(run_id) for finished steps and the final summary, since " +
+	"a full pipeline routinely takes minutes. " +
 	"This EXECUTES the repository's configured commands as shell on the auto-approved, " +
-	"non-interactive path (no human approval prompt), so it is refused unless the operator " +
-	"has explicitly trusted this repo (WARDEN_MCP_ALLOW_RUN=1, or the axi --trust flag). " +
-	"The read-only tools are always available."
+	"non-interactive path (no human in the loop), so it is refused unless the operator has " +
+	"explicitly trusted this repo (`warden trust add`, the axi --trust flag, or " +
+	"WARDEN_MCP_ALLOW_RUN=1). The read-only tools are always available."
 
 // NewServer builds an MCP server exposing Warden's operation set as typed tools:
 //
@@ -255,22 +269,30 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 			return f.Status()
 		})
 
+	runs := newRegistry()
+
 	srv.Tool("run_trigger").
 		Description(runTriggerDescription).
-		Handler(func(ctx context.Context, in RunTriggerInput) (RunSummary, error) {
-			return handleRunTrigger(ctx, f, gate, in)
-		})
-
-	srv.Tool("run_respond").
-		Description("Not supported in synchronous v0: runs complete inline, so there is no pending run to respond to.").
-		Handler(func(map[string]any) (struct{}, error) {
-			return struct{}{}, errNotSupported("run_respond")
+		Handler(func(_ context.Context, in RunTriggerInput) (RunStatusOutput, error) {
+			return handleRunTrigger(f, gate, runs, in)
 		})
 
 	srv.Tool("run_status").
-		Description("Not supported in synchronous v0: run_trigger returns the final outcome directly.").
+		Description("Poll a run started by run_trigger. Reports the steps that have finished so " +
+			"far and, once the pipeline ends, the full summary. Phase is running, complete or " +
+			"errored — note that 'complete' means the run finished, NOT that the gate passed; read " +
+			"summary.outcome for the verdict.").
+		ReadOnly().
+		Handler(func(in RunStatusInput) (RunStatusOutput, error) {
+			return handleRunStatus(runs, in)
+		})
+
+	srv.Tool("run_respond").
+		Description("Not supported: this surface auto-approves, so a run never pauses for an " +
+			"answer. The operator checkpoint here is the per-repo trust grant that permits " +
+			"run_trigger at all, not a per-run prompt.").
 		Handler(func(map[string]any) (struct{}, error) {
-			return struct{}{}, errNotSupported("run_status")
+			return struct{}{}, errVisible(errNotSupported("run_respond"))
 		})
 
 	return srv
@@ -307,21 +329,39 @@ func handleStepsList(f Facade) (StepsListOutput, error) {
 // MCP client. The gate is consulted before anything else so a refusal is
 // deterministic and never leaks whether the hook or config was otherwise valid.
 // A nil gate leaves the run unguarded (see RunGate).
-func handleRunTrigger(ctx context.Context, f Facade, gate RunGate, in RunTriggerInput) (RunSummary, error) {
+func handleRunTrigger(f Facade, gate RunGate, runs *registry, in RunTriggerInput) (RunStatusOutput, error) {
 	if gate != nil {
 		if err := gate(); err != nil {
 			// The refusal names the opt-in that resolves it, so it must survive
 			// the dispatcher's sanitizing — see visible.
-			return RunSummary{}, errVisible(err)
+			return RunStatusOutput{}, errVisible(err)
 		}
 	}
 	hook, err := domain.ParseHook(in.Hook)
 	if err != nil {
 		// Bad input: the model can retry with the right value, but only once it
 		// can see what was wrong.
-		return RunSummary{}, errVisible(err)
+		return RunStatusOutput{}, errVisible(err)
 	}
-	return f.RunTrigger(ctx, hook)
+	// Returns as soon as the run is registered, not when it finishes. The
+	// snapshot is therefore almost always phase=running with no steps yet —
+	// what the caller needs from it is the run_id to poll.
+	return runs.start(f, hook).snapshot(), nil
+}
+
+// handleRunStatus reports a run's progress. An unknown id is a visible error
+// rather than an empty status: silently returning "no steps yet" for a run that
+// does not exist would leave a caller polling a typo forever.
+func handleRunStatus(runs *registry, in RunStatusInput) (RunStatusOutput, error) {
+	if in.RunID == "" {
+		return RunStatusOutput{}, errVisible(fmt.Errorf("run_status requires run_id (returned by run_trigger)"))
+	}
+	st := runs.lookup(in.RunID)
+	if st == nil {
+		return RunStatusOutput{}, errVisible(fmt.Errorf(
+			"no run %q on this server — run ids are per-process and do not survive a restart", in.RunID))
+	}
+	return st.snapshot(), nil
 }
 
 // visible marks an error whose MESSAGE the caller is meant to read and act on,

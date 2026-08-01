@@ -357,6 +357,7 @@ structured answer, rather than having to run the gate to find out.
 | `policy_explain` | `policy-explain` | What policy resolves for a hypothetical push? |
 | `steps_list` | `steps` | Which steps exist per hook? |
 | `run_trigger` | `run-trigger` | Run the pipeline (**gated on trust** — see below) |
+| `run_status` | — | Poll a run started by `run_trigger`: finished steps, then the verdict |
 
 Everything except `run_trigger` is a pure read, marked `readOnlyHint` on MCP, and
 needs no trust opt-in. The two gate verbs put their verdict in the **exit status**
@@ -370,6 +371,33 @@ warden axi verify-range --base origin/main --require-signed
 A failed run reports `blocker` and `retryable` alongside its findings, so an agent
 can tell "your change is wrong" (don't retry) from "another process held the
 linter's lock" (retry later) without parsing prose.
+
+#### Runs are asynchronous over MCP
+
+A full pipeline routinely takes minutes, so `run_trigger` **returns immediately**
+with a `run_id` and `phase: running`. Poll `run_status(run_id)` for the steps that
+have finished and, once it ends, the verdict:
+
+```jsonc
+// run_trigger → returns in milliseconds
+{ "run_id": "run-1", "phase": "running", "steps": [] }
+
+// run_status → while it works
+{ "run_id": "run-1", "phase": "running", "steps": [ { "step": "lint", "status": "pass" } ] }
+
+// run_status → when it ends
+{ "run_id": "run-1", "phase": "complete", "summary": { "outcome": "passed", … } }
+```
+
+`phase: complete` means the run **finished**, not that the gate **passed** — read
+`summary.outcome` for the verdict. A run that could not be carried out at all
+reports `errored` instead, which is a different thing from a rejected change and
+must not be treated as one.
+
+Steps appear as they finish, so an agent can start fixing a lint failure while the
+test step is still running. Run ids are per-process and don't survive a server
+restart. `warden axi run-trigger` stays **synchronous** — a one-shot CLI
+invocation should block until it has an answer.
 
 ### `run_trigger` trust
 
