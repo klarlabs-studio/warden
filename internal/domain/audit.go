@@ -48,7 +48,18 @@ type CommitStatus struct {
 // Reattestable reports whether this commit is an un-noted commit whose content
 // a validated commit already covers — i.e. the gap is recoverable rather than a
 // real hole in the history.
-func (c CommitStatus) Reattestable() bool { return !c.HasNote && c.ReattestableFrom != "" }
+func (c CommitStatus) Reattestable() bool {
+	return !c.HasNote && !c.Covered() && c.ReattestableFrom != ""
+}
+
+// Commit states.
+//
+// The predicates below PARTITION every commit: exactly one of HasNote, Covered,
+// Reattestable, Unattributable and Bypassed holds. That is not decoration — the
+// fleet rollup sums the buckets, so an overlap double-counts and a hole loses a
+// commit entirely. TestCommitStates_Partition enforces it across every
+// combination of the underlying fields, which is what makes it safe to add a
+// fifth state later: the test fails until the new one is made exclusive.
 
 // Covered reports whether a gated push span published this commit. Such a commit
 // has no note of its own and needs none: the span is the claim warden actually

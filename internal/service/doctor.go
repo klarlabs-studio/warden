@@ -152,7 +152,10 @@ func (s *Service) classify(sha string) domain.CommitStatus {
 func (s *Service) markReattestable(report *domain.AuditReport) {
 	var gaps []int
 	for i := range report.Commits {
-		if !report.Commits[i].HasNote {
+		// A commit a gated push already covers is not a gap: it needs no repair,
+		// and marking it reattestable would put it in two states at once, which
+		// double-counts it in any tally that sums the buckets.
+		if !report.Commits[i].HasNote && !report.Commits[i].Covered() {
 			gaps = append(gaps, i)
 		}
 	}
