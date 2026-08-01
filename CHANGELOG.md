@@ -6,6 +6,67 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **`WARDEN_VERSION` could redirect an install to another GitHub repository**
+  (#148). All three installers interpolated the version straight into the
+  download URL, so a value of `../../../../someone/else/releases/download/v1`
+  traversed out of this repo's path: both the archive *and* `checksums.txt`
+  then resolved to `github.com/someone/else`. The checksum step could not catch
+  it, because it verified the download against a `checksums.txt` fetched from
+  the same redirected base — confirming the attacker's file matched the
+  attacker's digest. The host stays pinned to `github.com` by the literal URL
+  prefix, so this is a wrong-repository fetch rather than an arbitrary-origin
+  one, and reaching it requires control of the environment the installer runs
+  in. It should still never have been reachable.
+
+  All three now validate the version against a release-tag pattern before it
+  touches a URL, after the `latest` lookup so the resolved tag is checked too:
+  `scripts/install.sh`, `scripts/install.ps1` and
+  `.github/actions/install-warden.sh`.
+
+  Two anchoring traps were found while testing the fix rather than after
+  shipping it. `grep` matches line by line, so `^…$` accepted `v0.20.4\nid` on
+  its first line while the second still reached the URL — the shell guard
+  therefore rejects the character alphabet before checking the shape. And .NET's
+  `$` also matches before a trailing newline, so the PowerShell guard anchors
+  with `\z`.
+
+### Added
+
+- **The shipped installers are now covered by the Go suite** (#148),
+  `scripts/version_guard_test.go`. It executes the real scripts — a test
+  asserting a copy of the regex against itself would pass forever while the
+  shipped script drifted, which is how this class survived. `pwsh` is
+  preinstalled on GitHub-hosted runners, so `install.ps1` is exercised in CI
+  despite CI being ubuntu-only; locally it skips unless PowerShell is present,
+  which is precisely why nothing in the repo had ever run it.
+
+  That skip is a convenience locally and a *failure* under `CI`. `install.ps1`
+  is the one installer no other job can execute, so a silent skip there would
+  leave its guard permanently unverified while the suite still reported green —
+  the same shape of hole that let the flaw survive.
+
+- **The `gh` forge adapter is covered end to end** (#142), 34.7% → 100%. Its
+  untested paths were the ones that matter: `gh pr view` can exit 0 while
+  describing no PR, an empty base must omit `--base` rather than pass it empty,
+  a PR comment falls back to a fresh post when there is none to edit, and
+  `gh pr checks` exits non-zero precisely when checks fail or are pending — so
+  its JSON is read regardless of exit code.
+
+### Changed
+
+- The CI-gate pin example is documented against a pin that will not rot (#139),
+  and `actions/checkout` is bumped to v7.0.1 (#138).
+
+- **Every module warden builds against is current** (#143). Ten bumps, two of
+  them direct — `mattn/go-isatty` to v0.0.24 and `go.klarlabs.de/statekit` to
+  v1.12.0 — plus `logr`, `runewidth`, `x/net`, `x/sys`, `x/text`, `x/exp`,
+  `genproto` and `grpc`. No source change was needed. `go list -m -u all` still
+  reports modules behind, and that is correct rather than work left undone:
+  `go.sum` hashes the whole module graph, so it lists modules that reach warden
+  only through other modules' requirements and are never compiled in.
+
 ### Fixed
 
 - **Five doc comments described the wrong function** (#141). Inserting a
@@ -34,46 +95,25 @@ All notable changes to warden are documented here. The format follows
   guard's tests — an env override asserting *absence* has to clear the variable
   explicitly.
 
-### Changed
-
-- The CI-gate pin example is documented against a pin that will not rot (#139),
-  and `actions/checkout` is bumped to v7.0.1 (#138).
-
-- **Every module warden builds against is current** (#143). Ten bumps, two of
-  them direct — `mattn/go-isatty` to v0.0.24 and `go.klarlabs.de/statekit` to
-  v1.12.0 — plus `logr`, `runewidth`, `x/net`, `x/sys`, `x/text`, `x/exp`,
-  `genproto` and `grpc`. No source change was needed. `go list -m -u all` still
-  reports modules behind, and that is correct rather than work left undone:
-  `go.sum` hashes the whole module graph, so it lists modules that reach warden
-  only through other modules' requirements and are never compiled in.
-
-### Added
-
-- **The `gh` forge adapter is covered end to end** (#142), 34.7% → 100%. Its
-  untested paths were the ones that matter: `gh pr view` can exit 0 while
-  describing no PR, an empty base must omit `--base` rather than pass it empty,
-  a PR comment falls back to a fresh post when there is none to edit, and
-  `gh pr checks` exits non-zero precisely when checks fail or are pending — so
-  its JSON is read regardless of exit code.
-
 ### Removed
 
-- **44 dead entries pruned from the nox baseline**, which was written in July
-  against nox 1.7.1 and had drifted badly by 1.24.0: two thirds of it matched
-  nothing in a current scan, including 28 `high` and 2 `critical` suppressions
-  for findings that no longer exist. Dead suppressions are not inert — they
-  make the baseline unreadable, and a reviewer cannot tell an accepted risk
-  from a fingerprint that rotted.
+- **44 dead entries pruned from the nox baseline** (#145), which was written in
+  July against nox 1.7.1 and had drifted badly by 1.24.0: two thirds of it
+  matched nothing in a current scan, including 28 `high` and 2 `critical`
+  suppressions for findings that no longer exist. Dead suppressions are not
+  inert — they make the baseline unreadable, and a reviewer cannot tell an
+  accepted risk from a fingerprint that rotted.
 
   The 18 findings added in their place were each read before being accepted
   rather than bulk-approved: fake SHAs and fixture email addresses in
   `_test.go` files, plus `workflow_dispatch` on the release workflow, which is
-  deliberate and documented in the workflow itself. The one `high` the baseline
-  genuinely carries — `TAINT-006`, `WARDEN_VERSION` reaching `Invoke-WebRequest`
-  in `scripts/install.ps1` — was re-examined and kept: the taint source is the
-  invoking user's own environment, on an install path (`irm … | iex`) that
-  already grants arbitrary execution. Gate behavior is unchanged; it passed
-  before and after.
+  deliberate and documented in the workflow itself.
+
+  The one `high` the baseline carries — `TAINT-006`, `WARDEN_VERSION` reaching
+  `Invoke-WebRequest` in `scripts/install.ps1` — was re-examined here and kept,
+  then **fixed outright in #148 above**. Its entry is retained because a taint
+  analyzer cannot see that a regex constrains the value, so it now suppresses a
+  mitigated flow rather than an accepted one.
 
 - **Three stale release-notes files** (`docs/release-notes-v0.6.0.md`,
   `v0.7.0`, `v0.7.1`) from thirteen releases ago. Nothing linked to them, no
