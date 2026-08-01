@@ -54,6 +54,12 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 			// as UNVERIFIED read as "never checked" and was simply wrong.
 			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (covered by the gated push %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.CoveredBy))
+		case c.Unpushed():
+			// The pre-push gate is what writes the note, and this branch never
+			// reached it. Reporting these as bypasses accused someone of evading
+			// a gate that was never reachable.
+			_, _ = fmt.Fprintf(w, "  ? %s  %s  %s  UNPUSHED (never pushed; the pre-push gate has not run)\n",
+				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		case c.Unattributable():
 			_, _ = fmt.Fprintf(w, "  ? %s  %s  %s  UNATTRIBUTABLE (provenance predates push spans)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
@@ -70,6 +76,10 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 	}
 	verified, intact, unverified := r.Counts()
 	_, _ = fmt.Fprintf(w, "%d verified (%d chain-intact), %d unverified since adoption\n", verified, intact, unverified)
+	if r.NeverPushed {
+		_, _ = fmt.Fprintf(w, "branch %s has no remote-tracking ref: nothing here has been pushed, so the\n"+
+			"pre-push gate that writes the note has never run. These are not bypasses.\n", r.Branch)
+	}
 	if n := len(r.Reattestable()); n > 0 {
 		_, _ = fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
 			"  warden reattest --all --branch %s --push\n", n, unverified, r.Branch)

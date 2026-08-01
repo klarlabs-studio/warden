@@ -336,7 +336,7 @@ warden fleet status --root ~/dev --json # for a dashboard
   ✓  statekit                     18 verified
 ```
 
-Three distinctions do the work here:
+Four distinctions do the work here:
 
 - **Bypassed is not the same as `doctor`'s "unverified".** A squash-merge unbinds
   a note while the *content* was gated under the pre-squash commit. Those are
@@ -353,6 +353,11 @@ Three distinctions do the work here:
   On the fleet this README was written against, that was the difference between
   52.6% and 27.0%, and between one repo looking like a systemic failure and it
   being the single repo that actually was.
+- **A branch that was never pushed cannot have bypassed a *push* gate.** With no
+  remote-tracking ref, nothing ever reached pre-push, which is what writes the
+  note. Those commits are reported as **unpushed**, not as bypasses. On the same
+  fleet that was another 61 of 74 reported bypasses — a single local-only repo,
+  renamed away weeks earlier — taking the rate from 26.6% to 4.7%.
 
 Exits non-zero when any commit was genuinely bypassed, so it composes as a CI or
 cron check. A reattestable gap does not fail it — `warden reattest --all` rebinds

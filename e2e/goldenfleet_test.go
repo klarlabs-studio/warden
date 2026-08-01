@@ -62,6 +62,19 @@ func newGoldenRepo(t *testing.T) *goldenRepo {
 	return g
 }
 
+// newGoldenRepoNoRemote builds a repository that has never been pushed and has
+// no remote configured at all — the shape a local-only or abandoned repo has.
+func newGoldenRepoNoRemote(t *testing.T) *goldenRepo {
+	t.Helper()
+	g := &goldenRepo{t: t, dir: t.TempDir()}
+	g.git("init")
+	g.git("config", "user.email", "warden-golden-fleet")
+	g.git("config", "user.name", "warden-golden-fleet")
+	g.git("commit", "--allow-empty", "-m", "root")
+	g.git("branch", "-M", "main")
+	return g
+}
+
 func (g *goldenRepo) git(args ...string) {
 	g.t.Helper()
 	cmd := exec.Command("git", args...)
@@ -148,6 +161,7 @@ type fleetCounts struct {
 	Bypassed       int  `json:"bypassed"`
 	Reattestable   int  `json:"reattestable"`
 	Unattributable int  `json:"unattributable"`
+	Unpushed       int  `json:"unpushed"`
 }
 
 // A multi-commit push: warden validates ONE tree — the tip's — and vouches for
@@ -234,6 +248,38 @@ func TestGoldenFleet_BucketsAccountForEveryCommit(t *testing.T) {
 	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable
 	if sum != got.Commits {
 		t.Errorf("buckets sum to %d but there are %d commits since adoption (%+v)", sum, got.Commits, got)
+	}
+}
+
+// A repo with NO REMOTE has never pushed, so the pre-push gate has never had an
+// opportunity to run. Its commits carry no note for a reason that is not a
+// bypass, and reporting them as one accuses someone of routing around a gate
+// that was never reachable.
+//
+// This is the same failure as the pre-span one fixed in #163 — calling a gap a
+// bypass when the absence of a note is not evidence of anything — and it was
+// worth 61 of the 74 bypasses on the real fleet, from a single local-only repo
+// that had been renamed away weeks earlier.
+//
+// Every other fixture here builds a bare remote in newGoldenRepo, so the suite
+// structurally could not catch this: the helper encoded "repos have remotes".
+func TestGoldenFleet_ARepoThatNeverPushedIsNotBypassed(t *testing.T) {
+	g := newGoldenRepoNoRemote(t)
+	g.adopt()
+	g.commit("local one")
+	g.commit("local two")
+	g.commit("local three")
+
+	got := g.classify()
+	if got.Bypassed != 0 {
+		t.Errorf("bypassed = %d, want 0: with no remote the push gate never ran, so nothing went round it", got.Bypassed)
+	}
+	if got.Unpushed != 3 {
+		t.Errorf("unpushed = %d, want 3: the commits must be positively accounted for, not merely uncounted", got.Unpushed)
+	}
+	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed
+	if sum != got.Commits {
+		t.Errorf("buckets sum to %d but there are %d commits (%+v)", sum, got.Commits, got)
 	}
 }
 

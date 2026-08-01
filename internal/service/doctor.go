@@ -31,23 +31,50 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 
 	ref := s.remote + "/" + branch
 	shas, err := s.repo.CommitsSince(ref, adoption)
+	// neverPushed: no remote-tracking ref exists, so nothing on this branch has
+	// ever reached the pre-push gate that writes the note. Its gaps are not
+	// bypasses — see domain.CommitStatus.NoRemoteRef.
+	neverPushed := false
 	if err != nil {
 		// Fall back to the local branch when there is no remote tracking ref.
 		if shas, err = s.repo.CommitsSince(branch, adoption); err != nil {
 			return domain.AuditReport{}, fmt.Errorf("walk commits since adoption: %w", err)
 		}
+		neverPushed = true
 	}
 
-	report := domain.AuditReport{Adoption: adoption, Branch: branch}
+	report := domain.AuditReport{Adoption: adoption, Branch: branch, NeverPushed: neverPushed}
 	for _, sha := range shas {
 		report.Commits = append(report.Commits, s.classify(sha))
 	}
 	// Span coverage BEFORE reattestation: a commit published by a gated push is
 	// not a gap at all, so it should never be offered as something to reattest.
 	s.markCovered(&report)
+	s.markUnpushed(&report)
 	s.markPreSpanProvenance(&report)
 	s.markReattestable(&report)
 	return report, nil
+}
+
+// markUnpushed annotates every un-noted commit when the branch has no
+// remote-tracking ref.
+//
+// warden's note is written by the PRE-PUSH gate, so a branch that was never
+// pushed never reached it. Reporting those commits as bypasses says someone
+// routed around a gate that was never reachable — the same unevidenced
+// accusation that pre-span gaps drew before they were separated out.
+//
+// Measured on a real fleet, this was 61 of 74 reported bypasses: one local-only
+// repo, renamed away weeks earlier, with no remote at all.
+func (s *Service) markUnpushed(r *domain.AuditReport) {
+	if !r.NeverPushed {
+		return
+	}
+	for i := range r.Commits {
+		if !r.Commits[i].HasNote {
+			r.Commits[i].NoRemoteRef = true
+		}
+	}
 }
 
 // markCovered annotates each un-noted commit that a gated push span published.

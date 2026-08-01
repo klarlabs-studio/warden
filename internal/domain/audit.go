@@ -36,6 +36,18 @@ type CommitStatus struct {
 	// Reporting it as verified asserts more still. It is unattributable, and
 	// saying so is the only honest reading.
 	PreSpanProvenance bool `json:"pre_span_provenance,omitempty"`
+	// NoRemoteRef marks a gap on a branch with no remote-tracking ref — nothing
+	// on it has ever been pushed.
+	//
+	// warden's provenance note is written by the PRE-PUSH gate. A branch that was
+	// never pushed never reached that gate, so its commits carry no note for a
+	// reason that has nothing to do with anyone routing around anything. Calling
+	// them bypasses accuses someone of evading a gate that was never reachable.
+	//
+	// Same shape as PreSpanProvenance, one step earlier: the absence of a note is
+	// evidence of a bypass only once warden had both the ABILITY and the
+	// OPPORTUNITY to write one.
+	NoRemoteRef bool `json:"no_remote_ref,omitempty"`
 	// ReattestableFrom names a validated commit that reproduces this commit's
 	// tree exactly, when one exists and this commit has no note of its own — the
 	// squash-merge signature. It turns a bare UNVERIFIED into an actionable one:
@@ -55,22 +67,34 @@ func (c CommitStatus) Reattestable() bool {
 // Commit states.
 //
 // The predicates below PARTITION every commit: exactly one of HasNote, Covered,
-// Reattestable, Unattributable and Bypassed holds. That is not decoration — the
-// fleet rollup sums the buckets, so an overlap double-counts and a hole loses a
-// commit entirely. TestCommitStates_Partition enforces it across every
-// combination of the underlying fields, which is what makes it safe to add a
-// fifth state later: the test fails until the new one is made exclusive.
+// Reattestable, Unpushed, Unattributable and Bypassed holds. That is not
+// decoration — the fleet rollup sums the buckets, so an overlap double-counts
+// and a hole loses a commit entirely. TestCommitStates_Partition enforces it
+// across every combination of the underlying fields, which is what made it safe
+// to add Unpushed as a sixth state: the test failed until it was made exclusive,
+// exactly as its comment promised.
+//
+// Ordered strongest-claim-first. Unpushed outranks Unattributable because
+// "never pushed" is a definite fact about the branch, while pre-span provenance
+// is an ambiguity; a definite explanation beats an ambiguous one.
 
 // Covered reports whether a gated push span published this commit. Such a commit
 // has no note of its own and needs none: the span is the claim warden actually
 // makes about a multi-commit push.
 func (c CommitStatus) Covered() bool { return !c.HasNote && c.CoveredBy != "" }
 
+// Unpushed reports whether this commit sits on a branch that was never pushed,
+// so the pre-push gate that writes the note never had an opportunity to run.
+// See NoRemoteRef.
+func (c CommitStatus) Unpushed() bool {
+	return !c.HasNote && !c.Covered() && !c.Reattestable() && c.NoRemoteRef
+}
+
 // Unattributable reports whether this commit's status cannot be determined from
 // what was recorded, because the provenance around it predates push spans.
 // See PreSpanProvenance.
 func (c CommitStatus) Unattributable() bool {
-	return !c.HasNote && !c.Covered() && !c.Reattestable() && c.PreSpanProvenance
+	return !c.HasNote && !c.Covered() && !c.Reattestable() && !c.Unpushed() && c.PreSpanProvenance
 }
 
 // Bypassed reports whether this commit demonstrably went round the gate: no
@@ -83,9 +107,9 @@ func (c CommitStatus) Unattributable() bool {
 // metric that overstates the problem gets dismissed as noisy — which costs more
 // than not having one. The last exclusion is the subtlest: a gap can only be
 // called a bypass if the absence of a span is EVIDENCE, and it is only evidence
-// once warden was capable of writing one.
+// once warden was capable of writing one — and had the chance.
 func (c CommitStatus) Bypassed() bool {
-	return !c.HasNote && !c.Covered() && !c.Reattestable() && !c.PreSpanProvenance
+	return !c.HasNote && !c.Covered() && !c.Reattestable() && !c.Unpushed() && !c.PreSpanProvenance
 }
 
 // NewCommitStatus classifies a commit from its metadata and optional note.
@@ -109,7 +133,12 @@ func NewCommitStatus(sha, author, date, subject string, note *RunRecord) CommitS
 type AuditReport struct {
 	Adoption string
 	Branch   string
-	Commits  []CommitStatus
+	// NeverPushed is true when the branch has no remote-tracking ref, so nothing
+	// on it has ever reached the pre-push gate. Reported at the branch level as
+	// well as per-commit because it is a fact about the branch, and a reader
+	// seeing every commit marked unpushed deserves the one-line reason.
+	NeverPushed bool
+	Commits     []CommitStatus
 }
 
 // Counts tallies verified/intact/unverified commits for the summary line.

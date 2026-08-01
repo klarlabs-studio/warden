@@ -93,6 +93,11 @@ type fleetReport struct {
 	// provenance around them predates push spans (< v0.19.0). They are neither
 	// verified nor bypassed, and saying so is the only honest reading.
 	Unattributable int `json:"unattributable"`
+	// Unpushed counts commits on branches with no remote-tracking ref. The
+	// pre-push gate writes the note, so nothing on such a branch ever reached it.
+	// Measured on a real fleet this was 61 of 74 reported bypasses — one
+	// local-only repo, renamed away weeks earlier, with no remote at all.
+	Unpushed int `json:"unpushed"`
 	// BypassRate is Bypassed/Commits as a percentage, rounded to one decimal.
 	BypassRate float64 `json:"bypass_rate"`
 }
@@ -128,6 +133,13 @@ type fleetRepo struct {
 	Bypassed       int `json:"bypassed"`
 	Reattestable   int `json:"reattestable"`
 	Unattributable int `json:"unattributable"`
+	// Unpushed counts commits on a branch with no remote-tracking ref. The
+	// pre-push gate writes the note, so a branch that was never pushed never
+	// reached it — these are not bypasses.
+	Unpushed int `json:"unpushed"`
+	// NeverPushed reports that the repo itself has no remote-tracking ref, which
+	// is why Unpushed is non-zero.
+	NeverPushed bool `json:"never_pushed,omitempty"`
 	// Error is set when the repo could not be surveyed at all. It never stops the
 	// rollup: one unreadable checkout must not deny the answer for the rest.
 	Error string `json:"error,omitempty"`
@@ -202,6 +214,7 @@ func surveyFleet(paths []string, branch string) fleetReport {
 		rep.Bypassed += r.Bypassed
 		rep.Reattestable += r.Reattestable
 		rep.Unattributable += r.Unattributable
+		rep.Unpushed += r.Unpushed
 	}
 	if rep.Commits > 0 {
 		rep.BypassRate = round1(float64(rep.Bypassed) / float64(rep.Commits) * 100)
@@ -232,6 +245,7 @@ func surveyRepo(path, branch string) fleetRepo {
 	}
 	r.Adopted = true
 	r.Branch = report.Branch
+	r.NeverPushed = report.NeverPushed
 	r.Commits = len(report.Commits)
 	verified, _, _ := report.Counts()
 	r.Verified = verified
@@ -244,6 +258,8 @@ func surveyRepo(path, branch string) fleetRepo {
 		switch {
 		case report.Commits[i].Covered():
 			r.Covered++
+		case report.Commits[i].Unpushed():
+			r.Unpushed++
 		case report.Commits[i].Unattributable():
 			r.Unattributable++
 		}
@@ -283,6 +299,9 @@ func printFleet(w io.Writer, rep fleetReport) {
 		if rep.Unattributable > 0 {
 			_, _ = fmt.Fprintf(w, ", %d unattributable", rep.Unattributable)
 		}
+		if rep.Unpushed > 0 {
+			_, _ = fmt.Fprintf(w, ", %d unpushed", rep.Unpushed)
+		}
 		_, _ = fmt.Fprint(w, "\n\n")
 	} else {
 		_, _ = fmt.Fprintln(w)
@@ -296,6 +315,12 @@ func printFleet(w io.Writer, rep fleetReport) {
 			_, _ = fmt.Fprintf(w, "  !  %-28s configured but never adopted — run `warden init`\n", name)
 		case !r.Adopted:
 			_, _ = fmt.Fprintf(w, "  –  %-28s not warden-gated\n", name)
+		case r.NeverPushed:
+			// Reported before the bypass line: with no remote there are no bypasses
+			// to report, and "0/61 bypassed" would read as a clean sheet when the
+			// truth is that the gate has never had an opportunity to run.
+			_, _ = fmt.Fprintf(w, "  ?  %-28s %d unpushed — no remote; the pre-push gate has never run\n",
+				name, r.Unpushed)
 		case r.Bypassed == 0 && r.Unattributable > 0:
 			_, _ = fmt.Fprintf(w, "  ?  %-28s %d unattributable (provenance predates push spans)\n",
 				name, r.Unattributable)
@@ -320,6 +345,11 @@ func printFleet(w io.Writer, rep fleetReport) {
 		_, _ = fmt.Fprintln(w, "which is when a note began recording the span of its push. An intermediate")
 		_, _ = fmt.Fprintln(w, "commit of a gated push and a real bypass are indistinguishable there — the")
 		_, _ = fmt.Fprintln(w, "information was never recorded, so they are counted as neither.")
+	}
+	if rep.Unpushed > 0 {
+		_, _ = fmt.Fprintln(w, "\nUnpushed commits sit on a branch with no remote-tracking ref. warden's note is")
+		_, _ = fmt.Fprintln(w, "written by the PRE-PUSH gate, so a branch that was never pushed never reached")
+		_, _ = fmt.Fprintln(w, "it. They are not bypasses: there was no gate event to go round.")
 	}
 	if rep.Reattestable > 0 {
 		_, _ = fmt.Fprintln(w, "\nReattestable commits were gated under a different commit id (a squash-merge")
