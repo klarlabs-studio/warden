@@ -29,6 +29,17 @@ if [ -z "$ver" ] || [ "$ver" = "latest" ]; then
   [ -n "$ver" ] || { echo "warden: could not resolve the latest release tag" >&2; exit 1; }
 fi
 
+# $ver is interpolated straight into the download URL below, so constrain it to
+# a release tag before it gets there. Without this, WARDEN_VERSION of
+# "../../../../someone/else/releases/download/v1" traverses out of this repo's
+# path and both the archive AND checksums.txt resolve to github.com/someone/else
+# — so the digest check further down passes against the attacker's own checksum
+# file and verifies nothing. Validating here covers the API-resolved tag too.
+if [[ ! $ver =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+  echo "warden: refusing version '$ver': expected a release tag like 0.20.4" >&2
+  exit 1
+fi
+
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
 case "$arch" in x86_64 | amd64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; esac

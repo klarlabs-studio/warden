@@ -12,6 +12,20 @@ if ($version -eq "latest") {
   $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
   $version = $rel.tag_name
 }
+
+# $version is interpolated straight into the download URL below, so constrain it
+# to a release tag before it gets there. Without this, WARDEN_VERSION of
+# "../../../../someone/else/releases/download/v1" traverses out of this repo's
+# path and both the archive AND checksums.txt resolve to
+# github.com/someone/else — so the checksum verification further down passes
+# against the attacker's own checksum file and verifies nothing. Validating
+# after the "latest" lookup covers the resolved tag too.
+# \z, not $: in .NET regex `$` also matches immediately before a trailing
+# newline, which would let "v0.20.4`n" through and carry the newline into the URL.
+if ($version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?\z') {
+  throw "warden: refusing version '$version': expected a release tag like v0.20.4"
+}
+
 $ver = $version.TrimStart("v")
 $archive = "warden_${ver}_windows_${arch}.zip"
 $base = "https://github.com/$repo/releases/download/$version"
