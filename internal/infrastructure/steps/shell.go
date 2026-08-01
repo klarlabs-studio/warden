@@ -58,6 +58,13 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 		msg := strings.TrimSpace(string(out))
 		summary := string(s.name) + " failed"
 		blocker := domain.BlockerNone
+		// rule/why/fix carry the machine-readable half of what the prose below
+		// already says. The step knows exactly which of the four failure modes it
+		// hit and, in the environmental cases, the command that resolves it —
+		// leaving that only in the message forces every reader to parse it back
+		// out of English.
+		var rule, why string
+		var fix *domain.Fix
 		envFail, missingToolchain := detectEnvFailure(string(out), sc.WorktreeDir)
 		switch {
 		// A cancelled context means the per-step timeout fired: say so plainly,
@@ -68,6 +75,12 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 				msg += "\n" + trimmed
 			}
 			summary = string(s.name) + " timed out"
+			rule = "step/timeout"
+			why = "The step exceeded its configured timeout and was killed, so it never reached a " +
+				"verdict about your change. Either the command genuinely hangs, or the budget is " +
+				"too tight for this repo."
+			fix = &domain.Fix{Command: "# raise the budget in .warden.yaml, e.g. timeouts: { " +
+				string(s.name) + ": \"10m\" }"}
 		// The command never ran: another process still held its lock when the
 		// wait budget ran out. The gate still fails — "I could not check" is not
 		// "the tree is clean" — but it must not claim the tree is dirty.
@@ -77,6 +90,18 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 			msg = string(s.name) + " could not run: another process held its lock for " +
 				contentionBudget.String() + ". Nothing is wrong with your tree — wait for the other " +
 				"run to finish and retry.\n" + parallelRunnerHint(sc.Commands[s.cmdKey]) + msg
+			rule = "step/lock-contention"
+			why = "The tool refused to start because another copy of itself holds a machine-global " +
+				"lock. That is not a verdict on your tree — the check never ran — and it clears on " +
+				"its own once the other run finishes."
+			// golangci-lint's lock guards a SHARED cache, and warden already gives
+			// each run its own, so the thing the lock protects is protected
+			// twice. Naming the flag turns a recurring annoyance into a one-line
+			// config change.
+			if hint := parallelRunnerHint(sc.Commands[s.cmdKey]); hint != "" {
+				fix = &domain.Fix{Command: "# add --allow-parallel-runners to the " +
+					string(s.name) + " command in .warden.yaml"}
+			}
 		// The command never ran either, for the other environmental reason: the
 		// executable it needs is not installed. Same rule — fail, but say what is
 		// actually wrong, and name the command that fixes it.
@@ -84,6 +109,16 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 			blocker = domain.BlockerEnvironment
 			summary = string(s.name) + " could not run (missing toolchain)"
 			msg = envFail.message(string(s.name)) + "\n" + msg
+			rule = "step/missing-toolchain"
+			why = "The step's executable or dependencies are not present in the validation " +
+				"worktree, so the command never ran. Retrying changes nothing until the install " +
+				"below has happened."
+			// detectEnvFailure already derived the install command from the
+			// lockfile actually present, so hand it over as a fix rather than
+			// only mentioning it mid-paragraph.
+			if envFail.Remediation != "" {
+				fix = &domain.Fix{Command: envFail.Remediation}
+			}
 		}
 		return domain.StepResult{
 			Step:   s.name,
@@ -91,6 +126,9 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 			Findings: []domain.Finding{{
 				Severity: domain.SeverityHigh,
 				Message:  msg,
+				Rule:     rule,
+				Why:      why,
+				Fix:      fix,
 			}},
 			Summary: summary,
 			Blocker: blocker,

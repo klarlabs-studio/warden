@@ -35,11 +35,45 @@ type DiffSummary struct {
 
 // Finding is a single issue a step reports. Findings are advisory data attached
 // to the run; the overall gate decision is carried by [Output.Status].
+//
+// Rule, Why and Fix are the remediation half. Your step usually knows which rule
+// fired, what breaks if it is ignored, and the command that resolves it — and
+// whoever reads the finding, human or agent, otherwise has to rediscover all
+// three. Filling them in is what lets a caller act on a failure rather than
+// re-run the gate to work out what it meant.
+//
+// Everything except Severity and Message is optional; a step that sets only
+// those two is exactly as valid as it was before these existed.
 type Finding struct {
 	Severity string `json:"severity"` // "info" | "low" | "medium" | "high"
 	Message  string `json:"message"`
 	File     string `json:"file,omitempty"`
 	Line     int    `json:"line,omitempty"`
+	// Rule is the identifier your tool fired, e.g. "SA4006". It is what a reader
+	// searches for, waives, or baselines — none of which prose supports.
+	Rule string `json:"rule,omitempty"`
+	// Why explains what breaks if this is ignored — the justification that
+	// severity alone does not carry.
+	Why string `json:"why,omitempty"`
+	// Fix is the remediation, when you know one.
+	Fix *Fix `json:"fix,omitempty"`
+}
+
+// Fix is a remediation for a finding: a command to run, a patch to apply, or
+// neither.
+//
+// Both are ADVISORY — warden will not apply them on the strength of your finding
+// alone. Folding changes into the tree is a policy decision the repo expresses
+// with an `auto_fix` budget, so attaching a patch never escalates your step into
+// a tree write. It closes the loop for the reader, nothing more.
+type Fix struct {
+	// Command resolves the finding, e.g. "gofmt -w internal/foo.go". Make it
+	// runnable from the repo root, and have it fix only what the finding says.
+	Command string `json:"command,omitempty"`
+	// Patch is a unified diff resolving the finding. Prefer it over Command when
+	// you know the change exactly: a diff can be reviewed before it is applied,
+	// not only after.
+	Patch string `json:"patch,omitempty"`
 }
 
 // Input is the payload the daemon sends to a step on stdin.
