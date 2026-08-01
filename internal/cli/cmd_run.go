@@ -41,6 +41,20 @@ const (
 	exitEnvironment = 78
 )
 
+// exitWardenPushed reports the one SUCCESS that cannot exit 0: the gate passed
+// and warden performed the push itself, so git's own now-stale push must be
+// stopped from racing it (§4.3 step 4). Git resolves the refs it will push
+// before calling the hook and its push protocol is a compare-and-swap, so the
+// hook has to fail on purpose — the push already landed.
+//
+// It previously shared exit 1 with "the gate rejected your change", which made
+// the single most common successful outcome indistinguishable from a rejection
+// for anything reading the status: retry wrappers, CI, and agents alike. The
+// ambiguity was documented as a known hazard rather than removed, and it kept
+// costing people the same confusion. Git only cares whether the code is zero,
+// so a distinct non-zero value costs nothing and settles the question.
+const exitWardenPushed = 3
+
 // exitForBlocker maps a run's blocker to its process exit code. A verdict that
 // is about the change rather than the environment exits 1, like any other
 // failed hook.
@@ -55,12 +69,31 @@ func exitForBlocker(b domain.Blocker) int {
 	}
 }
 
+// prePushExitCode decides a pre-push run's exit status. Both delivery paths (the
+// TUI and the plain-stream reporter) end in this decision, so it lives here
+// rather than being restated in each — the three outcomes it separates are the
+// whole contract a wrapper reads:
+//
+//	0                  passed; git completes the push itself
+//	exitWardenPushed   passed; warden pushed, git must stand down
+//	1 / 75 / 78        the gate reached a verdict, or could not run
+func prePushExitCode(res application.RunResult) int {
+	if res.Outcome == domain.OutcomePassed {
+		if res.GitCompletesPush {
+			return 0
+		}
+		return exitWardenPushed
+	}
+	return exitForBlocker(res.Blocker)
+}
+
 // cmdRun handles `warden run <hook>`, the entry point the installed hook shims
 // call. Its exit code drives git: a pre-commit pass exits 0 so the commit
 // proceeds; a pre-push pass exits 0 when warden stood aside and left the push to
-// git, and non-zero when warden performed the push itself and git's own
-// (now-stale) push must be stopped from racing it (§4.3 step 4). A blocked push
-// always exits non-zero. See runPrePushExit.
+// git, and exitWardenPushed (3) when warden performed the push itself and git's
+// own (now-stale) push must be stopped from racing it (§4.3 step 4). A blocked
+// push exits 1, or 75/78 when the machine rather than the change stopped it.
+// See prePushExitCode.
 func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		_, _ = fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push>")
@@ -234,10 +267,7 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 	// a run stopped by the environment says so in its code (see runPrePushExit).
 	printWarnings(stdout, res)
 	noteGitPushError(stdout, res)
-	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
-		return 0
-	}
-	return exitForBlocker(res.Blocker)
+	return prePushExitCode(res)
 }
 
 // printWarnings surfaces non-fatal notices from a run — currently only a
@@ -268,7 +298,7 @@ func noteGitPushError(w io.Writer, res application.RunResult) {
 	if res.Outcome != domain.OutcomePassed || res.GitCompletesPush {
 		return
 	}
-	_, _ = fmt.Fprintln(w, `warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit.`)
+	_, _ = fmt.Fprintf(w, "warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit. (exit %d means exactly this: passed, warden pushed.)\n", exitWardenPushed)
 }
 
 // notifyAfter is the DEFAULT run duration above which a passing interactive
@@ -445,10 +475,7 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "warden: %s\n", msg)
 	printWarnings(stdout, res)
 	noteGitPushError(stdout, res)
-	if res.Outcome == domain.OutcomePassed && res.GitCompletesPush {
-		return 0
-	}
-	return exitForBlocker(res.Blocker)
+	return prePushExitCode(res)
 }
 
 func printFindings(w io.Writer, findings []domain.Finding) {

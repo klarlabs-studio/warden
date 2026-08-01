@@ -459,7 +459,9 @@ func TestMCP_UsageError(t *testing.T) {
 }
 
 func TestRun_PrePushExitAndAutoApprover(t *testing.T) {
-	// runPrePushExit always returns 1 and echoes the run message.
+	// A result that did not pass exits 1 and echoes the run message. (A PASSING
+	// run that warden pushed exits exitWardenPushed instead — see
+	// TestPrePushExit_PassIsUnaffectedByTheBlockerCodes.)
 	var out bytes.Buffer
 	if code := runPrePushExit(application.RunResult{Message: "pushed"}, &out); code != 1 {
 		t.Errorf("runPrePushExit code = %d, want 1", code)

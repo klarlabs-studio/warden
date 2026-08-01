@@ -8,6 +8,9 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/git"
+	"go.klarlabs.de/warden/internal/infrastructure/signing"
+	"go.klarlabs.de/warden/internal/infrastructure/trust"
 	"go.klarlabs.de/warden/internal/service"
 )
 
@@ -23,11 +26,51 @@ import (
 const envMCPAllowRun = "WARDEN_MCP_ALLOW_RUN"
 
 // mcpRunTrusted reports whether the operator has explicitly opted this
-// non-interactive run in. explicit carries a surface-local trust signal (the
-// axi `--trust` flag); the env var is the surface-agnostic opt-in that also
-// covers `warden mcp serve`, which an MCP client cannot pass flags to.
+// non-interactive run in, checking three grants in order of specificity:
+//
+//  1. explicit — a surface-local signal (the axi `--trust` flag), scoped to the
+//     single invocation that carries it.
+//  2. the per-repo allowlist (`warden trust add`), which names its subject.
+//  3. the env var, which does not.
+//
+// (2) exists because (3) answers the wrong question. WARDEN_MCP_ALLOW_RUN=1 says
+// "this server may run commands", not "this server may run THIS repo's
+// commands" — and an MCP server is long-lived while an agent moves between
+// checkouts, so a single grant silently covered every repo the server was later
+// pointed at, including one cloned minutes afterwards. The env var is kept: in a
+// container or CI job there is no persistent config dir to hold an allowlist,
+// and the whole workspace is disposable anyway.
 func mcpRunTrusted(explicit bool) bool {
-	return explicit || truthyEnv(os.Getenv(envMCPAllowRun))
+	if explicit || truthyEnv(os.Getenv(envMCPAllowRun)) {
+		return true
+	}
+	return repoTrusted()
+}
+
+// repoTrusted reports whether the CURRENT repository is on the operator's
+// allowlist. It fails closed: when the config dir or the working directory
+// cannot be resolved, trust has not been established, and the safe reading of
+// "I don't know" is "no".
+func repoTrusted() bool {
+	dir, err := signing.DefaultDir()
+	if err != nil {
+		return false
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	return trust.New(dir).Trusted(trustSubject(cwd))
+}
+
+// trustSubject is the path a grant is recorded against: the repository ROOT when
+// there is one, so a call from a subdirectory resolves to the same grant instead
+// of needing one per directory.
+func trustSubject(cwd string) string {
+	if repo, err := git.Open(cwd); err == nil && repo.Dir != "" {
+		return repo.Dir
+	}
+	return cwd
 }
 
 // truthyEnv treats the common affirmative spellings as "on"; everything else,
@@ -46,7 +89,7 @@ func truthyEnv(v string) bool {
 // is actionable rather than a bare "denied".
 func errUntrustedMCPRun() error {
 	return fmt.Errorf(
-		"run_trigger refused: this surface auto-approves and runs the repository's configured commands as shell with no human in the loop, so it will not execute a possibly-untrusted repo's .warden.yaml. Set %s=1 (or pass --trust to `warden axi run-trigger`) only for repositories you trust",
+		"run_trigger refused: this surface auto-approves and runs the repository's configured commands as shell with no human in the loop, so it will not execute a possibly-untrusted repo's .warden.yaml. Trust this one repository with `warden trust add` (preferred — the grant names its subject), pass --trust to `warden axi run-trigger` for a single invocation, or set %s=1 to trust EVERY repo this process is pointed at",
 		envMCPAllowRun,
 	)
 }
