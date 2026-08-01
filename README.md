@@ -193,6 +193,42 @@ produce notes that gate will later reject — by then the commit is in history a
 whoever could have fixed it has moved on. **Enforcement only at verification time
 is enforcement too late.**
 
+### Signing with your SSH key
+
+Warden's own key is generated per machine and means nothing to anyone else: a
+`trusted_keys` roster of warden fingerprints has to be hand-maintained, with no
+way to check an entry against any identity system.
+
+Sign with your **SSH key** instead — the same one git signs commits with — and
+the roster names an identity your forge already publishes and can revoke:
+
+```yaml
+signing:
+  signer: ssh        # default: local (warden's own per-machine ed25519 key)
+  # ssh_key: ~/.ssh/id_ed25519   # optional — defaults to git's user.signingkey
+```
+
+With `gpg.format = ssh` already configured, that's the whole change: warden picks
+up `user.signingkey` on its own. `warden verify` then reports OpenSSH's own
+fingerprint — the string `ssh-keygen -lf` prints and your forge shows beside the
+key — so a roster entry can be pasted rather than transcribed:
+
+```
+validated dca03be43bf2 (…, chain-intact, signed by trusted SHA256:hjc5hW5BZinMwBxv…)
+```
+
+`trusted_keys` accepts either form: an `ssh-ed25519 AAAA…` line or a `SHA256:…`
+fingerprint.
+
+**Signatures are namespaced.** Warden signs under `warden-provenance`, so a
+provenance signature can never be replayed as a git commit signature, or the
+reverse — which matters precisely because it's the same key.
+
+**Existing notes are untouched.** The algorithm is recorded as an empty field for
+warden's own scheme, so every note ever written stays byte-identical and still
+verifies. An algorithm a given warden doesn't recognise verifies *false* rather
+than passing.
+
 ### Enforcing provenance across a range
 
 `warden verify` checks one commit (the provenance-*skip* primitive). To **gate**
@@ -296,7 +332,7 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
-signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
+signing: { signer: local, required: false }   # signer: local|ssh; required: true refuses to write an unsigned note — true refuses to write an unsigned note instead of warning
 push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:
   - match: { branch: main }

@@ -42,6 +42,11 @@ func DefaultDir() (string, error) {
 	return filepath.Join(base, "warden"), nil
 }
 
+// Algorithm identifies warden's own per-machine scheme. It is the empty string
+// so that a record written by this signer is byte-identical to one written
+// before the field existed — see domain.RunRecord.Algorithm.
+func (s *Signer) Algorithm() string { return domain.AlgorithmEd25519 }
+
 // Load returns the signer for dir, generating and persisting a fresh keypair on
 // first use. The key file is created 0600 inside dir (0700).
 func Load(dir string) (*Signer, error) {

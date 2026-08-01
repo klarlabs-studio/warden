@@ -163,16 +163,21 @@ type SBOM interface {
 	Collect(dir string) []domain.DependencyManifest
 }
 
-// Signer produces detached ed25519 signatures over provenance payloads. It is
-// optional: a nil Signer leaves run records unsigned, and a signing failure
-// never fails a run — the note is still written, just without a signature (§9).
+// Signer produces detached signatures over provenance payloads. It is optional:
+// a nil Signer leaves run records unsigned, and a signing failure never fails a
+// run by default — the note is still written, just without a signature (§9),
+// unless signing.required says otherwise.
 type Signer interface {
-	// PublicKey is the base64 ed25519 public key that verifies this signer's
-	// signatures. It is written into the record before signing so the key is
-	// bound into its own signature.
+	// PublicKey is the public key that verifies this signer's signatures, in
+	// whatever encoding Algorithm implies. It is written into the record before
+	// signing so the key is bound into its own signature.
 	PublicKey() string
-	// Sign returns a base64 ed25519 signature over payload.
+	// Sign returns the signature over payload.
 	Sign(payload []byte) (string, error)
+	// Algorithm names the scheme, matching domain.Algorithm*. It is recorded
+	// BEFORE the payload is computed, so a signature always covers a statement of
+	// which scheme produced it — a record cannot be re-labeled after signing.
+	Algorithm() string
 }
 
 // Approver resolves the run's approval gate. Interactive delivery shows a TUI;

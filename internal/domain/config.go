@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -131,6 +132,20 @@ type Config struct {
 // read-only — but it is SILENT, so a repo can accumulate unsigned notes for
 // months and only find out when a CI `verify --require-signed` starts failing.
 type SigningConfig struct {
+	// Signer selects the signing scheme: "local" (default) is warden's own
+	// per-machine ed25519 key; "ssh" uses the developer's SSH key — the same one
+	// git signs commits with when gpg.format=ssh.
+	//
+	// The local key is generated per machine and means nothing to anyone else, so
+	// a trusted_keys roster of warden fingerprints has to be hand-maintained with
+	// no way to check an entry against any identity system. An SSH key is one a
+	// forge already publishes and can revoke.
+	Signer string `yaml:"signer"`
+	// SSHKey is the key to sign with when Signer is "ssh". Empty falls back to
+	// git's user.signingkey, which is already set in any repo signing commits —
+	// so the common case needs no warden-specific configuration at all. Either
+	// the private or the .pub path works.
+	SSHKey string `yaml:"ssh_key"`
 	// Required refuses to write an unsigned note, failing the run instead.
 	//
 	// Default false, so nothing changes for an existing repo. Set it where the
@@ -149,7 +164,12 @@ func ValidTrustedKey(s string) bool {
 	if isFingerprint(s) {
 		return true
 	}
-	return KeyFingerprint(s) != "" // a full base64 ed25519 public key
+	if KeyFingerprint(s) != "" { // a full base64 ed25519 public key
+		return true
+	}
+	// An SSH public key line, or OpenSSH's own SHA256 fingerprint — the forms a
+	// forge publishes, so a roster can name an identity someone else maintains.
+	return SSHKeyFingerprint(s) != "" || strings.HasPrefix(s, "SHA256:")
 }
 
 func isFingerprint(s string) bool {

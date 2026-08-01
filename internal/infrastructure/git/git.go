@@ -145,6 +145,17 @@ func (r *Repo) HeadSHA() (string, error) {
 	return r.run("rev-parse", "HEAD")
 }
 
+// ConfigValue reads a git config value, or "" when it is unset. An unset key is
+// an ordinary state, not an error — callers use this to pick up a setting the
+// developer already made (user.signingkey) and fall back when they have not.
+func (r *Repo) ConfigValue(key string) string {
+	v, err := r.run("config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
 // MergeBase returns the best common ancestor of HEAD and ref (e.g.
 // "origin/main"), the anchor Warden diffs against to scope a change.
 func (r *Repo) MergeBase(ref string) (string, error) {
