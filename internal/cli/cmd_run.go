@@ -397,8 +397,15 @@ func maybeNotify(svc notifySource, res application.RunResult, elapsed time.Durat
 		repo = filepath.Base(r.Dir)
 		branch, _ = r.CurrentBranch()
 	}
-	notify.Send(buildNotification(res, repo, branch))
+	sendNotification(buildNotification(res, repo, branch))
 }
+
+// sendNotification is the seam that makes maybeNotify's wiring assertable.
+// shouldNotify and buildNotification are pure and tested directly, but whether
+// maybeNotify actually consults them — and stays silent on a config error —
+// is only observable by watching for the send. Mirrors the runNotifier seam in
+// the notify package, added for the same reason.
+var sendNotification = notify.Send
 
 // preCommitReporter is the slice of the service a finished pre-commit needs:
 // re-apply the fix patch, and read the configured step lists so the pass line
