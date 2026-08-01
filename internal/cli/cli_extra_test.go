@@ -100,12 +100,41 @@ func TestDoctor_ReportsUnverifiedAndExits1(t *testing.T) {
 	if code, _, errb := run("init", "--hooks=pre-push"); code != 0 {
 		t.Fatalf("init: code=%d err=%q", code, errb)
 	}
-	// A commit made after adoption with no warden note is unverified.
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	// The branch MUST have a remote-tracking ref for this to test what it means
+	// to test. Without one warden reports the commit below as UNPUSHED — the
+	// pre-push gate that writes the note never had an opportunity to run — which
+	// is correct, and is not the bypass this test is about. The remote-less
+	// fixture was incidental, and the assertion depended on it silently.
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v: %s", err, out)
+	}
+	// Push HEAD, never a hardcoded branch name: `git init` yields master on some
+	// installs and main on others, and pushing to refs/heads/main from a master
+	// checkout leaves origin/master missing — which warden then reads, correctly,
+	// as a branch that was never pushed. That is precisely the state this test
+	// must NOT be in, and it passed locally while failing on CI for exactly that
+	// reason.
+	git("remote", "add", "origin", remote)
+	git("push", "--no-verify", "-u", "origin", "HEAD")
+
+	// A commit made after adoption with no warden note is unverified. It must
+	// reach the remote to be in doctor's walk, and --no-verify is what makes it
+	// the genuine bypass this test asserts on.
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "post-adoption change")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
 	}
+	git("push", "--no-verify", "origin", "HEAD")
 
 	code, out, _ := run("doctor")
 	if code != 1 {

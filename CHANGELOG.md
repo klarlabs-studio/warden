@@ -6,6 +6,37 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A branch that was never pushed is no longer reported as bypassed.** warden's
+  note is written by the PRE-PUSH gate. A branch with no remote-tracking ref has
+  never reached it, so its commits carry no note for a reason that has nothing to
+  do with anyone routing around anything — but `doctor` fell back to walking the
+  local branch, found no notes, and called every commit a bypass.
+
+  This is the same unevidenced accusation as the pre-span case fixed in 0.21.2,
+  with a different missing signal: the absence of a note is evidence of a bypass
+  only once warden had both the ABILITY and the OPPORTUNITY to write one. Such
+  commits are now reported as **unpushed**, counted as neither verified nor
+  bypassed.
+
+  Measured on the fleet this was written against, it was 61 of 74 reported
+  bypasses — one local-only repo, renamed away weeks earlier, with no remote at
+  all — taking the rate from 26.6% to **4.7%**. A second repo moved from
+  *unattributable* to *unpushed*, which is the more precise reading: "never
+  pushed" is a definite fact about the branch, where pre-span provenance is an
+  ambiguity, so it takes precedence.
+
+  `Unpushed` is the sixth commit state, and the exhaustive partition test added
+  in 0.21.2 did exactly what its comment promised — it failed until the new state
+  was ordered against the other five, rather than letting it silently skew a
+  number someone acts on.
+
+- **The golden fleet no longer assumes every repo has a remote.** `newGoldenRepo`
+  built a bare remote for every fixture, so the suite structurally could not have
+  caught the bug above — the helper encoded an assumption instead of testing it.
+  A no-remote fixture now covers that shape.
+
 ## [0.21.2] — 2026-08-01
 
 Three corrections to one number: the bypass rate `doctor` and `fleet status`
