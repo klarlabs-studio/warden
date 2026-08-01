@@ -6,6 +6,39 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Five doc comments described the wrong function** (#141). Inserting a
+  function between an existing comment and its declaration leaves the comment
+  behind, silently rebinding it to whatever now follows. `Worktree.Remove` came
+  off worst: its doc was cut mid-sentence onto `HeadSHA` above it, and `Remove`
+  itself was left holding the orphan fragment `// block removal.` The same
+  drift put `GH.Checks`'s doc on `GH.Comment`, a stale `Push` paragraph on
+  `Repo.ApplyPatch`, a duplicated opener on `remoteTrackingSHA`, and
+  `Runner.result`'s doc on `pushedMessage`. Four of the five are exported, so
+  the wrong text was what pkg.go.dev served.
+
+  `gofmt`, `go vet` and `golangci-lint` were all silent throughout: nothing is
+  syntactically wrong with a comment in the wrong place. golangci-lint excludes
+  staticcheck's doc-comment-form checks by default, so `ST1020`/`ST1021`/`ST1022`
+  are now enabled — `ST1020` flagged exactly these and nothing else, so the
+  guard against a recurrence costs no ongoing noise.
+
+- **A stray `data/` cache directory is now ignored**. Tooling run from the repo
+  root writes a durability cache there. Nothing in warden produces it, but
+  leaving it untracked-and-unignored parked it permanently in `git status`,
+  where an `-A`-style stage would sweep it into a commit.
+
+- **Test isolation for `WARDEN_ALLOW_DISCARD`** (#140). The override leaked out
+  of the push that set it and into the gate's own `go test` step, failing the
+  guard's tests — an env override asserting *absence* has to clear the variable
+  explicitly.
+
+### Changed
+
+- The CI-gate pin example is documented against a pin that will not rot (#139),
+  and `actions/checkout` is bumped to v7.0.1 (#138).
+
 ## [0.20.4] — 2026-07-27
 
 A single fix, to the one warden command that was editing your config badly.

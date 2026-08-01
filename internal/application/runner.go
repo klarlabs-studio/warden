@@ -658,7 +658,6 @@ func (r *Runner) newRun(hook domain.Hook, resolved domain.ResolvedPolicy, branch
 	return domain.NewRun(id, hook, resolved, branch)
 }
 
-// result projects the aggregate into the application's output DTO.
 // pushedMessage states what landed where, so "did it push?" is answerable from
 // the output alone rather than by running `git ls-remote` — which is what an
 // operator had to do while success and failure printed the same thing (#89).
@@ -684,6 +683,7 @@ func pushedMessage(sha, remote, branch string, gitCompletes bool) string {
 	return fmt.Sprintf("pushed %s to %s; local branch fast-forwarded", short, target)
 }
 
+// result projects the aggregate into the application's output DTO.
 func (r *Runner) result(run *domain.Run, patch string) RunResult {
 	return RunResult{
 		Outcome:  run.Outcome(),

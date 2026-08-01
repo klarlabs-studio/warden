@@ -17,3 +17,8 @@
 
 # Local agent/session scratch
 .claude/
+# Durability cache written into the CWD by tooling run from the repo root.
+# Nothing in warden produces it, but leaving it untracked-and-unignored parks a
+# stray dir in `git status` — exactly the kind of thing a stray `git add -A`
+# sweeps into a commit.
+/data/

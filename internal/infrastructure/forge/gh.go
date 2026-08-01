@@ -64,9 +64,6 @@ func (g *GH) EnsurePR(ctx context.Context, branch, base string) (domain.PRInfo, 
 	return domain.PRInfo{URL: url, Created: true}, nil
 }
 
-// Checks returns the CI status for branch's PR by reading `gh pr checks`'s
-// machine-readable JSON. A non-zero exit (failing/pending checks) is expected,
-// so the JSON is parsed regardless of exit code.
 // Comment posts a sticky gate-result comment on branch's PR. It first tries to
 // edit the current user's last comment (so repeated pushes update one comment
 // instead of stacking); if there is none to edit, it posts a fresh one. Body is
@@ -89,6 +86,9 @@ func (g *GH) runStdin(ctx context.Context, in string, args ...string) error {
 	return err
 }
 
+// Checks returns the CI status for branch's PR by reading `gh pr checks`'s
+// machine-readable JSON. A non-zero exit (failing/pending checks) is expected,
+// so the JSON is parsed regardless of exit code.
 func (g *GH) Checks(ctx context.Context, branch string) (domain.CIStatus, error) {
 	out, _ := g.run(ctx, "pr", "checks", branch, "--json", "state")
 	var rows []struct {
