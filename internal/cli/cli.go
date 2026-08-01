@@ -38,6 +38,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdSteps(rest, stdout, stderr)
 	case "doctor":
 		return cmdDoctor(rest, stdout, stderr)
+	case "fleet":
+		return cmdFleet(rest, stdout, stderr)
 	case "ci":
 		return cmdCI(rest, stdout, stderr)
 	case "verify":
