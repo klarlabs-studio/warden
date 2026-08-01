@@ -8,6 +8,42 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **Commands no longer silently answer a question other than the one asked.**
+  Every flag-parsing command discarded its leftover positional arguments, so
+  `warden verify <sha>` parsed cleanly, verified **HEAD** instead, and printed
+
+  ```
+  validated a80e2707237a (…, chain-intact, signed by trusted 139e6eb9e261)
+  ```
+
+  for a commit the caller never named. That is worse than an error: the answer
+  looks authoritative, it is about a different commit, and nothing in the output
+  says so. It was found only by noticing that the SHA in the reply did not match
+  the SHA in the request.
+
+  All fourteen such commands now refuse an unexpected argument and name the flag
+  the caller most likely meant (``did you mean `--commit <sha>`?``). `fleet
+  status` is the deliberate exception — its positional arguments are the
+  repositories to survey. `attest` already refused an unknown `--predicate` on
+  exactly this reasoning; this extends the rule from flag values to arguments.
+
+- **"TAMPERED" is no longer printed for two innocent causes.** It was rendered
+  from a single boolean that folds three distinct failures together: no evidence
+  recorded, a broken hash chain, and a note that is internally sound but
+  describes a *different* commit. Only the middle one suggests tampering; the
+  last is what a rebase or a squash routinely leaves behind.
+
+  Each is now named for what it is — `TAMPERED (evidence chain broken)`,
+  `UNBOUND (note describes another commit — history was rewritten)`,
+  `NO EVIDENCE (note records no steps)`. On the repo this was found in, **all
+  seven commits warden was calling TAMPERED were UNBOUND, and none had been
+  tampered with.**
+
+  The gate is unchanged: all three still fail `Attests`, and `verify` still
+  refuses them. Only the accusation changed. The glyph went with it — those lines
+  printed `✓ … TAMPERED`, which reads as a pass at a glance, and a glance is all
+  most of them get.
+
 - **A branch that was never pushed is no longer reported as bypassed.** warden's
   note is written by the PRE-PUSH gate. A branch with no remote-tracking ref has
   never reached it, so its commits carry no note for a reason that has nothing to
