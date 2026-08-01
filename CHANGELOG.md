@@ -39,6 +39,23 @@ All notable changes to warden are documented here. The format follows
 - The CI-gate pin example is documented against a pin that will not rot (#139),
   and `actions/checkout` is bumped to v7.0.1 (#138).
 
+- **Every module warden builds against is current** (#143). Ten bumps, two of
+  them direct — `mattn/go-isatty` to v0.0.24 and `go.klarlabs.de/statekit` to
+  v1.12.0 — plus `logr`, `runewidth`, `x/net`, `x/sys`, `x/text`, `x/exp`,
+  `genproto` and `grpc`. No source change was needed. `go list -m -u all` still
+  reports modules behind, and that is correct rather than work left undone:
+  `go.sum` hashes the whole module graph, so it lists modules that reach warden
+  only through other modules' requirements and are never compiled in.
+
+### Added
+
+- **The `gh` forge adapter is covered end to end** (#142), 34.7% → 100%. Its
+  untested paths were the ones that matter: `gh pr view` can exit 0 while
+  describing no PR, an empty base must omit `--base` rather than pass it empty,
+  a PR comment falls back to a fresh post when there is none to edit, and
+  `gh pr checks` exits non-zero precisely when checks fail or are pending — so
+  its JSON is read regardless of exit code.
+
 ## [0.20.4] — 2026-07-27
 
 A single fix, to the one warden command that was editing your config badly.
