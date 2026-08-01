@@ -36,7 +36,7 @@ Warden does what a Makefile can't:
 
 It complements your checks rather than replacing them: point warden at the
 commands you already run (`warden import` reads them from your Makefile, npm
-scripts, lefthook, or CI).
+scripts, pre-commit config, lefthook, or CI).
 
 ## Install
 
@@ -80,7 +80,7 @@ the integrity model and the signature-verification follow-up.
 
 ```bash
 cd your-repo
-warden import --write   # reads your Makefile / package.json / lefthook / CI into .warden.yaml
+warden import --write   # reads your Makefile / package.json / .pre-commit-config.yaml / lefthook / CI
 warden init             # installs hooks + records the adoption point
 ```
 
@@ -290,7 +290,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
-| `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / lefthook / CI |
+| `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
@@ -300,19 +300,51 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |
 | `warden reattest --all [--branch b] [--push]` | sweep a branch: re-attest every recoverable squash-merge gap since adoption |
 | `warden key show` | print this machine's provenance signing key + fingerprint |
+| `warden trust add\|list\|remove [path]` | allow the agent surfaces to run **this** repo's commands (per-repo `run_trigger` opt-in) |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
 | `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
-| `warden axi <verb>` | flags-only agent surface, TOON output |
+| `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `policy-explain`, `steps`, `run-trigger`) |
 | `warden mcp serve` | MCP server over stdio |
 
-### Agent surfaces and `run_trigger` trust
+### Agent surfaces
+
+Both agent surfaces — `warden mcp serve` (MCP over stdio) and `warden axi <verb>`
+(flags-only, TOON output) — expose the same operation set. The provenance reads
+are the point: an agent can ask **"is this commit actually gated?"** and get a
+structured answer, rather than having to run the gate to find out.
+
+| MCP tool | axi verb | Answers |
+|---|---|---|
+| `verify` | `verify` | Does this commit carry signed, chain-intact provenance bound to it? |
+| `verify_range` | `verify-range` | Is *every* commit in `base..head` gated? (the PR-check shape) |
+| `doctor` | `doctor` | Which commits since adoption have no note — where was the gate bypassed? |
+| `audit` | `audit` | Full per-commit provenance export, for compliance |
+| `status` | `status` | Are the hooks actually armed? What would run? Which key signs here? |
+| `policy_explain` | `policy-explain` | What policy resolves for a hypothetical push? |
+| `steps_list` | `steps` | Which steps exist per hook? |
+| `run_trigger` | `run-trigger` | Run the pipeline (**gated on trust** — see below) |
+
+Everything except `run_trigger` is a pure read, marked `readOnlyHint` on MCP, and
+needs no trust opt-in. The two gate verbs put their verdict in the **exit status**
+as well as the payload, so they compose in a shell:
+
+```bash
+warden axi verify && echo "already validated — CI can skip the checks"
+warden axi verify-range --base origin/main --require-signed
+```
+
+A failed run reports `blocker` and `retryable` alongside its findings, so an agent
+can tell "your change is wrong" (don't retry) from "another process held the
+linter's lock" (retry later) without parsing prose.
+
+### `run_trigger` trust
 
 The `axi` and `mcp` surfaces are non-interactive: they auto-approve gate
 findings because there is no human at a prompt. That is fine for the read-only
-operations (`policy_explain` / `policy-explain`, `steps_list` / `steps`), but
+operations above, but
 `run_trigger` (and `warden axi run-trigger`) **executes the repository's
 `.warden.yaml` `commands` as shell**. Pointing an MCP-enabled agent at an
 untrusted cloned repo and letting it call `run_trigger` would therefore be
@@ -320,12 +352,32 @@ arbitrary code execution from that repo's config, with the human-approval step a
 normal interactive `warden run` keeps.
 
 So `run_trigger` **refuses by default** on these surfaces and runs only when the
-operator has explicitly trusted the repo:
+operator has explicitly trusted the repo. Grant it **per repository**:
 
-- **MCP** (`warden mcp serve`): set `WARDEN_MCP_ALLOW_RUN=1` in the server's
-  environment. An MCP client cannot pass flags, so the env var is the only knob.
-- **axi** (`warden axi run-trigger`): pass `--trust`, or set
-  `WARDEN_MCP_ALLOW_RUN=1`.
+```bash
+cd your-repo
+warden trust add        # this repo only
+warden trust list       # what have I granted?
+warden trust remove     # revoke
+```
+
+The allowlist lives beside your signing key under the per-user config dir (never
+in the repo — a repository must not be able to declare itself trusted), is
+`0600`, and is plain text you can read and audit.
+
+Two narrower grants also work:
+
+- **`--trust`** on `warden axi run-trigger`, scoped to that single invocation.
+- **`WARDEN_MCP_ALLOW_RUN=1`**, which trusts **every** repo the process is
+  pointed at. Prefer `warden trust add`; reach for the env var only where there
+  is no persistent config dir to hold an allowlist — a container or a CI job,
+  where the whole workspace is disposable anyway.
+
+> **Changed in v0.21.0.** The env var was previously the only opt-in, and it
+> authorized a *process*, not a repository. An MCP server is long-lived while an
+> agent moves between checkouts, so one grant silently covered every repo the
+> server was later pointed at — including one cloned minutes afterwards. The
+> per-repo grant names its subject, the same fix git made with `safe.directory`.
 
 Grant trust only for repositories whose `.warden.yaml` you have reviewed. The
 normal interactive `warden` flow is unaffected — it still prompts a human.
@@ -589,16 +641,28 @@ ready", so a retry wrapper can tell them apart without parsing prose:
 | Code | Meaning | Retry? |
 |------|---------|--------|
 | `0` | passed (pre-commit, or a pre-push where git completed the push) | — |
-| `1` | the gate reached a verdict about your change — or a pre-push passed that *warden* had to push (see below) | no |
+| `1` | the gate reached a verdict about your change | no |
 | `2` | usage error | no |
+| `3` | **passed**, and *warden* performed the push (see below) | no — you're done |
 | `75` | a step couldn't run: another process holds its lock (`EX_TEMPFAIL`) | **yes**, later |
 | `78` | a step couldn't run: its toolchain/deps aren't installed (`EX_CONFIG`) | no — run the remediation |
 
-A passing pre-push usually exits `0`. It exits `1` in the one case where warden
+A passing pre-push usually exits `0`. It exits `3` in the one case where warden
 performs the push itself — after a step rewrote the branch, or when a force is
 needed — because git's own now-stale push must then be stopped from racing it.
-So `1` stays ambiguous, which is exactly why the environmental cases get their
-own codes.
+That case is a **success**: your commits are on the remote.
+
+These codes are what `warden run` returns. **Git does not propagate a hook's exit
+status** — it only distinguishes zero from non-zero, then reports its own failure
+as `1` and prints `error: failed to push some refs`. So the distinct codes are for
+whatever calls warden directly (retry wrappers, CI steps, the `axi`/MCP agent
+surfaces); at an interactive `git push` you still see git's `1`, which is why
+warden prints its own explanation first.
+
+> **Changed in v0.21.0.** The warden-performed push used to exit `1`, sharing a
+> code with "the gate rejected your change" — so the most common successful
+> outcome was indistinguishable from a rejection. If you have a wrapper script or
+> CI step keying on `1`, treat `3` as success.
 
 ## Rebasing a gated branch (`push.force`)
 

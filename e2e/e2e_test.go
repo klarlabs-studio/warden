@@ -254,6 +254,82 @@ func TestE2E_PrePushPushesWithProvenance(t *testing.T) {
 	}
 }
 
+// TestE2E_WardenPerformedPushExitsThree pins the other half of the exit
+// contract. When a step REWRITES the branch, warden performs the push itself and
+// must then fail the hook on purpose so git's now-stale compare-and-swap cannot
+// race it. That case is a success — the commits are on the remote — but it used
+// to exit 1, the same code as "the gate rejected your change", making the most
+// common successful outcome indistinguishable from a rejection for every wrapper,
+// CI step and agent reading the status. It now exits 3.
+//
+// This is the sibling of TestE2E_PrePushSelfPushWhenStepRewrites, not a
+// duplicate of it: that one drives a real `git push` and asserts what GIT
+// reports (non-zero, because git only distinguishes zero from non-zero and
+// substitutes its own 1); this one calls the hook entry point directly and
+// asserts what WARDEN returns, which is the code wrappers and agents read.
+func TestE2E_WardenPerformedPushExitsThree(t *testing.T) {
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v %s", err, out)
+	}
+	h := newHarness(t)
+	h.git("remote", "add", "origin", remote)
+	h.write("a.txt", "hello\n")
+	h.git("add", "a.txt")
+	h.git("commit", "--no-verify", "-m", "init")
+	h.git("branch", "-M", "main")
+	h.git("push", "--no-verify", "-u", "origin", "main")
+
+	// A `writes:` step runs as a sequential barrier in the shared worktree with its
+	// changes KEPT. Committing there moves the worktree HEAD away from the seed
+	// tip, which is exactly the condition under which warden must perform the push
+	// itself (delegateToGit requires finalSHA == seedTip) — the real-world shape
+	// being an auto-fix or an amending agent step.
+	h.write(".warden.yaml", `
+hooks: { pre_push: true }
+commands: { amend: "printf 'fixed\n' > a.txt && git commit --no-verify -am 'auto-fixed by a step'" }
+steps: { pre_push: [amend] }
+writes: [amend]
+rules: []
+`)
+	h.warden("init")
+	h.write("a.txt", "feature\n")
+	h.git("commit", "--no-verify", "-am", "feature change")
+
+	// Invoke the hook entry point directly, because THAT is the exit code this
+	// change is about. Git does not propagate a hook's status: it observes only
+	// zero vs non-zero and then reports its own failure as 1. So the audience for
+	// the distinct code is everything that calls warden directly — retry wrappers,
+	// CI steps, and the agent surfaces — not the interactive `git push` user, who
+	// gets git's 1 either way and reads the printed explanation instead.
+	out, code := h.warden("run", "pre-push")
+
+	if code != 3 {
+		t.Fatalf("a push warden performed itself must exit 3 (passed, warden pushed), got %d: %s", code, out)
+	}
+	// The success must be legible in the output too, not only in the code.
+	if !strings.Contains(out, "exit 3") {
+		t.Errorf("expected the heads-up naming exit 3, got: %s", out)
+	}
+	// The commits must actually be on the remote — the whole reason this non-zero
+	// exit is a success and not a failure.
+	if remoteSHA := strings.TrimSpace(gitIn(t, remote, "rev-parse", "main")); remoteSHA == "" {
+		t.Error("remote main is empty; warden did not perform the push")
+	}
+
+	// A rejection must NOT share that code — the point of the split.
+	h.write(".warden.yaml", `
+hooks: { pre_push: true }
+commands: { lint: "echo nope >&2; exit 1" }
+steps: { pre_push: [lint] }
+rules: []
+`)
+	h.git("commit", "--no-verify", "-am", "another change")
+	if _, rejectCode := h.warden("run", "pre-push"); rejectCode == 3 {
+		t.Error("a rejected push must not exit 3; that code means the push succeeded")
+	}
+}
+
 // TestE2E_PrePushSkipsNonBranchPush pins the fix for a notes/tag push needlessly
 // re-running the gate: when git's pre-push stdin advances no branch (here a
 // refs/notes/warden push), warden exits 0 without running the pipeline, letting

@@ -27,6 +27,35 @@ type fakeFacade struct {
 	run     RunSummary
 	runErr  error
 	runHook domain.Hook
+
+	// The read-only provenance surface. The *Arg fields record what each handler
+	// passed through, so a test can assert on the translation the handler does
+	// (defaulting to HEAD, resolving the roster from the base) rather than only
+	// on the value that comes back.
+	verify    ProvenanceRecord
+	verifyErr error
+	verifyArg struct {
+		commit string
+		keys   []string
+	}
+
+	rangeVerify    RangeVerifyOutput
+	rangeVerifyErr error
+	rangeVerifyArg struct {
+		base, head string
+		opts       RangeVerifyRequest
+	}
+
+	doctor       domain.AuditReport
+	doctorErr    error
+	doctorBranch string
+
+	audit       domain.AuditReport
+	auditErr    error
+	auditBranch string
+
+	status    StatusOutput
+	statusErr error
 }
 
 func (f *fakeFacade) PolicyExplain(hook domain.Hook, branch string, paths []string) (domain.ResolvedPolicy, error) {
@@ -44,6 +73,31 @@ func (f *fakeFacade) RunTrigger(_ context.Context, hook domain.Hook) (RunSummary
 	f.runHook = hook
 	return f.run, f.runErr
 }
+
+func (f *fakeFacade) Verify(commitish string, trustedKeys []string) (ProvenanceRecord, error) {
+	f.verifyArg.commit = commitish
+	f.verifyArg.keys = trustedKeys
+	return f.verify, f.verifyErr
+}
+
+func (f *fakeFacade) VerifyRange(base, head string, opts RangeVerifyRequest) (RangeVerifyOutput, error) {
+	f.rangeVerifyArg.base = base
+	f.rangeVerifyArg.head = head
+	f.rangeVerifyArg.opts = opts
+	return f.rangeVerify, f.rangeVerifyErr
+}
+
+func (f *fakeFacade) Doctor(branch string) (domain.AuditReport, error) {
+	f.doctorBranch = branch
+	return f.doctor, f.doctorErr
+}
+
+func (f *fakeFacade) Audit(branch string) (domain.AuditReport, error) {
+	f.auditBranch = branch
+	return f.audit, f.auditErr
+}
+
+func (f *fakeFacade) Status() (StatusOutput, error) { return f.status, f.statusErr }
 
 func TestNewServer_BuildsWithoutPanic(t *testing.T) {
 	srv := NewServer(&fakeFacade{}, "1.2.3", AllowAllRuns)

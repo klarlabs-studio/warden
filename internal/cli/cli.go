@@ -48,6 +48,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdReattest(rest, stdout, stderr)
 	case "key":
 		return cmdKey(rest, stdout, stderr)
+	case "trust":
+		return cmdTrust(rest, stdout, stderr)
 	case "why":
 		return cmdWhy(rest, stdout, stderr)
 	case "recipes":
@@ -92,6 +94,7 @@ Usage:
   warden reattest --all [--branch b] [--push] sweep a branch: re-attest every recoverable squash-merge gap
   warden key show                             print this machine's provenance signing key
   warden key list                             print the repo's trusted-signer roster (.warden.yaml trusted_keys)
+  warden trust add|list|remove [path]         allow the agent surfaces to run THIS repo's commands
   warden why [commit]                         explain what the gate did for a commit (from its note)
   warden recipes [name]                        list / print paste-able check recipes (gitleaks, semgrep, …)
   warden watch                                 re-run the fast checks on save (dev feedback loop)

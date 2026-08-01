@@ -30,8 +30,10 @@ func TestExitForBlocker(t *testing.T) {
 	if exitContention == exitEnvironment {
 		t.Error("the two blockers must not share a code: one is worth retrying, the other never is")
 	}
-	// Neither may collide with the codes that already mean something else.
-	for _, taken := range []int{0, 1, 2} {
+	// Neither may collide with the codes that already mean something else —
+	// including exitWardenPushed, which is a SUCCESS and must never be confused
+	// with a run the machine stopped.
+	for _, taken := range []int{0, 1, 2, exitWardenPushed} {
 		if exitContention == taken || exitEnvironment == taken {
 			t.Errorf("blocker code collides with the existing exit code %d", taken)
 		}
@@ -58,7 +60,9 @@ func TestPrePushExit_BlockerPicksTheCode(t *testing.T) {
 }
 
 // The blocker codes must not disturb what #89 established: a pass exits 0 when
-// git completed the push, and 1 in the one case where warden pushed itself.
+// git completed the push, and non-zero in the one case where warden pushed
+// itself — now exitWardenPushed rather than 1, so that success is distinguishable
+// from a rejection.
 func TestPrePushExit_PassIsUnaffectedByTheBlockerCodes(t *testing.T) {
 	var out bytes.Buffer
 	gitPushed := application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed", GitCompletesPush: true}
@@ -67,8 +71,29 @@ func TestPrePushExit_PassIsUnaffectedByTheBlockerCodes(t *testing.T) {
 	}
 	out.Reset()
 	wardenPushed := application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"}
-	if got := runPrePushExit(wardenPushed, &out); got != 1 {
-		t.Errorf("exit = %d, want 1 when warden pushed and git's stale push must be stopped", got)
+	if got := runPrePushExit(wardenPushed, &out); got != exitWardenPushed {
+		t.Errorf("exit = %d, want %d when warden pushed and git's stale push must be stopped", got, exitWardenPushed)
+	}
+}
+
+// A passing run that warden pushed must not be reported with the code that means
+// "the gate rejected your change". This is the whole point of the split: the two
+// outcomes shared exit 1, so nothing reading the status could tell the most
+// common success from a failure.
+func TestPrePushExit_WardenPushedIsNotConfusableWithRejection(t *testing.T) {
+	var out bytes.Buffer
+	wardenPushed := application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"}
+	rejected := application.RunResult{Outcome: domain.OutcomeFailed, Message: "step lint failed"}
+
+	pushed := runPrePushExit(wardenPushed, &out)
+	out.Reset()
+	failed := runPrePushExit(rejected, &out)
+
+	if pushed == failed {
+		t.Fatalf("a warden-performed push and a rejection both exit %d; they must differ", pushed)
+	}
+	if pushed == 0 {
+		t.Error("a warden-performed push must still exit non-zero so git's stale push is stopped")
 	}
 }
 

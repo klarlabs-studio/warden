@@ -25,6 +25,47 @@ type Facade interface {
 	StepsList() (preCommit, prePush []domain.StepName, err error)
 	// RunTrigger runs the pipeline for a hook and returns a compact summary.
 	RunTrigger(ctx context.Context, hook domain.Hook) (RunSummary, error)
+
+	// The read-only provenance surface. These interrogate notes that already
+	// exist; none of them runs repo-authored shell, so none is gated on trust.
+
+	// Verify reports whether one commit carries trustworthy provenance.
+	// trustedKeys, when non-empty, additionally requires a signature from one of
+	// those keys.
+	Verify(commitish string, trustedKeys []string) (ProvenanceRecord, error)
+	// VerifyRange gates every commit in base..head.
+	VerifyRange(base, head string, opts RangeVerifyRequest) (RangeVerifyOutput, error)
+	// Doctor audits which commits since adoption carry a note.
+	Doctor(branch string) (domain.AuditReport, error)
+	// Audit exports the full commit-provenance report for compliance.
+	Audit(branch string) (domain.AuditReport, error)
+	// Status describes the gate's installed state.
+	Status() (StatusOutput, error)
+}
+
+// ProvenanceRecord is a delivery-neutral verify result. It mirrors the service's
+// VerifyResult rather than importing it: the MCP surface must not depend on the
+// concrete service, or the inversion that keeps this package testable against a
+// fake collapses.
+type ProvenanceRecord struct {
+	Validated      bool
+	Signed         bool
+	SignatureValid bool
+	Signer         string
+	Trusted        bool
+	Record         *domain.RunRecord
+}
+
+// RangeVerifyRequest is the delivery-neutral option set for a range gate,
+// mirroring the service's RangeVerifyOptions for the same reason.
+type RangeVerifyRequest struct {
+	RequireSigned bool
+	TrustedKeys   []string
+	// UseRoster resolves the trusted-signer roster from the range's BASE ref —
+	// the trusted side — when no keys are pinned explicitly. A range gate must
+	// never read trust from the head it is checking.
+	UseRoster  bool
+	SkipMerges bool
 }
 
 // RunSummary is a delivery-neutral run result the MCP tool returns.
@@ -35,6 +76,18 @@ type RunSummary struct {
 	Findings []domain.Finding  `json:"findings"`
 	Message  string            `json:"message"`
 	RunID    string            `json:"run_id,omitempty"`
+	// Blocker names the environmental obstacle that ended a failed run — a
+	// tool's lock, a missing toolchain — rather than the change itself; empty
+	// means the verdict is about the change. Retryable is the actionable half:
+	// contention clears on its own, a missing toolchain does not.
+	//
+	// The CLI has expressed this distinction since the exit-code split (75 vs
+	// 78 vs 1), but the agent surfaces dropped it, leaving an agent to infer
+	// "should I retry?" by parsing English prose. An agent that cannot tell
+	// "your code is wrong" from "this machine wasn't ready" either retries a
+	// real failure forever or gives up on a lock that would have cleared.
+	Blocker   string `json:"blocker,omitempty"`
+	Retryable bool   `json:"retryable"`
 }
 
 // PolicyExplainInput is the argument schema for the policy_explain tool. Branch
@@ -58,6 +111,37 @@ type StepsListOutput struct {
 type RunTriggerInput struct {
 	Hook string `json:"hook" jsonschema:"required,description=Hook pipeline to run: pre-commit or pre-push"`
 }
+
+// VerifyInput asks whether one commit carries trustworthy provenance. Commit is
+// optional so the common question — "is HEAD gated?" — needs no arguments.
+type VerifyInput struct {
+	Commit string `json:"commit,omitempty" jsonschema:"description=Commit-ish to verify (default HEAD)"`
+	// TrustedKeys escalates the check: the note must additionally be signed by
+	// one of these keys (full base64 public keys or fingerprints). Without it a
+	// note is verified for chain integrity and binding but not for WHO signed.
+	TrustedKeys []string `json:"trusted_keys,omitempty" jsonschema:"description=Require the note to be signed by one of these keys or fingerprints (optional)"`
+}
+
+// VerifyRangeInput gates every commit in base..head — the PR-check shape.
+type VerifyRangeInput struct {
+	Base string `json:"base" jsonschema:"required,description=Base ref of the range to gate e.g. origin/main"`
+	Head string `json:"head,omitempty" jsonschema:"description=Head ref of the range (default HEAD)"`
+	// RequireSigned and TrustedKeys escalate the gate from "provenance exists"
+	// to "provenance I trust".
+	RequireSigned bool     `json:"require_signed,omitempty" jsonschema:"description=Fail a commit whose note is unsigned"`
+	TrustedKeys   []string `json:"trusted_keys,omitempty" jsonschema:"description=Require a signature from one of these keys or fingerprints (optional)"`
+	// SkipMerges defaults true, matching the CLI: a merge commit's parents are
+	// gated individually, so gating the merge itself double-counts.
+	SkipMerges *bool `json:"skip_merges,omitempty" jsonschema:"description=Skip merge commits; their parents are gated individually (default true)"`
+}
+
+// BranchInput names a branch for the audit reads; empty means the current one.
+type BranchInput struct {
+	Branch string `json:"branch,omitempty" jsonschema:"description=Branch to report on (default the current branch)"`
+}
+
+// StatusInput takes no arguments; status is a pure read of installed state.
+type StatusInput struct{}
 
 // RunGate authorizes run_trigger before it executes the repository's configured
 // commands. It returns nil to permit the run, or a descriptive error to refuse
@@ -83,9 +167,19 @@ const runTriggerDescription = "Run the pipeline for a hook and return a compact 
 	"The read-only tools are always available."
 
 // NewServer builds an MCP server exposing Warden's operation set as typed tools:
-//   - policy_explain(hook, branch?, paths?) -> ResolvedPolicy
-//   - steps_list() -> {pre_commit, pre_push}
-//   - run_trigger(hook) -> RunSummary
+//
+//	policy_explain(hook, branch?, paths?)  -> ResolvedPolicy
+//	steps_list()                           -> {pre_commit, pre_push}
+//	run_trigger(hook)                      -> RunSummary
+//	verify(commit?, trusted_keys?)         -> VerifyOutput
+//	verify_range(base, head?, …)           -> RangeVerifyOutput
+//	doctor(branch?)                        -> AuditOutput
+//	audit(branch?)                         -> AuditOutput
+//	status()                               -> StatusOutput
+//
+// Everything but run_trigger is a pure read and marked ReadOnly, so an agent can
+// interrogate a repo's provenance — the question Warden exists to answer —
+// without the trust opt-in that executing repo-authored shell requires.
 //
 // run_respond/run_status are intentionally absent: v0 runs synchronously, so
 // there is no out-of-band run to poll or respond to. A stub tool documents this
@@ -98,7 +192,7 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		Name:        "warden",
 		Version:     version,
 		Title:       "Warden",
-		Description: "Git commit/push gate: explain policy, list steps, and run the pipeline.",
+		Description: "Git commit/push gate: verify commit provenance, explain policy, list steps, and run the pipeline.",
 	})
 
 	srv.Tool("policy_explain").
@@ -113,6 +207,52 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		ReadOnly().
 		Handler(func(StepsListInput) (StepsListOutput, error) {
 			return handleStepsList(f)
+		})
+
+	srv.Tool("verify").
+		Description("Report whether a commit carries trustworthy warden provenance: a signed, " +
+			"hash-chained note bound to that exact commit, proving the configured checks ran and " +
+			"passed. This is the provenance-skip primitive — CI can trust a validated commit and " +
+			"skip re-running those checks. Fail-closed: an intact but unbound or transplanted note " +
+			"is NOT validated.").
+		ReadOnly().
+		Handler(func(in VerifyInput) (VerifyOutput, error) {
+			return handleVerify(f, in)
+		})
+
+	srv.Tool("verify_range").
+		Description("Gate every commit in base..head, failing if any lacks trustworthy provenance. " +
+			"Use this to answer 'is this whole branch/PR gated?'. Each commit gets a reason: ok, " +
+			"missing, broken-chain, unsigned, or untrusted.").
+		ReadOnly().
+		Handler(func(in VerifyRangeInput) (RangeVerifyOutput, error) {
+			return handleVerifyRange(f, in)
+		})
+
+	srv.Tool("doctor").
+		Description("Audit which commits since warden was adopted carry a validation note — the " +
+			"gaps where the gate was bypassed. Reports a reattestable count for gaps a " +
+			"tree-identical validated commit can still vouch for (the squash-merge case).").
+		ReadOnly().
+		Handler(func(in BranchInput) (AuditOutput, error) {
+			return handleDoctor(f, in)
+		})
+
+	srv.Tool("audit").
+		Description("Export the full commit-provenance report for a branch, per commit, for " +
+			"compliance reporting.").
+		ReadOnly().
+		Handler(func(in BranchInput) (AuditOutput, error) {
+			return handleAudit(f, in)
+		})
+
+	srv.Tool("status").
+		Description("Report the gate's installed state: which hooks are actually armed, the " +
+			"adoption point, the steps that would run, and this machine's signing fingerprint. A " +
+			"repo with a .warden.yaml but no installed hook is configured, not gated.").
+		ReadOnly().
+		Handler(func(StatusInput) (StatusOutput, error) {
+			return f.Status()
 		})
 
 	srv.Tool("run_trigger").
@@ -170,14 +310,48 @@ func handleStepsList(f Facade) (StepsListOutput, error) {
 func handleRunTrigger(ctx context.Context, f Facade, gate RunGate, in RunTriggerInput) (RunSummary, error) {
 	if gate != nil {
 		if err := gate(); err != nil {
-			return RunSummary{}, err
+			// The refusal names the opt-in that resolves it, so it must survive
+			// the dispatcher's sanitizing — see visible.
+			return RunSummary{}, errVisible(err)
 		}
 	}
 	hook, err := domain.ParseHook(in.Hook)
 	if err != nil {
-		return RunSummary{}, err
+		// Bad input: the model can retry with the right value, but only once it
+		// can see what was wrong.
+		return RunSummary{}, errVisible(err)
 	}
 	return f.RunTrigger(ctx, hook)
+}
+
+// visible marks an error whose MESSAGE the caller is meant to read and act on,
+// rather than one that merely reports that something went wrong.
+//
+// The dispatcher sanitizes a raw handler error to a bare "internal error" before
+// it reaches the client — right for a failure that might leak paths or
+// credentials, wrong for a refusal the caller is supposed to resolve: an agent
+// told "internal error" cannot learn that the operator must trust this repo
+// first, so it has no move except to give up or retry identically.
+//
+// Unwrap returns BOTH the cause and a *mcp.ToolInputError, because the two
+// audiences need different things from the same error: the dispatcher finds the
+// ToolInputError with errors.As and surfaces the message to the model, while
+// callers (and tests) keep matching the original sentinel with errors.Is.
+type visible struct{ cause error }
+
+func (e *visible) Error() string { return e.cause.Error() }
+
+func (e *visible) Unwrap() []error {
+	return []error{e.cause, &mcp.ToolInputError{Message: e.cause.Error()}}
+}
+
+// errVisible wraps err so its message reaches the client. Returns nil for nil,
+// so it can wrap a call site unconditionally.
+func errVisible(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &visible{cause: err}
 }
 
 // errNotSupported reports an operation that has no meaning in synchronous v0.

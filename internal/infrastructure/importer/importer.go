@@ -1,8 +1,9 @@
 // Package importer bootstraps a Warden config from the automation a repo
 // already carries. Adopting Warden should be one command, not a hand-written
 // .warden.yaml, so Detect inspects the conventional places a project keeps its
-// lint/test/security commands — Makefile, package.json, lefthook, GitHub
-// workflows — and maps what it finds onto Warden's built-in steps. It is pure
+// lint/test/security commands — Makefile, package.json, .pre-commit-config.yaml,
+// lefthook, GitHub workflows — and maps what it finds onto Warden's built-in
+// steps. It is pure
 // parsing infrastructure: it reads files and returns a domain.Config plus
 // human-readable notes; it never writes or executes anything.
 package importer
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +30,8 @@ const stepSecurityScan domain.StepName = "security-scan"
 // notes describing what was imported. It is best-effort: every source is
 // optional and a missing or malformed file is skipped rather than failing the
 // whole detection. When several sources define the same command the higher
-// priority one wins — Makefile > package.json > lefthook > workflows — because a
+// priority one wins — Makefile > package.json > pre-commit > lefthook >
+// workflows — because a
 // Makefile target is the most deliberate, project-blessed entrypoint and a
 // workflow `run:` line is the most heuristic. When nothing is found the returned
 // Config is the zero value and the notes say so, so callers can tell the
@@ -37,15 +40,19 @@ func Detect(root string) (domain.Config, []string, error) {
 	c := &collector{commands: map[string]string{}}
 
 	// Ordered by descending priority: the first source to define a command
-	// keeps it, so later sources only fill gaps.
+	// keeps it, so later sources only fill gaps. pre-commit sits above lefthook
+	// and below package.json: like lefthook it is an explicit, hook-manager
+	// declaration of intent, but a repo carrying both a package.json script and a
+	// pre-commit config generally means the script.
 	c.fromMakefile(root)
 	c.fromPackageJSON(root)
+	c.fromPreCommit(root)
 	c.fromLefthook(root)
 	c.fromWorkflows(root)
 
 	if len(c.commands) == 0 {
 		return domain.Config{}, []string{
-			"no lint/test/security commands detected in Makefile, package.json, lefthook, or GitHub workflows — nothing imported",
+			"no lint/test/security commands detected in Makefile, package.json, .pre-commit-config.yaml, lefthook, or GitHub workflows — nothing imported",
 		}, nil
 	}
 
@@ -219,6 +226,119 @@ func (c *collector) fromLefthook(root string) {
 			}
 		}
 	}
+}
+
+// --- pre-commit -----------------------------------------------------------
+
+// preCommitFile is the subset of .pre-commit-config.yaml we read: the repos
+// list and, per repo, its hooks. Everything else (rev pins, ci settings, exclude
+// patterns) is pre-commit's own business.
+type preCommitFile struct {
+	Repos []struct {
+		Repo  string `yaml:"repo"`
+		Hooks []struct {
+			ID       string   `yaml:"id"`
+			Name     string   `yaml:"name"`
+			Entry    string   `yaml:"entry"`
+			Language string   `yaml:"language"`
+			Args     []string `yaml:"args"`
+		} `yaml:"hooks"`
+	} `yaml:"repos"`
+}
+
+// preCommitSecurityHooks are the hook ids that mean "this repo already scans for
+// secrets or vulnerabilities", so warden can back its security-scan step with the
+// check the repo already trusts rather than inventing one.
+var preCommitSecurityHooks = map[string]bool{
+	"detect-secrets":          true,
+	"detect-private-key":      true,
+	"gitleaks":                true,
+	"trufflehog":              true,
+	"bandit":                  true,
+	"semgrep":                 true,
+	"trivy":                   true,
+	"check-added-large-files": false, // hygiene, not security — deliberately excluded
+}
+
+// fromPreCommit imports a .pre-commit-config.yaml — by a wide margin the largest
+// installed base of the tools warden replaces, and until now the one adoption
+// path `warden import` could not read.
+//
+// It maps the config to `pre-commit run` rather than reconstructing each hook's
+// command, because pre-commit hooks execute inside environments pre-commit
+// itself provisions (a pinned `rev:` of black in its own virtualenv, a node hook
+// in its own node_modules). Warden cannot reproduce those from the config alone,
+// so a "faithfully reconstructed" command would name a binary that is not on
+// PATH — an import that looks successful and then fails at the gate. Delegating
+// to the tool that owns those environments is both simpler and the only version
+// that actually runs.
+//
+// The exception is a `repo: local` hook with `language: system`, which by
+// definition runs a plain command from PATH; those we can and do take directly.
+func (c *collector) fromPreCommit(root string) {
+	var data []byte
+	var err error
+	for _, name := range []string{".pre-commit-config.yaml", ".pre-commit-config.yml"} {
+		if data, err = os.ReadFile(filepath.Join(root, name)); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return
+	}
+	var pc preCommitFile
+	if err := yaml.Unmarshal(data, &pc); err != nil {
+		return
+	}
+
+	var hookCount int
+	var securityHook string
+	for _, repo := range pc.Repos {
+		for _, h := range repo.Hooks {
+			if h.ID == "" {
+				continue
+			}
+			hookCount++
+			if securityHook == "" && preCommitSecurityHooks[h.ID] {
+				securityHook = h.ID
+			}
+			// A local system hook runs a plain command, so warden can run it
+			// directly. Tests are the case worth lifting out: they are the one
+			// thing people put in pre-commit that warden wants as its own step.
+			if strings.EqualFold(repo.Repo, "local") &&
+				strings.EqualFold(h.Language, "system") &&
+				looksLikeTest(h.ID, h.Name) {
+				cmd := strings.TrimSpace(strings.Join(append([]string{h.Entry}, h.Args...), " "))
+				c.setCommand("test", cmd, "pre-commit: test <- local hook '"+h.ID+"'")
+			}
+		}
+	}
+	if hookCount == 0 {
+		return
+	}
+
+	c.setCommand("lint", "pre-commit run --all-files",
+		"pre-commit: lint <- `pre-commit run --all-files` (runs the repo's "+
+			strconv.Itoa(hookCount)+" configured hooks in pre-commit's own environments)")
+	if securityHook != "" {
+		c.setCommand(string(stepSecurityScan), "pre-commit run --all-files "+securityHook,
+			"pre-commit: security-scan <- hook '"+securityHook+"'")
+	}
+}
+
+// looksLikeTest reports whether a pre-commit hook's id or name reads as a test
+// runner. Kept deliberately narrow: a false positive here silently reassigns
+// someone's linter to warden's test step.
+func looksLikeTest(id, name string) bool {
+	for _, s := range []string{id, name} {
+		l := strings.ToLower(s)
+		if l == "test" || l == "tests" ||
+			strings.HasPrefix(l, "test-") || strings.HasPrefix(l, "unit-test") ||
+			strings.Contains(l, "pytest") || strings.Contains(l, "go-test") {
+			return true
+		}
+	}
+	return false
 }
 
 // --- GitHub workflows -----------------------------------------------------
