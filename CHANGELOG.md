@@ -6,6 +6,42 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **`WARDEN_VERSION` could redirect an install to another GitHub repository**
+  (#147). All three installers interpolated the version straight into the
+  download URL, so a value of `../../../../someone/else/releases/download/v1`
+  traversed out of this repo's path: both the archive *and* `checksums.txt`
+  then resolved to `github.com/someone/else`. The checksum step could not catch
+  it, because it verified the download against a `checksums.txt` fetched from
+  the same redirected base — confirming the attacker's file matched the
+  attacker's digest. The host stays pinned to `github.com` by the literal URL
+  prefix, so this is a wrong-repository fetch rather than an arbitrary-origin
+  one, and reaching it requires control of the environment the installer runs
+  in. It should still never have been reachable.
+
+  All three now validate the version against a release-tag pattern before it
+  touches a URL, after the `latest` lookup so the resolved tag is checked too:
+  `scripts/install.sh`, `scripts/install.ps1` and
+  `.github/actions/install-warden.sh`.
+
+  Two anchoring traps were found while testing the fix rather than after
+  shipping it. `grep` matches line by line, so `^…$` accepted `v0.20.4\nid` on
+  its first line while the second still reached the URL — the shell guard
+  therefore rejects the character alphabet before checking the shape. And .NET's
+  `$` also matches before a trailing newline, so the PowerShell guard anchors
+  with `\z`.
+
+### Added
+
+- **The shipped installers are now covered by the Go suite** (#147),
+  `scripts/version_guard_test.go`. It executes the real scripts — a test
+  asserting a copy of the regex against itself would pass forever while the
+  shipped script drifted, which is how this class survived. `pwsh` is
+  preinstalled on GitHub-hosted runners, so `install.ps1` is exercised in CI
+  despite CI being ubuntu-only; locally it skips unless PowerShell is present,
+  which is precisely why nothing in the repo had ever run it.
+
 ### Fixed
 
 - **Five doc comments described the wrong function** (#141). Inserting a

@@ -27,6 +27,30 @@ if [ "$VERSION" = "latest" ]; then
 fi
 [ -n "$VERSION" ] || { echo "could not resolve latest version" >&2; exit 1; }
 
+# $VERSION is interpolated straight into the download URL below, so constrain it
+# to a release tag before it gets there. Without this, WARDEN_VERSION of
+# "../../../../someone/else/releases/download/v1" traverses out of this repo's
+# path and both the archive AND checksums.txt resolve to
+# github.com/someone/else — so the checksum verification further down passes
+# against the attacker's own checksum file and verifies nothing. Validating
+# after the "latest" lookup covers the resolved tag too.
+#
+# The alphabet check comes first and is not redundant: grep matches LINE BY
+# LINE, so "v0.20.4\nid" satisfies ^...$ on its first line while still carrying
+# a second one into the URL. Rejecting every character outside the tag alphabet
+# removes newlines, spaces, slashes and shell metacharacters in one step; the
+# pattern below then checks the shape.
+case "$VERSION" in
+  "" | *[!0-9A-Za-z.+-]*)
+    echo "warden: refusing version '$VERSION': expected a release tag like v0.20.4" >&2
+    exit 1
+    ;;
+esac
+if ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+  echo "warden: refusing version '$VERSION': expected a release tag like v0.20.4" >&2
+  exit 1
+fi
+
 ver="${VERSION#v}"
 archive="warden_${ver}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$VERSION"
