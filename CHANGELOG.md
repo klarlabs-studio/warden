@@ -8,6 +8,17 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **`internal/tui` and `stepsdk` are now enforced by a coverage minimum**
+  (#155). Neither belonged to any domain, so no minimum applied to either — the
+  gate reported "all 7 domains pass" while 204 statements sat outside every
+  policy. Both were healthy (83.0% and 86.4%) but nothing held them there, and
+  `stepsdk` is the public SDK third-party step binaries compile against.
+
+  Found by the unmatched-directory warning added in coverctl#127, on its first
+  run. `main.go` is excluded rather than given a domain: two statements handing
+  off to `cli.Run` belong to no domain by design, and excluding it keeps a
+  future warning meaningful instead of routine.
+
 - **A per-file coverage floor the domain average cannot hide** (#153). The
   domain minimums are the quality bar; this is the smoke alarm for the failure
   they structurally cannot see. `internal/infrastructure/kernel/subprocess.go`
