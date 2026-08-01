@@ -19,7 +19,7 @@ someone who wasn't there:
 
 - **What produced it** — human, or which agent
 - **Was it actually checked** — which policy ran, and passed
-- **Can I trust that** — signed by a key your forge publishes
+- **Can I trust that** — signed by an identity your forge already knows
 
 It does that by gating `git commit` and `git push` themselves — **native git
 hooks**, no second remote and no changed muscle memory — running your checks in a
