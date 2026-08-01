@@ -32,3 +32,26 @@ policy:
       match:
         - ./internal/service/...
       min: null
+
+# A floor no domain average can hide. The domain minimums above are the quality
+# bar; this is a smoke alarm for the failure they cannot see — a file with
+# essentially no tests, averaged away by well-covered siblings in the same
+# domain. `kernel/subprocess.go` sat at 0% inside `infrastructure` at 87%, and
+# `forge/gh.go` at 0% inside the same domain before that. Both passed the gate.
+#
+# Patterns are repo-relative and use filepath.Match, so `*` does not cross a
+# directory separator — hence one rule per level rather than a single `**`.
+#
+# internal/cli and internal/mcp are deliberately absent: their command entry
+# points are thin wrappers that block on stdio or a server loop (cmd_mcp.go is
+# 23%), so a per-file floor there would measure how testable a main() is rather
+# than whether the logic is tested. Their domain minimums still apply at 80%.
+files:
+  - match:
+      - "internal/domain/*.go"
+      - "internal/policy/*.go"
+      - "internal/application/*.go"
+      - "internal/service/*.go"
+      - "internal/infrastructure/*/*.go"
+      - "stepsdk/*.go"
+    min: 50
