@@ -6,6 +6,27 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A per-file coverage floor the domain average cannot hide** (#153). The
+  domain minimums are the quality bar; this is the smoke alarm for the failure
+  they structurally cannot see. `internal/infrastructure/kernel/subprocess.go`
+  sat at 0% — every one of its six functions — inside an `infrastructure`
+  domain reporting 87%, and `internal/infrastructure/forge/gh.go` did the same
+  before it. Both passed the gate for months.
+
+  Demonstrated rather than asserted: zeroing a small file's coverage leaves
+  `service` at 83.2% PASS and the whole check exiting **0** without the floor,
+  and exiting **1** with it. 71 files are governed at a 50% minimum, the lowest
+  currently at 61.5%.
+
+  `internal/cli` and `internal/mcp` are deliberately excluded. Their command
+  entry points block on stdio or a server loop (`cmd_mcp.go` is 23%), so a
+  per-file floor there would measure how testable a `main()` is rather than
+  whether the logic is tested — and coverctl's `exclude:` would have dropped
+  them from domain coverage too, inflating it. Their 80% domain minimum still
+  applies.
+
 ### Security
 
 - **`WARDEN_VERSION` could redirect an install to another GitHub repository**
