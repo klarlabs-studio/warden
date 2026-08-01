@@ -111,7 +111,34 @@ type Config struct {
 	// `warden key list`.
 	TrustedKeys []string `yaml:"trusted_keys"`
 
+	// Signing configures the WRITE side of provenance signing.
+	Signing SigningConfig `yaml:"signing"`
+
 	Rules []Rule `yaml:"rules"`
+}
+
+// SigningConfig controls how a run record is signed.
+//
+// The READ side has been configurable since trusted_keys: a verifier can demand
+// a signature, and demand one from a named key. The WRITE side had nothing —
+// so a repo could not state the one thing that makes the read side meaningful,
+// namely that an unsigned note is never produced in the first place.
+//
+// Signing is otherwise best-effort by design: an unwritable config dir, a
+// malformed key file, or a failure inside Sign leaves the note unsigned rather
+// than failing a push that already succeeded. That default is right — a
+// developer should not be blocked from pushing because a key directory went
+// read-only — but it is SILENT, so a repo can accumulate unsigned notes for
+// months and only find out when a CI `verify --require-signed` starts failing.
+type SigningConfig struct {
+	// Required refuses to write an unsigned note, failing the run instead.
+	//
+	// Default false, so nothing changes for an existing repo. Set it where the
+	// provenance is load-bearing: a repo whose CI gates on --require-signed
+	// should not be able to produce notes that gate will later reject, because
+	// by then the commit is in history and whoever could have fixed it has moved
+	// on. Enforcement only at verification time is enforcement too late.
+	Required bool `yaml:"required"`
 }
 
 // ValidTrustedKey reports whether s is a usable trusted-key roster entry: a
