@@ -48,6 +48,12 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 			}
 			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (%s, %d steps, %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
+		case c.Covered():
+			// Published by a gated push, just not individually attested — warden
+			// validates one tree per run and vouches for the span. Reporting this
+			// as UNVERIFIED read as "never checked" and was simply wrong.
+			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (covered by the gated push %s)\n",
+				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.CoveredBy))
 		case c.Reattestable():
 			// The content WAS gated — under the pre-squash commit id. Say which
 			// one, so the reader sees a recoverable binding gap rather than an

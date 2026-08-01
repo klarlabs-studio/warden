@@ -6,6 +6,27 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`doctor` now honors a gated push span**, and so does `fleet status`. warden
+  validates ONE tree per run — the tip's — so it deliberately writes no note for
+  the intermediate commits of a multi-commit push, recording the span instead.
+  `verify --range` has read that back since #86; `doctor` never did. A perfectly
+  ordinary commit-commit-commit-push therefore reported its earlier commits as
+  UNVERIFIED forever, and `fleet status` counted them as BYPASSED — inflating the
+  one number that is supposed to trigger an intervention.
+
+  Found by chasing a repo reporting 65.5% bypass whose gated and "bypassed"
+  commits interleaved **ten seconds apart**; the un-noted one was the direct
+  parent of the noted one. One push, two commits, one tree validated.
+
+  `CommitStatus` now separates the three ways a commit can lack a note —
+  `Covered()` (a gated push published it), `Reattestable()` (a squash-merge
+  unbound it), and `Bypassed()` (it really did go round the gate) — and only the
+  last is counted. A covering note must itself attest its own commit, exactly as
+  in the range gate, so a span is never a cheaper path to "verified" than a note.
+
+
 ### Added
 
 - **Warden's provenance is now readable by agents** (#144). The MCP/axi surface
