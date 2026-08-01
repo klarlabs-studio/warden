@@ -623,6 +623,33 @@ commands:
 
 Warden says so in the failure message when it sees you haven't.
 
+### Compiled languages: build-cache reuse
+
+A worktree contains **tracked files only** — that's what makes the isolation worth
+having. But it also means every gitignored build cache is absent, so a compiled
+language would rebuild from scratch on every gated push.
+
+Warden redirects each toolchain's own cache-location variable at a directory
+under `.git/` that survives the worktree, so the second run onward is warm:
+
+| Toolchain | Variable | Detected by |
+|---|---|---|
+| Rust | `CARGO_TARGET_DIR` | `Cargo.toml` |
+
+Measured on a six-crate Rust workspace, the real pre-commit gate: **86s → 4s.**
+
+This is a *redirection*, not a copy — deliberately. Dependency directories are
+hardlink-copied into the worktree (see `symlink_deps`), which is safe because
+`node_modules` is read-mostly. A compiler **writes** to its cache, and hardlinks
+share inodes, so copying one that way could corrupt your live cache. Pointing the
+toolchain at its own directory lets its own locking handle concurrency — which is
+what those variables exist for.
+
+Warden never overrides a variable you already set: if you or your CI has
+deliberately placed a cache somewhere, that wins. **Go is absent on purpose** — its
+build cache already lives outside the repo, so a fresh worktree is already warm
+and redirecting it would only make things worse.
+
 ### Steps whose toolchain isn't installed
 
 A validation worktree is a git worktree, so it starts with tracked files only.

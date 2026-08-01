@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,6 +115,19 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 	}
 }
 
+// buildCacheDir resolves the per-clone directory warden roots build caches at.
+//
+// Best-effort: a repo whose git dir cannot be read simply gets no cache reuse,
+// which costs speed and nothing else. It must never fail a run — the gate's
+// verdict cannot depend on whether an optimization was available.
+func (r *Runner) buildCacheDir() string {
+	gitDir, err := r.Git.GitDir()
+	if err != nil || gitDir == "" {
+		return ""
+	}
+	return filepath.Join(gitDir, "warden", "build-cache")
+}
+
 // diffForRisk computes the diff stats that drive risk and path matching: the
 // staged index for pre-commit, else HEAD against its merge-base with origin.
 func (r *Runner) diffForRisk(hook domain.Hook, branch string) (domain.DiffStats, error) {
@@ -138,7 +152,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	}
 	defer func() { _ = wt.Remove() }()
 
-	sc := r.withStream(StepContext{Hook: domain.PreCommit, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote})
+	sc := r.withStream(StepContext{Hook: domain.PreCommit, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote})
 	run := r.newRun(domain.PreCommit, resolved, branch)
 
 	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
@@ -305,7 +319,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	defer func() { _ = wt.Remove() }()
 
-	sc := r.withStream(StepContext{Hook: domain.PrePush, WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base})
+	sc := r.withStream(StepContext{Hook: domain.PrePush, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base})
 	run := r.newRun(domain.PrePush, resolved, branch)
 
 	// spanBase is the commit this push starts from, captured BEFORE the push
