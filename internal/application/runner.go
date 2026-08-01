@@ -407,6 +407,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			record.CoversFrom = spanBase
 		}
 	}
+	// Notarize BEFORE signing, so the trace digest is inside the payload the
+	// signature covers. Bound alongside it instead, the digest would be as
+	// editable as the trace it vouches for.
+	if traceErr := r.notarizeAgentTrace(record, cfg, sc.WorktreeDir); traceErr != nil {
+		return r.result(run, ""), traceErr
+	}
 	// Signing degrades silently by design (see sign), which is why the reason is
 	// captured and surfaced rather than discarded. A repo that never learns its
 	// notes stopped being signed discovers it only when a CI --require-signed
@@ -640,6 +646,41 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 		}
 		return run.Abort("push failed: " + err.Error())
 	}
+	return nil
+}
+
+// notarizeAgentTrace binds a digest of the repo's Agent Trace record into the
+// provenance note.
+//
+// A missing record is NOT an error by default: a human commit legitimately has
+// no agent trace, so absence is the normal case. agent_trace.required flips that
+// for a repo where every change is expected to carry one.
+//
+// A record that is present but unreadable or malformed is different — something
+// meant to be notarized could not be, and silently gating without it would
+// produce a note that looks complete and is not.
+func (r *Runner) notarizeAgentTrace(record *domain.RunRecord, cfg domain.Config, worktreeDir string) error {
+	path := strings.TrimSpace(cfg.AgentTrace.Path)
+	if path == "" {
+		return nil // not configured
+	}
+	// The path is repo-relative and must stay inside the worktree.
+	full := filepath.Join(worktreeDir, filepath.Clean(path))
+	if !strings.HasPrefix(full, filepath.Clean(worktreeDir)+string(os.PathSeparator)) {
+		return fmt.Errorf("agent_trace.path %q escapes the repository", path)
+	}
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		if os.IsNotExist(err) && !cfg.AgentTrace.Required {
+			return nil
+		}
+		return fmt.Errorf("agent trace %s could not be read: %w", path, err)
+	}
+	ref, err := domain.NewAgentTraceRef(path, raw)
+	if err != nil {
+		return fmt.Errorf("agent trace %s: %w", path, err)
+	}
+	record.AgentTrace = &ref
 	return nil
 }
 
