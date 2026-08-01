@@ -11,6 +11,7 @@ import (
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
+	"go.klarlabs.de/warden/internal/infrastructure/notify"
 	"go.klarlabs.de/warden/internal/service"
 )
 
@@ -167,20 +168,75 @@ func (f fakeCfgSvc) Config() (domain.Config, error) { return f.cfg, f.err }
 // notification must still fire without it.
 func (f fakeCfgSvc) Repo() *git.Repo { return nil }
 
+// captureNotifications swaps the send seam for the duration of a test and
+// returns the notifications maybeNotify actually emitted.
+func captureNotifications(t *testing.T) *[]notify.Notification {
+	t.Helper()
+	var sent []notify.Notification
+	orig := sendNotification
+	sendNotification = func(n notify.Notification) { sent = append(sent, n) }
+	t.Cleanup(func() { sendNotification = orig })
+	return &sent
+}
+
 func TestMaybeNotify_RespectsConfigAndVerdict(t *testing.T) {
-	// These calls exercise the gating logic; notify.Send is a best-effort no-op
-	// on the test host, so we assert no panic and the right branches run.
 	off := false
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{Notify: &off}}, application.RunResult{Outcome: domain.OutcomePassed}, notifyAfter)
+	cases := []struct {
+		name     string
+		svc      fakeCfgSvc
+		res      application.RunResult
+		elapsed  time.Duration
+		wantSend bool
+		wantBody string
+	}{
+		{
+			name:    "notify:false stays silent",
+			svc:     fakeCfgSvc{cfg: domain.Config{Notify: &off}},
+			res:     application.RunResult{Outcome: domain.OutcomePassed},
+			elapsed: notifyAfter, wantSend: false,
+		},
+		{
+			name:    "slow pass notifies",
+			svc:     fakeCfgSvc{cfg: domain.Config{}},
+			res:     application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"},
+			elapsed: notifyAfter, wantSend: true, wantBody: "pushed",
+		},
+		{
+			// A blocked push always notifies, however fast it failed — you never
+			// want to miss the gate that stopped you.
+			name:    "failure notifies even when fast",
+			svc:     fakeCfgSvc{cfg: domain.Config{}},
+			res:     application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"},
+			elapsed: 0, wantSend: true, wantBody: "blocked",
+		},
+		{
+			name:    "fast pass stays silent",
+			svc:     fakeCfgSvc{cfg: domain.Config{}},
+			res:     application.RunResult{Outcome: domain.OutcomePassed, Message: "quick"},
+			elapsed: notifyAfter - time.Millisecond, wantSend: false,
+		},
+		{
+			// An unreadable config must not turn a finished run into a crash, and
+			// must not guess: no config, no notification.
+			name:    "config error stays silent",
+			svc:     fakeCfgSvc{err: errSentinel},
+			res:     application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"},
+			elapsed: notifyAfter, wantSend: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sent := captureNotifications(t)
+			maybeNotify(c.svc, c.res, c.elapsed)
 
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "pushed"}, notifyAfter)
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomeFailed, Message: "blocked"}, notifyAfter)
-
-	// A fast run stays quiet even when enabled (duration gate).
-	maybeNotify(fakeCfgSvc{cfg: domain.Config{}}, application.RunResult{Outcome: domain.OutcomePassed, Message: "quick"}, notifyAfter-time.Millisecond)
-
-	// A config load error must not panic.
-	maybeNotify(fakeCfgSvc{err: errSentinel}, application.RunResult{}, notifyAfter)
+			if got := len(*sent) > 0; got != c.wantSend {
+				t.Fatalf("notified = %v, want %v", got, c.wantSend)
+			}
+			if c.wantSend && (*sent)[0].Body != c.wantBody {
+				t.Errorf("body = %q, want %q", (*sent)[0].Body, c.wantBody)
+			}
+		})
+	}
 }
 
 var errSentinel = fmt.Errorf("boom")
