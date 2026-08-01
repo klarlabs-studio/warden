@@ -478,12 +478,40 @@ func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	return prePushExitCode(res)
 }
 
+// printFindings renders a run's findings. The verdict line comes first and is
+// unchanged; the labeled lines below it appear only when the step supplied
+// them, so a step reporting nothing extra prints exactly what it always did.
+//
+// rule/why/fix each get their own labeled line rather than being folded into
+// the verdict line. A step's message is frequently multi-line — a compiler's own
+// output, a shell error — and anything appended to it lands after the last line
+// of that output rather than next to the finding, where it reads as part of the
+// tool's text instead of as warden's.
 func printFindings(w io.Writer, findings []domain.Finding) {
+	const indent = "         "
 	for _, f := range findings {
 		loc := f.File
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
 		_, _ = fmt.Fprintf(w, "  [%s] %s %s\n", f.Severity, loc, f.Message)
+		if f.Rule != "" {
+			_, _ = fmt.Fprintf(w, "%srule: %s\n", indent, f.Rule)
+		}
+		if f.Why != "" {
+			_, _ = fmt.Fprintf(w, "%swhy: %s\n", indent, f.Why)
+		}
+		if f.Fix == nil {
+			continue
+		}
+		if f.Fix.Command != "" {
+			_, _ = fmt.Fprintf(w, "%sfix: %s\n", indent, f.Fix.Command)
+		}
+		// A patch is announced, not printed. It can be hundreds of lines, and a
+		// terminal mid-gate is the wrong place to review a diff.
+		if f.Fix.Patch != "" {
+			lines := strings.Count(strings.TrimRight(f.Fix.Patch, "\n"), "\n") + 1
+			_, _ = fmt.Fprintf(w, "%sfix: a %d-line patch is available\n", indent, lines)
+		}
 	}
 }

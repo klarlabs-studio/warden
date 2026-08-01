@@ -12,11 +12,58 @@ const (
 
 // Finding is a single issue reported by a step. Mirrors the custom-step wire
 // schema (§6) so built-in and subprocess steps produce the same shape.
+//
+// The fields below Line are the REMEDIATION half, and they exist because a
+// finding that only describes a problem leaves its reader to rediscover the
+// answer the step already had. A human reads "line too long" and goes looking
+// for the formatter; an agent reads it, guesses, and re-runs the whole gate to
+// learn whether the guess was right. The step usually knows which rule fired,
+// what breaks if it is ignored, and the command that resolves it — so say all
+// three rather than making every reader derive them again.
+//
+// All of them are optional. A step reporting only severity and message stays as
+// valid as it was, which is what keeps existing subprocess steps working.
 type Finding struct {
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
 	File     string   `json:"file,omitempty"`
 	Line     int      `json:"line,omitempty"`
+	// Rule is the identifier the tool fired, e.g. "SA4006" or "no-unused-vars".
+	// It is what a reader searches for, waives, or baselines — none of which
+	// prose supports.
+	Rule string `json:"rule,omitempty"`
+	// Why explains what breaks if this is ignored. Severity RANKS a finding;
+	// only this justifies it, and an unjustified finding is the kind people
+	// learn to scroll past.
+	Why string `json:"why,omitempty"`
+	// Fix carries the remediation, when the step knows one.
+	Fix *Fix `json:"fix,omitempty"`
+}
+
+// Fix is a remediation a step offers for a finding: a command to run, a patch to
+// apply, or neither.
+//
+// Both forms are ADVISORY. Warden never applies a Fix on the strength of the
+// finding alone — folding changes back into the tree is a policy decision
+// expressed by an `auto_fix` budget, and a step must not be able to escalate
+// itself into a tree write just by attaching a patch. What this does is close
+// the loop for the reader: an agent can apply it and re-run, a human can paste
+// it.
+type Fix struct {
+	// Command is a shell command that resolves the finding, e.g.
+	// "gofmt -w internal/foo.go". It should be runnable from the repo root and
+	// should fix only what the finding describes.
+	Command string `json:"command,omitempty"`
+	// Patch is a unified diff resolving the finding. Preferred over Command when
+	// the change is known exactly, because it can be reviewed before it is
+	// applied rather than only after.
+	Patch string `json:"patch,omitempty"`
+}
+
+// Actionable reports whether a finding carries a remediation its reader can act
+// on, as opposed to only a description of the problem.
+func (f Finding) Actionable() bool {
+	return f.Fix != nil && (f.Fix.Command != "" || f.Fix.Patch != "")
 }
 
 // StepStatus is the outcome a step reports.

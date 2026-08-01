@@ -498,6 +498,44 @@ Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
 
+#### Findings that can be acted on
+
+A finding needs only `Severity` and `Message`. But your step usually knows more
+than that — which rule fired, what breaks if it's ignored, and the command that
+fixes it — and whoever reads the finding otherwise has to rediscover all three:
+
+```go
+return stepsdk.Fail(stepsdk.Finding{
+	Severity: "high",
+	Message:  "unused import",
+	File:     "main.go",
+	Line:     7,
+	Rule:     "ST1003",                                    // what you search, waive, or baseline by
+	Why:      "an unused import fails the build on CI",    // the justification severity alone doesn't carry
+	Fix:      &stepsdk.Fix{Command: "goimports -w main.go"},
+})
+```
+
+That turns a failed gate into **run → read → fix → re-run** instead of
+**run → guess → re-run**, which is the difference between an agent that can
+close the loop and one that can't. Humans get the same lines under the finding:
+
+```
+  [high] main.go:7 unused import
+         rule: ST1003
+         why: an unused import fails the build on CI
+         fix: goimports -w main.go
+```
+
+`Fix` also takes a `Patch` (a unified diff), preferred when you know the change
+exactly since it can be reviewed before it's applied. **Both are advisory** —
+warden never applies a fix on the strength of a finding. Folding changes into the
+tree is a policy decision the repo makes with an `auto_fix` budget, so attaching a
+patch can't escalate your step into a tree write.
+
+All four fields are optional and omitted from the wire when unset, so steps
+written before they existed keep working unchanged.
+
 ### Pinning the scanner when the pin lives elsewhere
 
 The `security-scan` step refuses to run when the scanner on your PATH differs

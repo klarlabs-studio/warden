@@ -42,6 +42,11 @@ func (CredentialsStep) Name() domain.StepName { return domain.StepCredentials }
 
 // credentialPattern is one recognizable credential shape.
 type credentialPattern struct {
+	// id is the stable rule identifier reported on the finding. It is separate
+	// from name because a rule id is what people search, waive and baseline by:
+	// deriving it from the display text would silently invalidate every existing
+	// waiver the moment someone reworded the message.
+	id string
 	// name is what the developer is told they are about to publish.
 	name string
 	re   *regexp.Regexp
@@ -53,16 +58,16 @@ type credentialPattern struct {
 var credentialPatterns = []credentialPattern{
 	// GitHub's token formats, all prefix-tagged since 2021 precisely so they can
 	// be recognized. This is the one the .npmrc trap produces.
-	{"GitHub token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,}`)},
-	{"GitHub fine-grained token", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{60,}`)},
-	{"AWS access key id", regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)},
-	{"Slack token", regexp.MustCompile(`\bxox[abprs]-[0-9A-Za-z-]{10,}`)},
-	{"Anthropic API key", regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`)},
-	{"OpenAI API key", regexp.MustCompile(`\bsk-(?:proj-)?[A-Za-z0-9]{32,}`)},
-	{"Google API key", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
-	{"Stripe secret key", regexp.MustCompile(`\b[rs]k_live_[0-9A-Za-z]{16,}`)},
-	{"npm access token", regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`)},
-	{"private key", regexp.MustCompile(`-{5}BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-{5}`)},
+	{"github-token", "GitHub token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,}`)},
+	{"github-pat", "GitHub fine-grained token", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{60,}`)},
+	{"aws-access-key-id", "AWS access key id", regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)},
+	{"slack-token", "Slack token", regexp.MustCompile(`\bxox[abprs]-[0-9A-Za-z-]{10,}`)},
+	{"anthropic-api-key", "Anthropic API key", regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`)},
+	{"openai-api-key", "OpenAI API key", regexp.MustCompile(`\bsk-(?:proj-)?[A-Za-z0-9]{32,}`)},
+	{"google-api-key", "Google API key", regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
+	{"stripe-secret-key", "Stripe secret key", regexp.MustCompile(`\b[rs]k_live_[0-9A-Za-z]{16,}`)},
+	{"npm-token", "npm access token", regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`)},
+	{"private-key", "private key", regexp.MustCompile(`-{5}BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-{5}`)},
 }
 
 // interpolationRe matches the ways a config file legitimately spells "the
@@ -145,10 +150,20 @@ func scanFile(worktreeDir, rel string) []domain.Finding {
 				Severity: domain.SeverityHigh,
 				File:     rel,
 				Line:     line,
+				Rule:     "credentials/" + p.id,
 				Message: "looks like a live " + p.name + " (" + redact(m) + "). A tracked file must " +
 					"not carry a credential — move it to an environment variable (for npm: export " +
 					"NODE_AUTH_TOKEN, never `npm config set …_authToken`, which writes the token " +
 					"into .npmrc). If this is a false positive, drop `credentials` from steps in .warden.yaml.",
+				Why: "A credential in a tracked file is readable by everyone with access to the repo " +
+					"the moment it is pushed, and stays in the history after it is deleted. Treat it " +
+					"as already compromised: rotate it at the issuer first, then remove it here.",
+				// Deliberately NO Fix. Every other remediation warden offers is a
+				// command that resolves the finding; here the first correct step
+				// is rotating the credential at its issuer, which warden cannot
+				// do and must not appear to have done. Offering something like
+				// `git checkout -- <file>` would remove the evidence while
+				// leaving the secret valid — the worst of both outcomes.
 			})
 			// One finding per line is enough to stop the push; listing every
 			// pattern that matched the same string would only add noise.
