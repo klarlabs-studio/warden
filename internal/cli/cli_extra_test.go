@@ -117,8 +117,14 @@ func TestDoctor_ReportsUnverifiedAndExits1(t *testing.T) {
 	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
 		t.Fatalf("init bare: %v: %s", err, out)
 	}
+	// Push HEAD, never a hardcoded branch name: `git init` yields master on some
+	// installs and main on others, and pushing to refs/heads/main from a master
+	// checkout leaves origin/master missing — which warden then reads, correctly,
+	// as a branch that was never pushed. That is precisely the state this test
+	// must NOT be in, and it passed locally while failing on CI for exactly that
+	// reason.
 	git("remote", "add", "origin", remote)
-	git("push", "--no-verify", "-u", "origin", "HEAD:refs/heads/main")
+	git("push", "--no-verify", "-u", "origin", "HEAD")
 
 	// A commit made after adoption with no warden note is unverified. It must
 	// reach the remote to be in doctor's walk, and --no-verify is what makes it
@@ -128,7 +134,7 @@ func TestDoctor_ReportsUnverifiedAndExits1(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
 	}
-	git("push", "--no-verify", "origin", "HEAD:refs/heads/main")
+	git("push", "--no-verify", "origin", "HEAD")
 
 	code, out, _ := run("doctor")
 	if code != 1 {
