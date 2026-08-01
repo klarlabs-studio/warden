@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 
+	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	mcpserver "go.klarlabs.de/warden/internal/mcp"
 	"go.klarlabs.de/warden/internal/service"
@@ -22,6 +23,41 @@ func (f facade) StepsList() (preCommit, prePush []domain.StepName, err error) {
 }
 
 func (f facade) RunTrigger(ctx context.Context, hook domain.Hook) (mcpserver.RunSummary, error) {
+	return f.runTrigger(ctx, hook, nil)
+}
+
+// RunTriggerStreaming runs the pipeline and reports each step as it finishes.
+//
+// It installs a step observer for the duration of the run. That is safe here
+// because the facade owns its own service instance — newFacade constructs one
+// per surface invocation — so an observer set for one run cannot leak into
+// another's reporting.
+func (f facade) RunTriggerStreaming(ctx context.Context, hook domain.Hook, onStep func(mcpserver.StepProgress)) (mcpserver.RunSummary, error) {
+	return f.runTrigger(ctx, hook, onStep)
+}
+
+// stepObserver adapts the application's step events to the agent surface's
+// progress callback. It reports only FINISHED steps: the output-line events are
+// documented as best-effort and droppable under load, so forwarding them would
+// hand a polling caller a partial transcript it could mistake for a complete one.
+type stepObserver struct{ onStep func(mcpserver.StepProgress) }
+
+func (o stepObserver) OnStep(e application.StepEvent) {
+	if e.Phase != application.StepFinished {
+		return
+	}
+	o.onStep(mcpserver.StepProgress{
+		Step:     e.Step,
+		Status:   string(e.Result.Status),
+		Summary:  e.Result.Summary,
+		Findings: e.Result.Findings,
+	})
+}
+
+func (f facade) runTrigger(ctx context.Context, hook domain.Hook, onStep func(mcpserver.StepProgress)) (mcpserver.RunSummary, error) {
+	if onStep != nil {
+		f.svc.SetObserver(stepObserver{onStep: onStep})
+	}
 	res, err := f.svc.Run(ctx, hook)
 	if err != nil {
 		return mcpserver.RunSummary{}, err

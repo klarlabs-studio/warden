@@ -163,6 +163,36 @@ trusted_keys:
   - 3a76a2b850d0e957   # add yours with `warden key show`; inspect with `warden key list`
 ```
 
+### When a note can't be signed
+
+Signing is best-effort: an unwritable config dir, a malformed key file or a
+failure inside the signer leaves the note **unsigned** rather than failing a push
+that already succeeded. A developer shouldn't be blocked from pushing because a
+key directory went read-only.
+
+But an unsigned note isn't a smaller version of a signed one — it proves the
+checks ran, not *who* ran them, so `verify --require-signed` rejects it. Warden
+now says so at the moment it happens:
+
+```
+warden: provenance note written UNSIGNED: no signing key is available on this machine.
+        It still proves the checks ran, but not WHO ran them — `warden verify
+        --require-signed` will reject it. Set signing.required to fail instead.
+```
+
+Where the provenance is load-bearing, refuse instead:
+
+```yaml
+signing:
+  required: true    # default false — fail the run rather than write an unsigned note
+```
+
+The read side has been configurable since `trusted_keys`; this is the write-side
+counterpart. A repo whose CI gates on `--require-signed` should not be able to
+produce notes that gate will later reject — by then the commit is in history and
+whoever could have fixed it has moved on. **Enforcement only at verification time
+is enforcement too late.**
+
 ### Enforcing provenance across a range
 
 `warden verify` checks one commit (the provenance-*skip* primitive). To **gate**
@@ -266,6 +296,7 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
+signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
 push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:
   - match: { branch: main }
@@ -365,6 +396,7 @@ structured answer, rather than having to run the gate to find out.
 | `policy_explain` | `policy-explain` | What policy resolves for a hypothetical push? |
 | `steps_list` | `steps` | Which steps exist per hook? |
 | `run_trigger` | `run-trigger` | Run the pipeline (**gated on trust** — see below) |
+| `run_status` | — | Poll a run started by `run_trigger`: finished steps, then the verdict |
 
 Everything except `run_trigger` is a pure read, marked `readOnlyHint` on MCP, and
 needs no trust opt-in. The two gate verbs put their verdict in the **exit status**
@@ -378,6 +410,33 @@ warden axi verify-range --base origin/main --require-signed
 A failed run reports `blocker` and `retryable` alongside its findings, so an agent
 can tell "your change is wrong" (don't retry) from "another process held the
 linter's lock" (retry later) without parsing prose.
+
+#### Runs are asynchronous over MCP
+
+A full pipeline routinely takes minutes, so `run_trigger` **returns immediately**
+with a `run_id` and `phase: running`. Poll `run_status(run_id)` for the steps that
+have finished and, once it ends, the verdict:
+
+```jsonc
+// run_trigger → returns in milliseconds
+{ "run_id": "run-1", "phase": "running", "steps": [] }
+
+// run_status → while it works
+{ "run_id": "run-1", "phase": "running", "steps": [ { "step": "lint", "status": "pass" } ] }
+
+// run_status → when it ends
+{ "run_id": "run-1", "phase": "complete", "summary": { "outcome": "passed", … } }
+```
+
+`phase: complete` means the run **finished**, not that the gate **passed** — read
+`summary.outcome` for the verdict. A run that could not be carried out at all
+reports `errored` instead, which is a different thing from a rejected change and
+must not be treated as one.
+
+Steps appear as they finish, so an agent can start fixing a lint failure while the
+test step is still running. Run ids are per-process and don't survive a server
+restart. `warden axi run-trigger` stays **synchronous** — a one-shot CLI
+invocation should block until it has an answer.
 
 ### `run_trigger` trust
 
@@ -505,6 +564,44 @@ func main() {
 Build it as `warden-step-<name>` on `PATH` and reference `<name>` in the step
 list. Either way, custom steps run as isolated subprocesses — no repo-authored
 code is loaded into the daemon.
+
+#### Findings that can be acted on
+
+A finding needs only `Severity` and `Message`. But your step usually knows more
+than that — which rule fired, what breaks if it's ignored, and the command that
+fixes it — and whoever reads the finding otherwise has to rediscover all three:
+
+```go
+return stepsdk.Fail(stepsdk.Finding{
+	Severity: "high",
+	Message:  "unused import",
+	File:     "main.go",
+	Line:     7,
+	Rule:     "ST1003",                                    // what you search, waive, or baseline by
+	Why:      "an unused import fails the build on CI",    // the justification severity alone doesn't carry
+	Fix:      &stepsdk.Fix{Command: "goimports -w main.go"},
+})
+```
+
+That turns a failed gate into **run → read → fix → re-run** instead of
+**run → guess → re-run**, which is the difference between an agent that can
+close the loop and one that can't. Humans get the same lines under the finding:
+
+```
+  [high] main.go:7 unused import
+         rule: ST1003
+         why: an unused import fails the build on CI
+         fix: goimports -w main.go
+```
+
+`Fix` also takes a `Patch` (a unified diff), preferred when you know the change
+exactly since it can be reviewed before it's applied. **Both are advisory** —
+warden never applies a fix on the strength of a finding. Folding changes into the
+tree is a policy decision the repo makes with an `auto_fix` budget, so attaching a
+patch can't escalate your step into a tree write.
+
+All four fields are optional and omitted from the wire when unset, so steps
+written before they existed keep working unchanged.
 
 ### Pinning the scanner when the pin lives elsewhere
 

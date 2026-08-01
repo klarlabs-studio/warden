@@ -79,6 +79,11 @@ func (s SubprocessStep) Run(ctx context.Context, sc application.StepContext) (do
 	return fromWireOutput(s.name, out), nil
 }
 
+// toWireFindings projects earlier steps' findings onto the wire so a step can
+// react to what came before. The remediation fields travel too: a step deciding
+// whether to re-report an issue needs to see that an earlier one already offered
+// a fix for it, and dropping them here would make prior_findings a lossier view
+// of the run than the run itself has.
 func toWireFindings(fs []domain.Finding) []stepsdk.Finding {
 	if len(fs) == 0 {
 		return nil
@@ -90,11 +95,19 @@ func toWireFindings(fs []domain.Finding) []stepsdk.Finding {
 			Message:  f.Message,
 			File:     f.File,
 			Line:     f.Line,
+			Rule:     f.Rule,
+			Why:      f.Why,
+		}
+		if f.Fix != nil {
+			out[i].Fix = &stepsdk.Fix{Command: f.Fix.Command, Patch: f.Fix.Patch}
 		}
 	}
 	return out
 }
 
+// fromWireOutput adapts a subprocess step's reply back into the domain. A step
+// that reports only severity and message produces exactly what it always did —
+// the remediation fields are omitempty on the wire and stay zero here.
 func fromWireOutput(name domain.StepName, out stepsdk.Output) domain.StepResult {
 	res := domain.StepResult{
 		Step:   name,
@@ -102,12 +115,22 @@ func fromWireOutput(name domain.StepName, out stepsdk.Output) domain.StepResult 
 		Fixed:  out.Fixed,
 	}
 	for _, f := range out.Findings {
-		res.Findings = append(res.Findings, domain.Finding{
+		finding := domain.Finding{
 			Severity: domain.Severity(f.Severity),
 			Message:  f.Message,
 			File:     f.File,
 			Line:     f.Line,
-		})
+			Rule:     f.Rule,
+			Why:      f.Why,
+		}
+		// Carry a fix only when it actually offers something. An empty Fix
+		// object would make Actionable() true for a finding with nothing to act
+		// on, which is worse than no fix at all: it promises a remedy and then
+		// hands over an empty string.
+		if f.Fix != nil && (f.Fix.Command != "" || f.Fix.Patch != "") {
+			finding.Fix = &domain.Fix{Command: f.Fix.Command, Patch: f.Fix.Patch}
+		}
+		res.Findings = append(res.Findings, finding)
 	}
 	return res
 }
