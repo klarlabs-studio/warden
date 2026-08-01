@@ -266,8 +266,6 @@ func (w *Worktree) applyAndStage(diff string) error {
 	return nil
 }
 
-// Remove detaches the worktree via git and deletes its temp dir. It uses
-// --force because Warden's steps may leave build artifacts that would otherwise
 // HeadSHA is the worktree's current commit, read after steps (rebase, fix
 // commits) have run so the pre-push fast-forward targets the validated tip.
 func (w *Worktree) HeadSHA() (string, error) {
@@ -284,6 +282,8 @@ func (w *Worktree) DiffSince() (string, error) {
 	return runRawIn(w.Dir, "diff", "--binary")
 }
 
+// Remove detaches the worktree via git and deletes its temp dir. It uses
+// --force because Warden's steps may leave build artifacts that would otherwise
 // block removal.
 func (w *Worktree) Remove() error {
 	_, gitErr := w.repo.run("worktree", "remove", "--force", w.Dir)

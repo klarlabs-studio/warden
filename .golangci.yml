@@ -16,6 +16,18 @@ linters:
     - errcheck
     - unparam
   settings:
+    staticcheck:
+      # golangci-lint excludes the doc-comment-form checks by default. Five doc
+      # comments had drifted onto the function BELOW the one they described —
+      # a function inserted between a comment and its declaration leaves the
+      # comment behind, and gofmt/vet/errcheck all stay silent because nothing
+      # is syntactically wrong. ST1020 is what notices; it flagged exactly those
+      # and nothing else, so this costs no noise and stops the class recurring.
+      checks:
+        - all
+        - ST1020 # comment on exported function should be of the form "Fn ..."
+        - ST1021 # comment on exported type should be of the form "T ..."
+        - ST1022 # comment on exported var should be of the form "V ..."
     misspell:
       locale: US
       # GitHub's check-conclusion API value is the British "cancelled"; matching

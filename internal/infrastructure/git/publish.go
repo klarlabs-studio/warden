@@ -31,8 +31,6 @@ func (r *Repo) FastForwardTo(branch, sha, expectedTip string) error {
 	return nil
 }
 
-// Push publishes branch to remote. This is the terminal external action of a
-// passing pre-push run (§4.3).
 // ApplyPatch applies a unified diff to the working tree (used to re-apply
 // pre-commit auto-fixes computed in the worktree, §4.2). An empty patch is a
 // no-op. Fixes land in the working tree, not the index, preserving whatever the
@@ -59,7 +57,8 @@ func (r *Repo) ApplyPatch(patch string) error {
 // Push publishes branch to remote with --no-verify: Warden performs this push
 // itself only after its own pipeline has already validated the change, so the
 // pre-push hook must be bypassed — otherwise the push would re-trigger Warden
-// and recurse indefinitely (§4.3).
+// and recurse indefinitely. It is the terminal external action of a passing
+// pre-push run (§4.3).
 func (r *Repo) Push(remote, branch string, force domain.PushForce) error {
 	args := []string{"push", "--no-verify"}
 	// A rewrite needs an explicit force, because warden owns the push: git's
@@ -80,9 +79,8 @@ func (r *Repo) Push(remote, branch string, force domain.PushForce) error {
 }
 
 // remoteTrackingSHA returns this clone's last-fetched value for remote/branch,
-// or "" when no such ref exists (a branch that has never been pushed).
-// remoteTrackingSHA returns the tracking ref's commit, or "" if there is none.
-// It cannot fail: an absent ref is a clean miss, not an error, so callers get a
+// or "" when no such ref exists (a branch that has never been pushed). It
+// cannot fail: an absent ref is a clean miss, not an error, so callers get a
 // plain string rather than an error they would only ever compare against nil.
 func (r *Repo) remoteTrackingSHA(remote, branch string) string {
 	out, err := r.run("rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+branch)
