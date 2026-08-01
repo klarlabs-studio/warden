@@ -6,17 +6,13 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
+## [0.21.2] — 2026-08-01
 
-- **`fleet status` silently dropped span-covered commits.** The domain
-  distinguishes five states; the rollup enumerated four. A commit a gated push
-  published — no note of its own, vouched for by the span — fell into no bucket
-  at all, so the buckets stopped accounting for the commits. On the fleet this
-  was measured against, two commits were vanishing.
-
-  Found on the first run of the new golden-fleet suite, which is exactly what it
-  was built for: the type-level partition test could not catch it, because the
-  hole was in the CONSUMER that has to enumerate every partition.
+Three corrections to one number: the bypass rate `doctor` and `fleet status`
+report. On 0.21.0 and 0.21.1 it was wrong in both directions at once —
+**inflated**, by calling gaps bypasses that warden had no evidence to call
+anything, and **lossy**, by dropping a whole category of commit out of the
+tally. Anyone acting on that number should re-run against this release.
 
 ### Added
 
@@ -33,8 +29,19 @@ All notable changes to warden are documented here. The format follows
   asserts the buckets sum to the commit count, which is the invariant that
   catches a state added to the domain and forgotten in a report.
 
+  It found the dropped-bucket bug below on its first run.
 
 ### Fixed
+
+- **`fleet status` silently dropped span-covered commits.** The domain
+  distinguishes five states; the rollup enumerated four. A commit a gated push
+  published — no note of its own, vouched for by the span — fell into no bucket
+  at all, so the buckets stopped accounting for the commits. On the fleet this
+  was measured against, two commits were vanishing.
+
+  Found on the first run of the new golden-fleet suite, which is exactly what it
+  was built for: the type-level partition test could not catch it, because the
+  hole was in the CONSUMER that has to enumerate every partition.
 
 - **The commit states now partition.** `Covered`, `Reattestable`,
   `Unattributable` and `Bypassed` were each added separately as an independent
@@ -48,9 +55,6 @@ All notable changes to warden are documented here. The format follows
   This is the guard the three preceding state additions did not have. It is also
   what makes a fifth state safe to add: the test fails until the new one is made
   exclusive, rather than silently skewing a number someone acts on.
-
-
-### Fixed
 
 - **A gap is now only called a bypass when warden could have proved otherwise.**
   warden validates ONE tree per run, so the intermediate commits of a
@@ -69,6 +73,27 @@ All notable changes to warden are documented here. The format follows
   commit as unattributable when it might have been a bypass is a smaller error
   than accusing a perfectly gated push of going round the gate.
 
+## [0.21.1] — 2026-08-01
+
+### Fixed
+
+- **`doctor` now honors a gated push span**, and so does `fleet status`. warden
+  validates ONE tree per run — the tip's — so it deliberately writes no note for
+  the intermediate commits of a multi-commit push, recording the span instead.
+  `verify --range` has read that back since #86; `doctor` never did. A perfectly
+  ordinary commit-commit-commit-push therefore reported its earlier commits as
+  UNVERIFIED forever, and `fleet status` counted them as BYPASSED — inflating the
+  one number that is supposed to trigger an intervention.
+
+  Found by chasing a repo reporting 65.5% bypass whose gated and "bypassed"
+  commits interleaved **ten seconds apart**; the un-noted one was the direct
+  parent of the noted one. One push, two commits, one tree validated.
+
+  `CommitStatus` now separates the three ways a commit can lack a note —
+  `Covered()` (a gated push published it), `Reattestable()` (a squash-merge
+  unbound it), and `Bypassed()` (it really did go round the gate) — and only the
+  last is counted. A covering note must itself attest its own commit, exactly as
+  in the range gate, so a span is never a cheaper path to "verified" than a note.
 
 ### Changed
 
@@ -95,26 +120,6 @@ All notable changes to warden are documented here. The format follows
   on a fixture email that 1.25.0 stopped reporting. Pruned rather than left: a
   suppression for a finding that no longer exists is indistinguishable, to the
   next reader, from an accepted risk.
-
-### Fixed
-
-- **`doctor` now honors a gated push span**, and so does `fleet status`. warden
-  validates ONE tree per run — the tip's — so it deliberately writes no note for
-  the intermediate commits of a multi-commit push, recording the span instead.
-  `verify --range` has read that back since #86; `doctor` never did. A perfectly
-  ordinary commit-commit-commit-push therefore reported its earlier commits as
-  UNVERIFIED forever, and `fleet status` counted them as BYPASSED — inflating the
-  one number that is supposed to trigger an intervention.
-
-  Found by chasing a repo reporting 65.5% bypass whose gated and "bypassed"
-  commits interleaved **ten seconds apart**; the un-noted one was the direct
-  parent of the noted one. One push, two commits, one tree validated.
-
-  `CommitStatus` now separates the three ways a commit can lack a note —
-  `Covered()` (a gated push published it), `Reattestable()` (a squash-merge
-  unbound it), and `Bypassed()` (it really did go round the gate) — and only the
-  last is counted. A covering note must itself attest its own commit, exactly as
-  in the range gate, so a span is never a cheaper path to "verified" than a note.
 
 ## [0.21.0] — 2026-08-01
 
