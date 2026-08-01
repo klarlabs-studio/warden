@@ -6,6 +6,16 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+
+- **Six dead nox baseline entries.** Five were the SEC-163 false positive on Go
+  method calls, baselined in #158 when suppression was the only option; the rule
+  was fixed upstream the same day (nox-hq/nox#432, released in 1.25.1) and the
+  fleet moved to it, so the suppressions match nothing. The sixth is a DATA-001
+  on a fixture email that 1.25.0 stopped reporting. Pruned rather than left: a
+  suppression for a finding that no longer exists is indistinguishable, to the
+  next reader, from an accepted risk.
+
 ### Fixed
 
 - **`doctor` now honors a gated push span**, and so does `fleet status`. warden
@@ -26,6 +36,12 @@ All notable changes to warden are documented here. The format follows
   last is counted. A covering note must itself attest its own commit, exactly as
   in the range gate, so a span is never a cheaper path to "verified" than a note.
 
+## [0.21.0] — 2026-08-01
+
+Provenance the rest of your tooling can read: agents can interrogate the gate,
+notes can be signed with an SSH key, and a fleet-wide view says how much of it
+is actually enforced. Plus a security fix to the installers and a round of
+coverage work on the things the numbers were hiding.
 
 ### Added
 

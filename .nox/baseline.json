@@ -2,13 +2,6 @@
   "schema_version": "1.0.0",
   "entries": [
     {
-      "fingerprint": "3b14558fd4565ed0b9938dc89160f033df2767dd4a60d2aa5daf65394811ca3b",
-      "rule_id": "DATA-001",
-      "file_path": "e2e/e2e_test.go",
-      "severity": "medium",
-      "created_at": "2026-07-02T07:38:12.199936Z"
-    },
-    {
       "fingerprint": "206fc68191d1bc61792651d9b9f3f0ec0c5f33bcad2fc9286095e9c2e2a138a0",
       "rule_id": "DATA-001",
       "file_path": "internal/cli/cli_extra_test.go",
@@ -86,14 +79,6 @@
       "severity": "low",
       "reason": "Benign: test-fixture git author email in seed_test.go (matches 8 already-baselined sibling test emails); intentional cancel-in-progress concurrency guard in release.yml (matches already-baselined ci.yml).",
       "created_at": "2026-07-02T18:46:19.746484Z"
-    },
-    {
-      "fingerprint": "293870333c5f9c0b66ff26d99ef76e268ebe0e2ccde126540d51f8f8b6e8afa9",
-      "rule_id": "SEC-163",
-      "file_path": "internal/domain/signature_test.go",
-      "severity": "medium",
-      "reason": "False-positive high-entropy detections on plain-English help/error/assertion strings and ed25519 crypto test fixtures (no real secrets) — same class as the already-baselined importer_test.go:220.",
-      "created_at": "2026-07-02T19:09:12.289443Z"
     },
     {
       "fingerprint": "bc8d51248f7156d8a1a5e352a5320e49d273c948c2c398b5ff7d6ff5ad601200",
@@ -209,21 +194,7 @@
       "created_at": "2026-08-01T07:50:43.42737Z"
     },
     {
-      "fingerprint": "d9e26fc674677b76c44971a650db6a0bb10898f647123fe9ddfd42d20cc75c74",
-      "rule_id": "SEC-163",
-      "file_path": "internal/cli/cmd_reattest_test.go",
-      "severity": "medium",
-      "created_at": "2026-08-01T07:50:43.42737Z"
-    },
-    {
       "fingerprint": "4971c37f7a8d64bc88450ea867bbf16a956c6f25e1ace38942ae85c5eda6d5a7",
-      "rule_id": "SEC-163",
-      "file_path": "internal/cli/cmd_verify_test.go",
-      "severity": "medium",
-      "created_at": "2026-08-01T07:50:43.42737Z"
-    },
-    {
-      "fingerprint": "41ba3a20dd394bfbfd95688d9a1db70ece7af31f72deb96b7f1df581844bb194",
       "rule_id": "SEC-163",
       "file_path": "internal/cli/cmd_verify_test.go",
       "severity": "medium",
@@ -277,21 +248,6 @@
       "file_path": "internal/infrastructure/steps/credentials_test.go",
       "severity": "medium",
       "created_at": "2026-08-01T07:50:43.42737Z"
-    },
-    {
-      "fingerprint": "450593e0fda4e31b7d5edeba4ef49cacc53f7b6bbcb9b2364a99be98dc17655f",
-      "rule_id": "SEC-163",
-      "file_path": "internal/service/rangeverify_test.go",
-      "severity": "medium",
-      "created_at": "2026-08-01T07:50:43.42737Z"
-    },
-    {
-      "fingerprint": "4730cbc9d06a273cbf5b0d25738ee1220b568216d28a4e5f6b660b4fd0af0f7c",
-      "rule_id": "SEC-163",
-      "file_path": "internal/infrastructure/kernel/subprocess_test.go",
-      "severity": "medium",
-      "reason": "False positive: SEC-163 entropy heuristic matched the Go expression `domain.PrePush.ConfigKey(` in subprocess_test.go:95. Not a hex string and not a secret — nox itself rates it confidence:low with require_context:true. Nothing to reword; it is ordinary code.",
-      "created_at": "2026-08-01T11:19:01.030171Z"
     },
     {
       "fingerprint": "3a426f957431089b2582e79f030e4320d98b7097518bd4045248de5f78e29a57",
