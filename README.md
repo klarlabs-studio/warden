@@ -229,6 +229,44 @@ Because it's part of the signed, hash-chained record, a validated commit ships a
 tamper-evident, signed fingerprint of exactly which dependency sets it had —
 shown by `warden why`.
 
+### Measuring adoption across a fleet
+
+A gate that is routinely bypassed protects nothing **and** removes the signal
+that it ever ran. `doctor` answers that one repo at a time — which is exactly the
+granularity at which fleet-wide drift stays invisible. `warden fleet status`
+rolls it up:
+
+```bash
+warden fleet status --root ~/dev        # scan one level for repos
+warden fleet status ~/dev/a ~/dev/b     # or name them
+warden fleet status --root ~/dev --json # for a dashboard
+```
+
+```
+6 repos gated, 31 skipped (11 configured but never adopted)
+257 commits since adoption: 73 verified, 141 bypassed (54.9%), 43 reattestable
+
+  ✗  proctor                      61/61 bypassed (100.0%)
+  ✗  mcp-go                       36/55 bypassed (65.5%)
+  !  armada                       configured but never adopted — run `warden init`
+  ✓  statekit                     18 verified
+```
+
+Two distinctions do the work here:
+
+- **Bypassed is not the same as `doctor`'s "unverified".** A squash-merge unbinds
+  a note while the *content* was gated under the pre-squash commit. Those are
+  reported as **reattestable**, not as bypasses — counting them would inflate the
+  number that is supposed to trigger an intervention, and an alarmist metric gets
+  dismissed as noisy.
+- **"Configured but never adopted" is not "not a warden repo".** The first is a
+  stalled adoption with a one-command fix and someone who already intended it;
+  the second isn't a problem. Merging them buries the actionable one.
+
+Exits non-zero when any commit was genuinely bypassed, so it composes as a CI or
+cron check. A reattestable gap does not fail it — `warden reattest --all` rebinds
+those.
+
 ## Configuration (`.warden.yaml`)
 
 ```yaml
@@ -324,6 +362,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
+| `warden fleet status [--root d] [PATH...]` | gate coverage and **bypass rate** across many repos |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
