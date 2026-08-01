@@ -300,6 +300,26 @@ func findingMaps(findings []domain.Finding) []any {
 		if f.Line > 0 {
 			m["line"] = f.Line
 		}
+		if f.Rule != "" {
+			m["rule"] = f.Rule
+		}
+		if f.Why != "" {
+			m["why"] = f.Why
+		}
+		// The remediation is the half an agent can act on: with it, a failed run
+		// becomes run → read → fix → re-run instead of run → guess → re-run.
+		if f.Fix != nil {
+			fix := map[string]any{}
+			if f.Fix.Command != "" {
+				fix["command"] = f.Fix.Command
+			}
+			if f.Fix.Patch != "" {
+				fix["patch"] = f.Fix.Patch
+			}
+			if len(fix) > 0 {
+				m["fix"] = fix
+			}
+		}
 		out[i] = m
 	}
 	return out
