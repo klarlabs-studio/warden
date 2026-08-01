@@ -145,6 +145,18 @@ func (r *Repo) HeadSHA() (string, error) {
 	return r.run("rev-parse", "HEAD")
 }
 
+// RemoteURL returns the configured URL for remote, or "" when that remote does
+// not exist. A repo with no remote is an ordinary state — a local-only checkout
+// — not an error, so a caller that only wants to NAME the repository can treat
+// the miss as "unknown" and fall back to a bare identifier.
+func (r *Repo) RemoteURL(remote string) string {
+	url, err := r.run("config", "--get", "remote."+remote+".url")
+	if err != nil {
+		return ""
+	}
+	return url
+}
+
 // MergeBase returns the best common ancestor of HEAD and ref (e.g.
 // "origin/main"), the anchor Warden diffs against to scope a change.
 func (r *Repo) MergeBase(ref string) (string, error) {

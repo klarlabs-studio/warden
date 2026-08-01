@@ -23,7 +23,15 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	commit := fs.String("commit", "HEAD", "commit to attest")
 	keys := fs.String("key", "", "trusted signer key(s)/fingerprint(s) used to set predicate.verification.trusted; falls back to .warden.yaml trusted_keys")
+	predicate := fs.String("predicate", predicateWarden, "predicate to emit: "+predicateWarden+" (the full record) or "+predicateVSA+" (SLSA Verification Summary Attestation)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// Reject an unknown predicate rather than silently emitting the default. A
+	// caller who asked for a shape and got a different one would ship the wrong
+	// statement into their supply chain without ever being told.
+	if *predicate != predicateWarden && *predicate != predicateVSA {
+		_, _ = fmt.Fprintf(stderr, "warden: unknown predicate %q (want %s or %s)\n", *predicate, predicateWarden, predicateVSA)
 		return 2
 	}
 
@@ -41,9 +49,20 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	var statement any = buildStatement(res)
+	if *predicate == predicateVSA {
+		// The remote only makes the URIs resolvable; a local-only repo still
+		// produces a valid statement, identified by commit alone.
+		var remote string
+		if repo := svc.Repo(); repo != nil {
+			remote = repo.RemoteURL("origin")
+		}
+		statement = buildVSA(res, remote)
+	}
+
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(buildStatement(res)); err != nil {
+	if err := enc.Encode(statement); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
