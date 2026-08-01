@@ -221,6 +221,10 @@ func stepEnv(sc application.StepContext) []string {
 	if sc.WorktreeDir != "" {
 		env = append(env, "GOLANGCI_LINT_CACHE="+sc.WorktreeDir+"-golangci-cache")
 	}
+	// Redirect compiled-language build caches to a location that survives the
+	// worktree, so a gated push does not recompile the world every time. See
+	// buildcache.go for why this is a redirection rather than a copy.
+	env = append(env, buildCacheEnv(sc.BuildCacheDir, sc.WorktreeDir, env)...)
 	env = append(env,
 		"WARDEN_HOOK="+sc.Hook.ConfigKey(),
 		"WARDEN_BRANCH="+sc.Branch,
