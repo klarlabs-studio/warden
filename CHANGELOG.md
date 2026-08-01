@@ -8,6 +8,22 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **The commit states now partition.** `Covered`, `Reattestable`,
+  `Unattributable` and `Bypassed` were each added separately as an independent
+  predicate, and nothing forced them to be mutually exclusive — a commit both
+  span-covered and tree-identical to a validated one satisfied two at once, and
+  the fleet rollup sums the buckets, so it was counted twice. `markReattestable`
+  no longer treats an already-covered commit as a gap needing repair, and a new
+  exhaustive test asserts exactly one state holds across every combination of
+  the underlying fields.
+
+  This is the guard the three preceding state additions did not have. It is also
+  what makes a fifth state safe to add: the test fails until the new one is made
+  exclusive, rather than silently skewing a number someone acts on.
+
+
+### Fixed
+
 - **A gap is now only called a bypass when warden could have proved otherwise.**
   warden validates ONE tree per run, so the intermediate commits of a
   multi-commit push get no note — the span vouches for them. Spans arrived in
