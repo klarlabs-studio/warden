@@ -83,6 +83,10 @@ type fleetReport struct {
 	Verified     int `json:"verified"`
 	Bypassed     int `json:"bypassed"`
 	Reattestable int `json:"reattestable"`
+	// Unattributable counts commits whose status cannot be determined because the
+	// provenance around them predates push spans (< v0.19.0). They are neither
+	// verified nor bypassed, and saying so is the only honest reading.
+	Unattributable int `json:"unattributable"`
 	// BypassRate is Bypassed/Commits as a percentage, rounded to one decimal.
 	BypassRate float64 `json:"bypass_rate"`
 }
@@ -114,8 +118,9 @@ type fleetRepo struct {
 	// pre-squash commit, and counting those as bypasses would inflate the number
 	// that is supposed to trigger an intervention. Overstating the problem gets
 	// the metric dismissed as noisy, which costs more than not having it.
-	Bypassed     int `json:"bypassed"`
-	Reattestable int `json:"reattestable"`
+	Bypassed       int `json:"bypassed"`
+	Reattestable   int `json:"reattestable"`
+	Unattributable int `json:"unattributable"`
 	// Error is set when the repo could not be surveyed at all. It never stops the
 	// rollup: one unreadable checkout must not deny the answer for the rest.
 	Error string `json:"error,omitempty"`
@@ -188,6 +193,7 @@ func surveyFleet(paths []string, branch string) fleetReport {
 		rep.Verified += r.Verified
 		rep.Bypassed += r.Bypassed
 		rep.Reattestable += r.Reattestable
+		rep.Unattributable += r.Unattributable
 	}
 	if rep.Commits > 0 {
 		rep.BypassRate = round1(float64(rep.Bypassed) / float64(rep.Commits) * 100)
@@ -223,6 +229,11 @@ func surveyRepo(path, branch string) fleetRepo {
 	r.Verified = verified
 	r.Reattestable = len(report.Reattestable())
 	r.Bypassed = countBypassed(report)
+	for i := range report.Commits {
+		if report.Commits[i].Unattributable() {
+			r.Unattributable++
+		}
+	}
 	return r
 }
 
@@ -249,8 +260,12 @@ func printFleet(w io.Writer, rep fleetReport) {
 	}
 	_, _ = fmt.Fprintln(w)
 	if rep.Commits > 0 {
-		_, _ = fmt.Fprintf(w, "%d commits since adoption: %d verified, %d bypassed (%.1f%%), %d reattestable\n\n",
+		_, _ = fmt.Fprintf(w, "%d commits since adoption: %d verified, %d bypassed (%.1f%%), %d reattestable",
 			rep.Commits, rep.Verified, rep.Bypassed, rep.BypassRate, rep.Reattestable)
+		if rep.Unattributable > 0 {
+			_, _ = fmt.Fprintf(w, ", %d unattributable", rep.Unattributable)
+		}
+		_, _ = fmt.Fprint(w, "\n\n")
 	} else {
 		_, _ = fmt.Fprintln(w)
 	}
@@ -263,6 +278,9 @@ func printFleet(w io.Writer, rep fleetReport) {
 			_, _ = fmt.Fprintf(w, "  !  %-28s configured but never adopted — run `warden init`\n", name)
 		case !r.Adopted:
 			_, _ = fmt.Fprintf(w, "  –  %-28s not warden-gated\n", name)
+		case r.Bypassed == 0 && r.Unattributable > 0:
+			_, _ = fmt.Fprintf(w, "  ?  %-28s %d unattributable (provenance predates push spans)\n",
+				name, r.Unattributable)
 		case r.Bypassed > 0:
 			_, _ = fmt.Fprintf(w, "  ✗  %-28s %d/%d bypassed (%.1f%%)\n",
 				name, r.Bypassed, r.Commits, r.BypassRate())
@@ -278,6 +296,12 @@ func printFleet(w io.Writer, rep fleetReport) {
 		_, _ = fmt.Fprintln(w, "\nA bypassed commit went round the gate (`--no-verify`, or a push from a")
 		_, _ = fmt.Fprintln(w, "checkout without hooks installed). A gate that is routinely bypassed")
 		_, _ = fmt.Fprintln(w, "protects nothing and removes the signal that it ever ran.")
+	}
+	if rep.Unattributable > 0 {
+		_, _ = fmt.Fprintln(w, "\nUnattributable commits sit next to notes written before warden v0.19.0,")
+		_, _ = fmt.Fprintln(w, "which is when a note began recording the span of its push. An intermediate")
+		_, _ = fmt.Fprintln(w, "commit of a gated push and a real bypass are indistinguishable there — the")
+		_, _ = fmt.Fprintln(w, "information was never recorded, so they are counted as neither.")
 	}
 	if rep.Reattestable > 0 {
 		_, _ = fmt.Fprintln(w, "\nReattestable commits were gated under a different commit id (a squash-merge")

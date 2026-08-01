@@ -45,6 +45,7 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 	// Span coverage BEFORE reattestation: a commit published by a gated push is
 	// not a gap at all, so it should never be offered as something to reattest.
 	s.markCovered(&report)
+	s.markPreSpanProvenance(&report)
 	s.markReattestable(&report)
 	return report, nil
 }
@@ -88,6 +89,39 @@ func (s *Service) markCovered(report *domain.AuditReport) {
 				report.Commits[j].CoveredBy = c.SHA
 				delete(gaps, sha)
 			}
+		}
+	}
+}
+
+// markPreSpanProvenance flags gaps whose surrounding provenance predates push
+// spans, so they are reported as unattributable rather than as bypasses.
+//
+// The signal is the nearest DESCENDANT with a note — the commit that would have
+// been the push tip, and therefore the note that would have carried the span had
+// warden been able to write one. Walking newest-first, that is simply the last
+// note seen before reaching the gap.
+//
+// A gap with no noted descendant at all is left alone: nothing vouches for it
+// and nothing suggests anything ever would have, so the ordinary bypass reading
+// stands.
+func (s *Service) markPreSpanProvenance(report *domain.AuditReport) {
+	// CommitsSince returns newest-first, so iterate in that order and carry the
+	// most recent noted commit's warden version down onto the gaps beneath it.
+	preSpan := false
+	seenNote := false
+	for i := range report.Commits {
+		c := &report.Commits[i]
+		if c.HasNote {
+			note, err := s.repo.ReadNote(c.SHA)
+			if err != nil || note == nil {
+				continue
+			}
+			preSpan = domain.PredatesSpanRecording(note.WardenVersion)
+			seenNote = true
+			continue
+		}
+		if seenNote && preSpan && !c.Covered() {
+			c.PreSpanProvenance = true
 		}
 	}
 }

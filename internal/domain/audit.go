@@ -23,6 +23,19 @@ type CommitStatus struct {
 	// commit inside a trusted span was published by a gated push and is NOT a
 	// bypass, even though it carries no note of its own.
 	CoveredBy string `json:"covered_by,omitempty"`
+	// PreSpanProvenance marks a gap whose surrounding provenance was written by a
+	// warden too old to record a push span.
+	//
+	// warden validates one tree per run, so the intermediate commits of a
+	// multi-commit push get no note — the span is what vouches for them. Spans
+	// arrived in v0.19.0. A gap next to a note written before that could be an
+	// intermediate commit of a gated push OR a real bypass, and NOTHING
+	// distinguishes them: the information was never written down.
+	//
+	// Reporting such a commit as bypassed asserts more than the data supports.
+	// Reporting it as verified asserts more still. It is unattributable, and
+	// saying so is the only honest reading.
+	PreSpanProvenance bool `json:"pre_span_provenance,omitempty"`
 	// ReattestableFrom names a validated commit that reproduces this commit's
 	// tree exactly, when one exists and this commit has no note of its own — the
 	// squash-merge signature. It turns a bare UNVERIFIED into an actionable one:
@@ -42,14 +55,27 @@ func (c CommitStatus) Reattestable() bool { return !c.HasNote && c.ReattestableF
 // makes about a multi-commit push.
 func (c CommitStatus) Covered() bool { return !c.HasNote && c.CoveredBy != "" }
 
-// Bypassed reports whether this commit genuinely went round the gate: no note,
-// no covering push span, and no tree-identical validated commit to recover from.
+// Unattributable reports whether this commit's status cannot be determined from
+// what was recorded, because the provenance around it predates push spans.
+// See PreSpanProvenance.
+func (c CommitStatus) Unattributable() bool {
+	return !c.HasNote && !c.Covered() && !c.Reattestable() && c.PreSpanProvenance
+}
+
+// Bypassed reports whether this commit demonstrably went round the gate: no
+// note, no covering push span, no tree-identical validated commit to recover
+// from, and provenance recent enough that a span WOULD have been recorded had
+// the commit been part of a gated push.
 //
-// This is the number that should trigger an intervention, so it deliberately
-// excludes the two cases that look like gaps and are not. Counting either would
-// inflate it, and a metric that overstates the problem gets dismissed as noisy —
-// which costs more than not having one.
-func (c CommitStatus) Bypassed() bool { return !c.HasNote && !c.Covered() && !c.Reattestable() }
+// This is the number that should trigger an intervention, so it excludes every
+// case that looks like a gap and is not. Counting any of them inflates it, and a
+// metric that overstates the problem gets dismissed as noisy — which costs more
+// than not having one. The last exclusion is the subtlest: a gap can only be
+// called a bypass if the absence of a span is EVIDENCE, and it is only evidence
+// once warden was capable of writing one.
+func (c CommitStatus) Bypassed() bool {
+	return !c.HasNote && !c.Covered() && !c.Reattestable() && !c.PreSpanProvenance
+}
 
 // NewCommitStatus classifies a commit from its metadata and optional note.
 // A nil note means no provenance exists — the commit is unverified (a

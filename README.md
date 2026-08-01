@@ -336,7 +336,7 @@ warden fleet status --root ~/dev --json # for a dashboard
   ✓  statekit                     18 verified
 ```
 
-Two distinctions do the work here:
+Three distinctions do the work here:
 
 - **Bypassed is not the same as `doctor`'s "unverified".** A squash-merge unbinds
   a note while the *content* was gated under the pre-squash commit. Those are
@@ -346,6 +346,13 @@ Two distinctions do the work here:
 - **"Configured but never adopted" is not "not a warden repo".** The first is a
   stalled adoption with a one-command fix and someone who already intended it;
   the second isn't a problem. Merging them buries the actionable one.
+- **A gap is only a bypass once warden could have proved otherwise.** Push spans
+  arrived in v0.19.0. Beside an older note, an intermediate commit of a gated
+  push and a real `--no-verify` are indistinguishable — the information was never
+  recorded — so those are reported as **unattributable** and counted as neither.
+  On the fleet this README was written against, that was the difference between
+  52.6% and 27.0%, and between one repo looking like a systemic failure and it
+  being the single repo that actually was.
 
 Exits non-zero when any commit was genuinely bypassed, so it composes as a CI or
 cron check. A reattestable gap does not fail it — `warden reattest --all` rebinds

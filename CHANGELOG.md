@@ -6,6 +6,26 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A gap is now only called a bypass when warden could have proved otherwise.**
+  warden validates ONE tree per run, so the intermediate commits of a
+  multi-commit push get no note — the span vouches for them. Spans arrived in
+  v0.19.0. Beside an older note, an intermediate commit of a gated push and a
+  real `--no-verify` are indistinguishable, because the distinguishing
+  information was never recorded.
+
+  `doctor` and `fleet status` called all of them bypasses. They are now reported
+  as **unattributable** and counted as neither verified nor bypassed. On the
+  fleet this was measured against, the bypass rate went from 52.6% to 27.0%, and
+  one repo from 65.5% to 5.5% — turning a number that looked like systemic
+  neglect into one that correctly identifies the single repo with a real problem.
+
+  An unreadable or absent warden version is treated as pre-span: reporting a
+  commit as unattributable when it might have been a bypass is a smaller error
+  than accusing a perfectly gated push of going round the gate.
+
+
 ### Changed
 
 - **The README leads with what warden proves, not what it is.** It opened with

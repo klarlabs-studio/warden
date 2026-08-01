@@ -54,6 +54,9 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 			// as UNVERIFIED read as "never checked" and was simply wrong.
 			_, _ = fmt.Fprintf(w, "  ✓ %s  %s  %s  (covered by the gated push %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.CoveredBy))
+		case c.Unattributable():
+			_, _ = fmt.Fprintf(w, "  ? %s  %s  %s  UNATTRIBUTABLE (provenance predates push spans)\n",
+				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		case c.Reattestable():
 			// The content WAS gated — under the pre-squash commit id. Say which
 			// one, so the reader sees a recoverable binding gap rather than an
