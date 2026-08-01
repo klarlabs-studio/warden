@@ -8,6 +8,34 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **`fleet status` silently dropped span-covered commits.** The domain
+  distinguishes five states; the rollup enumerated four. A commit a gated push
+  published — no note of its own, vouched for by the span — fell into no bucket
+  at all, so the buckets stopped accounting for the commits. On the fleet this
+  was measured against, two commits were vanishing.
+
+  Found on the first run of the new golden-fleet suite, which is exactly what it
+  was built for: the type-level partition test could not catch it, because the
+  hole was in the CONSUMER that has to enumerate every partition.
+
+### Added
+
+- **A golden-fleet end-to-end suite.** Every provenance-classification bug this
+  project has shipped had the same shape — the unit tests asserted the code did
+  what its author intended, and the intent was what was wrong. Tests written from
+  the same mental model as the code cannot catch a wrong mental model; what
+  caught the earlier ones was running warden across real repositories and
+  noticing a number that could not be true.
+
+  The suite builds repositories to a KNOWN provenance shape — a multi-commit
+  push, a real `--no-verify`, a never-gated history, a fully gated one — so the
+  correct classification is known independently of what warden computes. It also
+  asserts the buckets sum to the commit count, which is the invariant that
+  catches a state added to the domain and forgotten in a report.
+
+
+### Fixed
+
 - **The commit states now partition.** `Covered`, `Reattestable`,
   `Unattributable` and `Bypassed` were each added separately as an independent
   predicate, and nothing forced them to be mutually exclusive — a commit both
