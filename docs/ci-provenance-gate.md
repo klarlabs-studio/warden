@@ -319,3 +319,61 @@ They are complements, not alternatives:
 
 A repo can use both: skip the expensive test matrix on already-validated
 commits, and gate the merge so nothing un-validated lands.
+
+## Closing the forge-merge gap (post-merge attestation)
+
+The gate above runs on the PR *head*, because that is where the notes are. But
+the commit that actually lands on `main` is a **different object**: GitHub
+creates it server-side when you squash-merge, and warden — a client-side
+pre-push gate — was never in that path. The same is true of a web edit or a
+merged Dependabot PR.
+
+This is measurable, not theoretical. Across one three-repository fleet, **all
+eleven remaining "bypassed" commits were committed by GitHub**; not one was a
+person going round the gate.
+
+`.github/workflows/provenance-main.yml` closes it by attesting the merged commit
+from CI:
+
+```yaml
+on:
+  push:
+    branches: [main]
+# …
+- run: warden run pre-push --attest-only
+- run: git push origin 'refs/notes/warden:refs/notes/warden'
+```
+
+`--attest-only` runs the configured steps against the merged tree and writes the
+note, but does **not** move or push the branch. Pushing from CI would race the
+next human push and fail on a stale ref, and the branch is already published —
+publishing it is what triggered the job.
+
+It **refuses** if a step rewrote the tree. The note binds to `HEAD`, so attesting
+a rewritten tree would assert the checks passed on a tree they never saw. In CI
+your steps must be checks, not formatters.
+
+### The signing key is the part to think about
+
+Set `WARDEN_SIGNING_KEY` (a base64 ed25519 seed — see `warden key show`) and add
+its fingerprint to `.warden.yaml` `trusted_keys`.
+
+**The workflow refuses to attest without it, deliberately.** warden's signer
+generates a fresh keypair when it finds no key, so an unguarded CI run would
+write notes signed by a throwaway signer that is discarded when the runner dies.
+Those commits would read as attested while being signed by nobody trusted —
+manufacturing provenance rather than recording it, which is worse than leaving
+the gap visible.
+
+A long-lived secret is the weak link here. Keyless OIDC (sigstore/Fulcio) is the
+right answer — no standing credential, org identity, transparency log — and is
+tracked as ADR-0002 Phase 2.5. Until then this is a real improvement on an
+unsigned note, not the end state.
+
+### Why this order matters
+
+Once `main` is covered, the PR-head `warden-gate` check can go back to being
+**required**. The reason it was downgraded to advisory — that it locked out
+Dependabot, web edits, and machines without warden installed — disappears when
+CI produces the attestation, because every one of those paths generates one
+naturally.

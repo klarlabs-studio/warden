@@ -208,6 +208,10 @@ func (s *Service) Run(ctx context.Context, hook domain.Hook) (application.RunRes
 // safe.
 func (s *Service) SetObserver(o application.Observer) { s.runner.Observer = o }
 
+// SetAttestOnly makes the next run gate and attest WITHOUT moving or pushing the
+// branch — the CI post-merge mode. See application.Settings.AttestOnly.
+func (s *Service) SetAttestOnly(v bool) { s.runner.Settings.AttestOnly = v }
+
 // StepsList returns the configured (or default) step subset for each hook.
 func (s *Service) StepsList() (preCommit, prePush []domain.StepName, err error) {
 	cfg, err := s.Config()

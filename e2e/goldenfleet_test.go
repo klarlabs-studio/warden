@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,18 @@ func (g *goldenRepo) adopt() {
 	if out, code := g.warden("trust", "add"); code != 0 {
 		g.t.Fatalf("trust add: %d %s", code, out)
 	}
+}
+
+// revParse resolves a ref to a SHA, for asserting that something did NOT move.
+func (g *goldenRepo) revParse(ref string) string {
+	g.t.Helper()
+	cmd := exec.Command("git", "rev-parse", ref)
+	cmd.Dir = g.dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		g.t.Fatalf("rev-parse %s: %v: %s", ref, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // commit adds an empty commit without gating it.
@@ -280,6 +293,66 @@ func TestGoldenFleet_ARepoThatNeverPushedIsNotBypassed(t *testing.T) {
 	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed
 	if sum != got.Commits {
 		t.Errorf("buckets sum to %d but there are %d commits (%+v)", sum, got.Commits, got)
+	}
+}
+
+// The forge-merge gap, and the CI mode that closes it.
+//
+// warden's gate is client-side pre-push, so a commit the forge creates itself —
+// a GitHub squash-merge, a web edit, a merged Dependabot PR — can never carry a
+// note. Every one of the 11 remaining "bypasses" on the fleet this was written
+// against was exactly that: committed by GitHub, not by a person evading
+// anything. `--attest-only` is what a post-merge CI job runs to attest the
+// merged commit: gate the tree, write the note, leave the branch alone.
+func TestGoldenFleet_AttestOnlyClosesTheForgeMergeGap(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+
+	// Simulate what the forge does: a commit lands on the published branch that
+	// warden's pre-push gate never saw.
+	g.commit("merged by the forge")
+	g.git("push", "--no-verify", "origin", "main")
+
+	before := g.classify()
+	if before.Bypassed != 1 {
+		t.Fatalf("bypassed = %d, want 1 before the CI job runs (%+v)", before.Bypassed, before)
+	}
+
+	// The post-merge CI job.
+	if out, code := g.warden("run", "pre-push", "--attest-only"); code != 0 && code != 3 {
+		t.Fatalf("attest-only: %d %s", code, out)
+	}
+
+	after := g.classify()
+	if after.Bypassed != 0 {
+		t.Errorf("bypassed = %d, want 0 after attesting the merged commit (%+v)", after.Bypassed, after)
+	}
+	if after.Verified != before.Verified+1 {
+		t.Errorf("verified = %d, want %d: the merged commit must now carry a note", after.Verified, before.Verified+1)
+	}
+}
+
+// --attest-only must not move the branch. The branch is already published —
+// that is what triggered the job — and pushing from CI would race the next human
+// push and fail on a stale ref.
+func TestGoldenFleet_AttestOnlyLeavesTheBranchAlone(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("merged by the forge")
+	g.git("push", "--no-verify", "origin", "main")
+
+	head := g.revParse("HEAD")
+	remote := g.revParse("refs/remotes/origin/main")
+
+	if out, code := g.warden("run", "pre-push", "--attest-only"); code != 0 && code != 3 {
+		t.Fatalf("attest-only: %d %s", code, out)
+	}
+
+	if got := g.revParse("HEAD"); got != head {
+		t.Errorf("HEAD moved from %s to %s: --attest-only must not rewrite the branch", head, got)
+	}
+	if got := g.revParse("refs/remotes/origin/main"); got != remote {
+		t.Errorf("origin/main moved from %s to %s: --attest-only must not push", remote, got)
 	}
 }
 
