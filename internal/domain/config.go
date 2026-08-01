@@ -114,7 +114,29 @@ type Config struct {
 	// Signing configures the WRITE side of provenance signing.
 	Signing SigningConfig `yaml:"signing"`
 
+	// AgentTrace configures notarization of an Agent Trace record.
+	AgentTrace AgentTraceConfig `yaml:"agent_trace"`
+
 	Rules []Rule `yaml:"rules"`
+}
+
+// AgentTraceConfig controls whether warden notarizes an Agent Trace record.
+//
+// Off by default. Agent Trace is a draft RFC, and a gate should not start
+// depending on a moving spec because someone upgraded warden — opting in is how
+// a repo says it accepts that.
+type AgentTraceConfig struct {
+	// Path is the repo-relative Agent Trace record to notarize. Empty disables
+	// notarization entirely.
+	Path string `yaml:"path"`
+	// Required fails the run when the record is absent or unreadable, instead of
+	// gating without it.
+	//
+	// The default is deliberately permissive: a human commit legitimately has no
+	// agent trace, so a missing record is the normal case rather than an error.
+	// Set this in a repo where every change is expected to carry one and its
+	// absence is itself the finding.
+	Required bool `yaml:"required"`
 }
 
 // SigningConfig controls how a run record is signed.

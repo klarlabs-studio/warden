@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/service"
@@ -60,6 +62,20 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 
 	_, _ = fmt.Fprintf(stdout, "evidence:      %d records, chain %s\n", len(rec.Evidence), chainState(res.Validated))
 	_, _ = fmt.Fprintf(stdout, "signature:     %s\n", whySignature(res))
+	// The trace is the agent's own claim; what warden adds is that this exact
+	// record existed when the commit was gated. Report whether it STILL matches,
+	// because a digest that no longer matches is the finding.
+	if t := rec.AgentTrace; t != nil {
+		state := "notarized"
+		raw, err := os.ReadFile(filepath.Join(svc.Repo().Dir, t.Path))
+		switch {
+		case err != nil:
+			state = "notarized, but the record is no longer present"
+		case !t.Matches(raw):
+			state = "CHANGED SINCE — the record no longer matches what was signed"
+		}
+		_, _ = fmt.Fprintf(stdout, "agent trace:   %s (%s, spec %s)\n", t.Path, state, t.SpecVersion)
+	}
 	if len(rec.Dependencies) > 0 {
 		_, _ = fmt.Fprintf(stdout, "sbom:          %d lockfile(s)\n", len(rec.Dependencies))
 		for _, m := range rec.Dependencies {
