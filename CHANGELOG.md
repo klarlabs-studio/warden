@@ -56,6 +56,29 @@ All notable changes to warden are documented here. The format follows
   `gh pr checks` exits non-zero precisely when checks fail or are pending — so
   its JSON is read regardless of exit code.
 
+### Removed
+
+- **44 dead entries pruned from the nox baseline**, which was written in July
+  against nox 1.7.1 and had drifted badly by 1.24.0: two thirds of it matched
+  nothing in a current scan, including 28 `high` and 2 `critical` suppressions
+  for findings that no longer exist. Dead suppressions are not inert — they
+  make the baseline unreadable, and a reviewer cannot tell an accepted risk
+  from a fingerprint that rotted.
+
+  The 18 findings added in their place were each read before being accepted
+  rather than bulk-approved: fake SHAs and fixture email addresses in
+  `_test.go` files, plus `workflow_dispatch` on the release workflow, which is
+  deliberate and documented in the workflow itself. The one `high` the baseline
+  genuinely carries — `TAINT-006`, `WARDEN_VERSION` reaching `Invoke-WebRequest`
+  in `scripts/install.ps1` — was re-examined and kept: the taint source is the
+  invoking user's own environment, on an install path (`irm … | iex`) that
+  already grants arbitrary execution. Gate behavior is unchanged; it passed
+  before and after.
+
+- **Three stale release-notes files** (`docs/release-notes-v0.6.0.md`,
+  `v0.7.0`, `v0.7.1`) from thirteen releases ago. Nothing linked to them, no
+  release since 0.7.1 produced one, and their content is in this file.
+
 ## [0.20.4] — 2026-07-27
 
 A single fix, to the one warden command that was editing your config badly.
