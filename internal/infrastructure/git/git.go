@@ -145,16 +145,23 @@ func (r *Repo) HeadSHA() (string, error) {
 	return r.run("rev-parse", "HEAD")
 }
 
+// ConfigValue reads a git config value, or "" when it is unset. An unset key is
+// an ordinary state, not an error — callers use this to pick up a setting the
+// developer already made (user.signingkey) and fall back when they have not.
+func (r *Repo) ConfigValue(key string) string {
+	v, err := r.run("config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
 // RemoteURL returns the configured URL for remote, or "" when that remote does
 // not exist. A repo with no remote is an ordinary state — a local-only checkout
 // — not an error, so a caller that only wants to NAME the repository can treat
 // the miss as "unknown" and fall back to a bare identifier.
 func (r *Repo) RemoteURL(remote string) string {
-	url, err := r.run("config", "--get", "remote."+remote+".url")
-	if err != nil {
-		return ""
-	}
-	return url
+	return r.ConfigValue("remote." + remote + ".url")
 }
 
 // MergeBase returns the best common ancestor of HEAD and ref (e.g.

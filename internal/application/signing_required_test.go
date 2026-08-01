@@ -14,11 +14,13 @@ type failingSigner struct{}
 
 func (failingSigner) PublicKey() string           { return "pub" }
 func (failingSigner) Sign([]byte) (string, error) { return "", errors.New("key is unreadable") }
+func (failingSigner) Algorithm() string           { return domain.AlgorithmEd25519 }
 
 type okSigner struct{}
 
 func (okSigner) PublicKey() string           { return "pub" }
 func (okSigner) Sign([]byte) (string, error) { return "sig", nil }
+func (okSigner) Algorithm() string           { return domain.AlgorithmEd25519 }
 
 // A successful sign reports no reason — the empty string is the "signed" signal
 // the caller branches on.
