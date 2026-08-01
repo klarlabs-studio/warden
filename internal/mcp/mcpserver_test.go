@@ -3,7 +3,9 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
@@ -24,9 +26,17 @@ type fakeFacade struct {
 	prePush   []domain.StepName
 	stepsErr  error
 
+	// A run happens on its own goroutine now, so runHook is written there and
+	// read by the test — mu guards the crossing.
+	mu      sync.Mutex
 	run     RunSummary
 	runErr  error
 	runHook domain.Hook
+	// progress is replayed to the onStep callback before the run finishes.
+	progress []StepProgress
+	// release, when set, holds the run open until the test closes it — the only
+	// way to observe the running phase deterministically.
+	release chan struct{}
 
 	// The read-only provenance surface. The *Arg fields record what each handler
 	// passed through, so a test can assert on the translation the handler does
@@ -70,8 +80,53 @@ func (f *fakeFacade) StepsList() ([]domain.StepName, []domain.StepName, error) {
 }
 
 func (f *fakeFacade) RunTrigger(_ context.Context, hook domain.Hook) (RunSummary, error) {
+	f.mu.Lock()
 	f.runHook = hook
+	f.mu.Unlock()
 	return f.run, f.runErr
+}
+
+func (f *fakeFacade) RunTriggerStreaming(_ context.Context, hook domain.Hook, onStep func(StepProgress)) (RunSummary, error) {
+	f.mu.Lock()
+	f.runHook = hook
+	f.mu.Unlock()
+	// Hold the run open when a test wants to observe the running phase before
+	// letting it finish.
+	if f.release != nil {
+		<-f.release
+	}
+	for _, s := range f.progress {
+		onStep(s)
+	}
+	return f.run, f.runErr
+}
+
+// hookRan reports the hook the fake was asked to run, under the lock: the run is
+// on its own goroutine, so a plain field read would race.
+func (f *fakeFacade) hookRan() domain.Hook {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.runHook
+}
+
+// waitForRun polls until the run leaves the running phase. Runs are asynchronous
+// now, so every assertion about an outcome has to wait for one.
+func waitForRun(t *testing.T, runs *registry, id string) RunStatusOutput {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, err := handleRunStatus(runs, RunStatusInput{RunID: id})
+		if err != nil {
+			t.Fatalf("run_status: %v", err)
+		}
+		if got.Phase != RunRunning {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s never left the running phase", id)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (f *fakeFacade) Verify(commitish string, trustedKeys []string) (ProvenanceRecord, error) {
@@ -182,7 +237,9 @@ func TestHandleStepsList_Error(t *testing.T) {
 	}
 }
 
-func TestHandleRunTrigger(t *testing.T) {
+// run_trigger now STARTS a run and returns a handle; the verdict arrives via
+// run_status. These tests therefore assert the handle, then wait.
+func TestHandleRunTrigger_StartsAndReportsThroughStatus(t *testing.T) {
 	want := RunSummary{
 		Outcome:  "passed",
 		Hook:     "pre-push",
@@ -192,74 +249,165 @@ func TestHandleRunTrigger(t *testing.T) {
 		RunID:    "run-42",
 	}
 	f := &fakeFacade{run: want}
+	runs := newRegistry()
 
-	got, err := handleRunTrigger(context.Background(), f, AllowAllRuns, RunTriggerInput{Hook: "pre-push"})
+	started, err := handleRunTrigger(f, AllowAllRuns, runs, RunTriggerInput{Hook: "pre-push"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Outcome != "passed" || got.RunID != "run-42" || len(got.Findings) != 1 {
-		t.Errorf("summary mismatch: got %+v", got)
+	if started.RunID == "" {
+		t.Fatal("run_trigger must return a run id to poll")
 	}
-	if f.runHook != domain.PrePush {
-		t.Errorf("hook not forwarded: got %q", f.runHook)
+
+	got := waitForRun(t, runs, started.RunID)
+	if got.Phase != RunComplete {
+		t.Fatalf("phase = %q, want complete", got.Phase)
+	}
+	if got.Summary == nil || got.Summary.Outcome != "passed" || len(got.Summary.Findings) != 1 {
+		t.Errorf("summary mismatch: %+v", got.Summary)
+	}
+	if f.hookRan() != domain.PrePush {
+		t.Errorf("hook not forwarded: got %q", f.hookRan())
+	}
+}
+
+// The whole point of the change: run_trigger must return BEFORE the pipeline
+// finishes. A five-minute test step was a five-minute silent tool call, and most
+// MCP clients time out long before it returned.
+func TestHandleRunTrigger_ReturnsWhileTheRunIsStillGoing(t *testing.T) {
+	release := make(chan struct{})
+	f := &fakeFacade{run: RunSummary{Outcome: "passed"}, release: release}
+	runs := newRegistry()
+
+	started, err := handleRunTrigger(f, AllowAllRuns, runs, RunTriggerInput{Hook: "pre-push"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if started.Phase != RunRunning {
+		t.Errorf("phase = %q, want running — the call must not block on the pipeline", started.Phase)
+	}
+	if started.Summary != nil {
+		t.Error("a run still in flight must not report a summary")
+	}
+
+	close(release)
+	if got := waitForRun(t, runs, started.RunID); got.Phase != RunComplete {
+		t.Errorf("phase after release = %q, want complete", got.Phase)
+	}
+}
+
+// Steps are reported as they finish, which is strictly more than the old
+// synchronous call ever gave: an agent can act on a lint failure while the test
+// step is still running.
+func TestHandleRunStatus_ReportsFinishedStepsWithFindings(t *testing.T) {
+	f := &fakeFacade{
+		run: RunSummary{Outcome: "failed"},
+		progress: []StepProgress{
+			{Step: domain.StepLint, Status: "pass", Summary: "lint passed"},
+			{Step: domain.StepTest, Status: "fail", Findings: []domain.Finding{
+				{Severity: domain.SeverityHigh, Message: "boom"},
+			}},
+		},
+	}
+	runs := newRegistry()
+	started, err := handleRunTrigger(f, AllowAllRuns, runs, RunTriggerInput{Hook: "pre-push"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := waitForRun(t, runs, started.RunID)
+	if len(got.Steps) != 2 {
+		t.Fatalf("steps = %d, want 2: %+v", len(got.Steps), got.Steps)
+	}
+	if got.Steps[0].Step != domain.StepLint || got.Steps[0].Status != "pass" {
+		t.Errorf("first step mismatch: %+v", got.Steps[0])
+	}
+	if len(got.Steps[1].Findings) != 1 || got.Steps[1].Findings[0].Message != "boom" {
+		t.Errorf("a failed step must carry its findings: %+v", got.Steps[1])
+	}
+}
+
+// A run that could not be carried out is `errored`, distinct from a run that
+// completed with a failing verdict. Collapsing the two would tell an agent its
+// code was rejected when the pipeline never ran.
+func TestHandleRunStatus_PipelineErrorIsNotAFailedGate(t *testing.T) {
+	sentinel := errors.New("pipeline exploded")
+	runs := newRegistry()
+	started, err := handleRunTrigger(&fakeFacade{runErr: sentinel}, AllowAllRuns, runs, RunTriggerInput{Hook: "pre-commit"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := waitForRun(t, runs, started.RunID)
+	if got.Phase != RunErrored {
+		t.Errorf("phase = %q, want errored", got.Phase)
+	}
+	if got.Summary != nil {
+		t.Error("an errored run has no verdict to report")
+	}
+	if got.Error == "" {
+		t.Error("an errored run must say what went wrong")
+	}
+}
+
+// Polling an id that does not exist must be an error, not an empty status: a
+// caller who mistyped would otherwise poll forever against silence.
+func TestHandleRunStatus_UnknownRun(t *testing.T) {
+	if _, err := handleRunStatus(newRegistry(), RunStatusInput{RunID: "run-999"}); err == nil {
+		t.Fatal("expected an error for an unknown run id")
+	}
+	if _, err := handleRunStatus(newRegistry(), RunStatusInput{}); err == nil {
+		t.Fatal("expected an error when run_id is missing")
 	}
 }
 
 func TestHandleRunTrigger_BadHook(t *testing.T) {
-	_, err := handleRunTrigger(context.Background(), &fakeFacade{}, AllowAllRuns, RunTriggerInput{Hook: "nope"})
+	_, err := handleRunTrigger(&fakeFacade{}, AllowAllRuns, newRegistry(), RunTriggerInput{Hook: "nope"})
 	if err == nil {
 		t.Fatal("expected error for unknown hook, got nil")
 	}
 }
 
-func TestHandleRunTrigger_FacadeError(t *testing.T) {
-	sentinel := errors.New("pipeline exploded")
-	_, err := handleRunTrigger(context.Background(), &fakeFacade{runErr: sentinel}, AllowAllRuns, RunTriggerInput{Hook: "pre-commit"})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected run error to propagate, got %v", err)
-	}
-}
-
-// TestHandleRunTrigger_GateRefuses is the core trust guard: when the gate
-// denies, run_trigger returns the gate's error and never touches the facade, so
-// a possibly-untrusted repo's commands are not executed on the auto-approved
-// MCP/axi path.
+// The core trust guard: when the gate denies, run_trigger returns the gate's
+// error and never starts a run, so a possibly-untrusted repo's commands are not
+// executed on the auto-approved path.
 func TestHandleRunTrigger_GateRefuses(t *testing.T) {
 	sentinel := errors.New("not trusted")
 	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
 	deny := func() error { return sentinel }
 
-	_, err := handleRunTrigger(context.Background(), f, deny, RunTriggerInput{Hook: "pre-push"})
+	_, err := handleRunTrigger(f, deny, newRegistry(), RunTriggerInput{Hook: "pre-push"})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected gate refusal to propagate, got %v", err)
 	}
-	if f.runHook != "" {
-		t.Errorf("facade must not run when the gate refuses; ran hook %q", f.runHook)
+	if f.hookRan() != "" {
+		t.Errorf("facade must not run when the gate refuses; ran hook %q", f.hookRan())
 	}
 }
 
-// TestHandleRunTrigger_GatePermits confirms a permitting gate lets the run
-// proceed to the facade unchanged.
 func TestHandleRunTrigger_GatePermits(t *testing.T) {
 	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
-	got, err := handleRunTrigger(context.Background(), f, AllowAllRuns, RunTriggerInput{Hook: "pre-push"})
+	runs := newRegistry()
+	started, err := handleRunTrigger(f, AllowAllRuns, runs, RunTriggerInput{Hook: "pre-push"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Outcome != "passed" || f.runHook != domain.PrePush {
-		t.Errorf("permitted run did not reach facade: got %+v hook=%q", got, f.runHook)
+	got := waitForRun(t, runs, started.RunID)
+	if got.Summary == nil || got.Summary.Outcome != "passed" || f.hookRan() != domain.PrePush {
+		t.Errorf("permitted run did not reach facade: %+v hook=%q", got.Summary, f.hookRan())
 	}
 }
 
-// TestHandleRunTrigger_NilGateUnguarded documents that a nil gate leaves
-// run_trigger unguarded, so embedders must opt in deliberately.
 func TestHandleRunTrigger_NilGateUnguarded(t *testing.T) {
 	f := &fakeFacade{run: RunSummary{Outcome: "passed"}}
-	if _, err := handleRunTrigger(context.Background(), f, nil, RunTriggerInput{Hook: "pre-push"}); err != nil {
+	runs := newRegistry()
+	started, err := handleRunTrigger(f, nil, runs, RunTriggerInput{Hook: "pre-push"})
+	if err != nil {
 		t.Fatalf("nil gate should not block: %v", err)
 	}
-	if f.runHook != domain.PrePush {
-		t.Errorf("nil gate should reach facade, got hook %q", f.runHook)
+	waitForRun(t, runs, started.RunID)
+	if f.hookRan() != domain.PrePush {
+		t.Errorf("nil gate should reach facade, got hook %q", f.hookRan())
 	}
 }
 

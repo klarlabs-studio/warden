@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -229,7 +228,7 @@ func TestHandleRunTrigger_RefusalIsLegibleAndStillMatchesTheSentinel(t *testing.
 	sentinel := errors.New("run_trigger is refused: this repo is not trusted; run `warden trust add`")
 	deny := RunGate(func() error { return sentinel })
 
-	_, err := handleRunTrigger(context.Background(), &fakeFacade{}, deny, RunTriggerInput{Hook: "pre-push"})
+	_, err := handleRunTrigger(&fakeFacade{}, deny, newRegistry(), RunTriggerInput{Hook: "pre-push"})
 	if err == nil {
 		t.Fatal("expected a refusal")
 	}
