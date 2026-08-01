@@ -226,14 +226,14 @@ func surveyRepo(path, branch string) fleetRepo {
 	return r
 }
 
-// countBypassed counts commits that carry no note AND have no tree-identical
-// validated commit to recover from — the ones that genuinely went round the
-// gate, as opposed to the ones a squash-merge unbound.
+// countBypassed counts commits that genuinely went round the gate. The
+// exclusions live on the domain type (CommitStatus.Bypassed): a squash-merge
+// gap is recoverable, and a commit inside a gated push span was never a gap at
+// all — warden validates one tree per run and records the span for the rest.
 func countBypassed(report domain.AuditReport) int {
 	n := 0
 	for i := range report.Commits {
-		c := &report.Commits[i]
-		if !c.HasNote && !c.Reattestable() {
+		if report.Commits[i].Bypassed() {
 			n++
 		}
 	}

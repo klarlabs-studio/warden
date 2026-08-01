@@ -14,6 +14,15 @@ type CommitStatus struct {
 	ChainIntact bool
 	RunID       string
 	Steps       []StepName
+	// CoveredBy names a validated commit whose signed push span published this
+	// one — everything in (CoversFrom, tip] went out together, gated as a unit.
+	//
+	// A run validates ONE tree, the tip's, so warden deliberately does not attest
+	// each commit of a multi-commit push individually: that would assert checks
+	// which never ran against those trees. What it does assert is the span. A
+	// commit inside a trusted span was published by a gated push and is NOT a
+	// bypass, even though it carries no note of its own.
+	CoveredBy string `json:"covered_by,omitempty"`
 	// ReattestableFrom names a validated commit that reproduces this commit's
 	// tree exactly, when one exists and this commit has no note of its own — the
 	// squash-merge signature. It turns a bare UNVERIFIED into an actionable one:
@@ -27,6 +36,20 @@ type CommitStatus struct {
 // a validated commit already covers — i.e. the gap is recoverable rather than a
 // real hole in the history.
 func (c CommitStatus) Reattestable() bool { return !c.HasNote && c.ReattestableFrom != "" }
+
+// Covered reports whether a gated push span published this commit. Such a commit
+// has no note of its own and needs none: the span is the claim warden actually
+// makes about a multi-commit push.
+func (c CommitStatus) Covered() bool { return !c.HasNote && c.CoveredBy != "" }
+
+// Bypassed reports whether this commit genuinely went round the gate: no note,
+// no covering push span, and no tree-identical validated commit to recover from.
+//
+// This is the number that should trigger an intervention, so it deliberately
+// excludes the two cases that look like gaps and are not. Counting either would
+// inflate it, and a metric that overstates the problem gets dismissed as noisy —
+// which costs more than not having one.
+func (c CommitStatus) Bypassed() bool { return !c.HasNote && !c.Covered() && !c.Reattestable() }
 
 // NewCommitStatus classifies a commit from its metadata and optional note.
 // A nil note means no provenance exists — the commit is unverified (a

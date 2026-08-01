@@ -42,8 +42,54 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 	for _, sha := range shas {
 		report.Commits = append(report.Commits, s.classify(sha))
 	}
+	// Span coverage BEFORE reattestation: a commit published by a gated push is
+	// not a gap at all, so it should never be offered as something to reattest.
+	s.markCovered(&report)
 	s.markReattestable(&report)
 	return report, nil
+}
+
+// markCovered annotates each un-noted commit that a gated push span published.
+//
+// warden validates ONE tree per run — the tip's — so it deliberately writes no
+// note for the intermediate commits of a multi-commit push. It records the span
+// instead. `verify --range` has read that back since #86; `doctor` did not, so a
+// perfectly ordinary commit-commit-commit-push reported two UNVERIFIED commits
+// forever, and anything counting from doctor (notably `fleet status`) reported
+// them as BYPASSED — inflating the one number meant to trigger an intervention.
+//
+// The covering note must itself attest its own commit, exactly as in the range
+// gate: a span must not be a cheaper path to "verified" than a note is.
+func (s *Service) markCovered(report *domain.AuditReport) {
+	gaps := map[string]int{}
+	for i := range report.Commits {
+		if !report.Commits[i].HasNote {
+			gaps[report.Commits[i].SHA] = i
+		}
+	}
+	if len(gaps) == 0 {
+		return
+	}
+	for i := range report.Commits {
+		c := &report.Commits[i]
+		if !c.HasNote {
+			continue // a commit with no note cannot vouch for anything
+		}
+		rec, err := s.repo.ReadNote(c.SHA)
+		if err != nil || rec == nil || rec.CoversFrom == "" || !rec.Attests(c.SHA) {
+			continue
+		}
+		covered, err := s.repo.CommitsInSpan(rec.CoversFrom, c.SHA)
+		if err != nil {
+			continue
+		}
+		for _, sha := range covered {
+			if j, isGap := gaps[sha]; isGap {
+				report.Commits[j].CoveredBy = c.SHA
+				delete(gaps, sha)
+			}
+		}
+	}
 }
 
 // classify gathers a commit's metadata and note, delegating the verified/intact
