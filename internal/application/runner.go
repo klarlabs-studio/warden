@@ -65,7 +65,8 @@ type Runner struct {
 	// live UI. Nil means no progress reporting.
 	Observer Observer
 	// Signer is optional: when set, a passing pre-push run's provenance note is
-	// signed. A nil Signer (or a signing failure) leaves the note unsigned.
+	// signed. A nil Signer (or a signing failure) leaves the note unsigned, and
+	// the run says so — see sign and Config.Signing.
 	Signer Signer
 	// SBOM is optional: when set, a passing pre-push run records its dependency
 	// lockfile digests in the provenance note.
@@ -316,6 +317,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// discardWarning carries a WARDEN_ALLOW_DISCARD override up to the caller so
 	// delivery can print which commits were force-pushed over.
 	var discardWarning string
+	// unsignedWarning carries a silent signing degrade up to the caller. Losing
+	// it is how a repo ends up with notes its own CI will later refuse.
+	var unsignedWarning string
 	// willOpenPR is resolved once, before the gate, because the delegation
 	// decision is made inside the push closure but PR creation happens after it.
 	willOpenPR := prCfg.Enabled && r.Forge != nil && r.Forge.Available()
@@ -389,7 +393,21 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			record.CoversFrom = spanBase
 		}
 	}
-	r.sign(record)
+	// Signing degrades silently by design (see sign), which is why the reason is
+	// captured and surfaced rather than discarded. A repo that never learns its
+	// notes stopped being signed discovers it only when a CI --require-signed
+	// starts failing, by which point the commits are already in history.
+	if reason := r.sign(record); reason != "" {
+		if cfg.Signing.Required {
+			// signing.required is the repo saying an unsigned note is not an
+			// acceptable outcome. Abort rather than write one — the push has not
+			// happened yet at this point, so refusing is still cheap.
+			return r.result(run, ""), fmt.Errorf(
+				"refusing to write an unsigned provenance note: %s (signing.required is set in .warden.yaml)", reason)
+		}
+		unsignedWarning = "provenance note written UNSIGNED: " + reason +
+			". It still proves the checks ran, but not WHO ran them — `warden verify --require-signed` will reject it. Set signing.required to fail instead."
+	}
 	if shaErr == nil {
 		// Note-push is best-effort: a failed note never fails the gate (§9).
 		if err := r.Git.WriteNote(finalSHA, *record); err == nil {
@@ -405,6 +423,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	res.GitCompletesPush = gitCompletes
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
+	}
+	if unsignedWarning != "" {
+		res.Warnings = append(res.Warnings, unsignedWarning)
 	}
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
@@ -608,26 +629,36 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 	return nil
 }
 
-// sign attaches an ed25519 signature to the record when a Signer is configured.
-// Signing is best-effort: a failure leaves the note unsigned rather than failing
-// a push that has already succeeded (§9).
-func (r *Runner) sign(record *domain.RunRecord) {
+// sign attaches an ed25519 signature to the record when a Signer is configured,
+// and returns why it could not when it could not.
+//
+// Signing stays best-effort: a failure leaves the note unsigned rather than
+// failing a push (§9) — a developer should not be blocked because a key
+// directory went read-only. But it used to fail SILENTLY, and an unsigned note
+// is not a smaller version of a signed one: it proves the checks ran, not who
+// ran them, so `verify --require-signed` rejects it. A repo could therefore
+// produce months of notes its own CI would refuse and never be told.
+//
+// The empty return means signed. The caller decides what to do with a reason —
+// warn, or (with signing.required) refuse.
+func (r *Runner) sign(record *domain.RunRecord) (reason string) {
 	if r.Signer == nil {
-		return
+		return "no signing key is available on this machine (the key directory could not be created or read)"
 	}
 	// Set the public key first so SigningPayload binds it into the signature.
 	record.PublicKey = r.Signer.PublicKey()
 	payload, err := record.SigningPayload()
 	if err != nil {
 		record.PublicKey = ""
-		return
+		return "the record could not be serialized for signing: " + err.Error()
 	}
 	sig, err := r.Signer.Sign(payload)
 	if err != nil {
 		record.PublicKey = ""
-		return
+		return "the signer rejected the payload: " + err.Error()
 	}
 	record.Signature = sig
+	return ""
 }
 
 // buildRecord finalizes the evidence chain into a provenance RunRecord (§9).

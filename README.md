@@ -163,6 +163,36 @@ trusted_keys:
   - 3a76a2b850d0e957   # add yours with `warden key show`; inspect with `warden key list`
 ```
 
+### When a note can't be signed
+
+Signing is best-effort: an unwritable config dir, a malformed key file or a
+failure inside the signer leaves the note **unsigned** rather than failing a push
+that already succeeded. A developer shouldn't be blocked from pushing because a
+key directory went read-only.
+
+But an unsigned note isn't a smaller version of a signed one — it proves the
+checks ran, not *who* ran them, so `verify --require-signed` rejects it. Warden
+now says so at the moment it happens:
+
+```
+warden: provenance note written UNSIGNED: no signing key is available on this machine.
+        It still proves the checks ran, but not WHO ran them — `warden verify
+        --require-signed` will reject it. Set signing.required to fail instead.
+```
+
+Where the provenance is load-bearing, refuse instead:
+
+```yaml
+signing:
+  required: true    # default false — fail the run rather than write an unsigned note
+```
+
+The read side has been configurable since `trusted_keys`; this is the write-side
+counterpart. A repo whose CI gates on `--require-signed` should not be able to
+produce notes that gate will later reject — by then the commit is in history and
+whoever could have fixed it has moved on. **Enforcement only at verification time
+is enforcement too late.**
+
 ### Enforcing provenance across a range
 
 `warden verify` checks one commit (the provenance-*skip* primitive). To **gate**
@@ -228,6 +258,7 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
+signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
 push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:
   - match: { branch: main }
