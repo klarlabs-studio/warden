@@ -302,6 +302,46 @@ hash-chained evidence entries or the dependency SBOM, which are the parts that
 make a warden note verifiable rather than merely assertive. That's why the warden
 predicate stays the default.
 
+### Notarizing an Agent Trace record
+
+[Agent Trace](https://github.com/cursor/agent-trace) standardizes how AI
+contributions are recorded alongside human ones. Every implementation of it is a
+**self-report**: the agent that wrote the code also writes the record saying what
+it wrote. Useful — and unfalsifiable. Nothing stops the record being edited
+afterwards, and nothing ties it to a moment the code was actually checked.
+
+Warden isn't the authoring tool and doesn't pretend to be. What it can do is
+**notarize**: at the moment it gates a commit, hash whatever trace record is
+present and bind that digest into the signed, hash-chained provenance note.
+
+```yaml
+agent_trace:
+  path: .agent-trace.json   # empty (default) disables notarization
+  # required: true          # fail the run when the record is missing
+```
+
+`warden why` then reports whether the record still matches what was signed:
+
+```
+agent trace:   .agent-trace.json (notarized, spec 0.1.0)
+agent trace:   .agent-trace.json (CHANGED SINCE — the record no longer matches what was signed, spec 0.1.0)
+```
+
+The trace stays the agent's claim. What warden adds is evidence of **when that
+claim existed** and that **it hasn't changed since** — so rewriting a
+`contributor: ai` range as `human` after the fact is detectable, which it is not
+anywhere else.
+
+**A missing record is not an error by default.** A human commit legitimately has
+no agent trace, so absence is the normal case; `required: true` is for a repo
+where every change is expected to carry one and its absence is itself the finding.
+
+**Warden does not validate the record against the schema** beyond the few fields
+that identify it as a trace. Agent Trace is a draft RFC and will move; a warden
+that rejected next quarter's revision would fail gates over a spec change — a far
+worse failure than notarizing a record it doesn't fully understand. The digest is
+what carries the guarantee, and that holds whatever the schema becomes.
+
 ## Configuration (`.warden.yaml`)
 
 ```yaml
@@ -331,6 +371,7 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
+agent_trace: { path: "" }   # notarize an Agent Trace record; empty disables it
 signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
 push: { force: lease }   # default — a rebased branch is pushed with --force-with-lease pinned to the remote-tracking ref; `never` refuses instead (see below)
 rules:

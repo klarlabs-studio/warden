@@ -69,6 +69,15 @@ type RunRecord struct {
 	// evidence chain and the signature — a signed statement of exactly which
 	// dependency sets were in the tree warden gated (§9).
 	Dependencies []DependencyManifest `json:"dependencies,omitempty"`
+	// AgentTrace notarizes an Agent Trace record that was present when this
+	// commit was gated. Being inside the record, its digest is covered by the
+	// evidence chain AND the signature — which is the whole point: the trace is
+	// the agent's own claim about what it wrote, and this is what makes that
+	// claim tamper-evident and anchored to a moment when the code was checked.
+	//
+	// Nil when no trace was configured or found, and omitempty so a note without
+	// one stays byte-identical to a note written before this field existed.
+	AgentTrace *AgentTraceRef `json:"agent_trace,omitempty"`
 	// PublicKey is the base64 ed25519 public key of the signer (§9). It is
 	// covered by Signature, so it cannot be swapped without re-signing.
 	PublicKey string `json:"public_key,omitempty"`
