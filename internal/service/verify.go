@@ -70,7 +70,14 @@ func keyTrusted(rec *domain.RunRecord, trustedKeys []string) bool {
 		if k == "" {
 			continue
 		}
-		if k == rec.PublicKey || k == rec.SignerFingerprint() || domain.KeyFingerprint(k) == rec.SignerFingerprint() {
+		// A roster entry may be the key itself or its fingerprint, in either
+		// scheme's encoding. Matching all the forms means an operator can paste
+		// whichever one they have — an ed25519 fingerprint from `warden key
+		// show`, or an SSH key or SHA256 fingerprint straight off a forge —
+		// without knowing which scheme the note happens to use.
+		if k == rec.PublicKey || k == rec.SignerFingerprint() ||
+			domain.KeyFingerprint(k) == rec.SignerFingerprint() ||
+			domain.SSHKeyFingerprint(k) == rec.SignerFingerprint() {
 			return true
 		}
 	}

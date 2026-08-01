@@ -264,6 +264,10 @@ func newFakeSigner(t *testing.T) *fakeSigner {
 }
 
 func (s *fakeSigner) PublicKey() string { return base64.StdEncoding.EncodeToString(s.pub) }
+
+// Algorithm reports warden's own scheme; the fake stands in for the local signer.
+func (s *fakeSigner) Algorithm() string { return domain.AlgorithmEd25519 }
+
 func (s *fakeSigner) Sign(payload []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(s.priv, payload)), nil
 }

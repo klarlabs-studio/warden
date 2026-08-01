@@ -700,16 +700,19 @@ func (r *Runner) sign(record *domain.RunRecord) (reason string) {
 	if r.Signer == nil {
 		return "no signing key is available on this machine (the key directory could not be created or read)"
 	}
-	// Set the public key first so SigningPayload binds it into the signature.
+	// Set the key AND the algorithm before computing the payload, so both are
+	// bound into the signature. A record whose algorithm could be changed after
+	// signing could be re-labeled into a scheme with weaker verification.
 	record.PublicKey = r.Signer.PublicKey()
+	record.Algorithm = r.Signer.Algorithm()
 	payload, err := record.SigningPayload()
 	if err != nil {
-		record.PublicKey = ""
+		record.PublicKey, record.Algorithm = "", ""
 		return "the record could not be serialized for signing: " + err.Error()
 	}
 	sig, err := r.Signer.Sign(payload)
 	if err != nil {
-		record.PublicKey = ""
+		record.PublicKey, record.Algorithm = "", ""
 		return "the signer rejected the payload: " + err.Error()
 	}
 	record.Signature = sig

@@ -78,13 +78,36 @@ type RunRecord struct {
 	// Nil when no trace was configured or found, and omitempty so a note without
 	// one stays byte-identical to a note written before this field existed.
 	AgentTrace *AgentTraceRef `json:"agent_trace,omitempty"`
-	// PublicKey is the base64 ed25519 public key of the signer (§9). It is
-	// covered by Signature, so it cannot be swapped without re-signing.
+	// PublicKey is the signer's public key (§9). Its encoding follows Algorithm:
+	// a base64 ed25519 key for warden's own signer, or an authorized_keys-style
+	// "ssh-ed25519 AAAA…" line for an SSH signer. It is covered by Signature, so
+	// it cannot be swapped without re-signing.
 	PublicKey string `json:"public_key,omitempty"`
-	// Signature is the base64 ed25519 signature over the record's SigningPayload.
-	// Empty on an unsigned record.
+	// Signature is the signature over the record's SigningPayload. Empty on an
+	// unsigned record.
 	Signature string `json:"signature,omitempty"`
+	// Algorithm names the signature scheme. EMPTY MEANS ed25519 — warden's
+	// original and still-default per-machine key.
+	//
+	// The empty default is load-bearing rather than lazy. This field sits inside
+	// SigningPayload, so any non-empty value changes the bytes a signature
+	// covers; leaving it empty for the existing scheme keeps every note ever
+	// written byte-identical and still verifiable. A new scheme opts in by
+	// naming itself.
+	Algorithm string `json:"algorithm,omitempty"`
 }
+
+// Signature algorithms. AlgorithmEd25519 is the zero value deliberately — see
+// RunRecord.Algorithm.
+const (
+	// AlgorithmEd25519 is warden's own per-machine key, written as "" so notes
+	// that predate this field are unchanged.
+	AlgorithmEd25519 = ""
+	// AlgorithmSSH is an SSHSIG signature from the developer's SSH key — the same
+	// key git signs commits with, and one a forge already publishes, so a roster
+	// can be checked against an identity someone else maintains.
+	AlgorithmSSH = "ssh"
+)
 
 // SigningPayload is the canonical byte string a signature covers: the record
 // with the Signature field cleared but PublicKey retained, so the key that
@@ -126,24 +149,52 @@ func (r RunRecord) VerifySignature() bool {
 	if r.Signature == "" || r.PublicKey == "" {
 		return false
 	}
-	pub, err := base64.StdEncoding.DecodeString(r.PublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return false
-	}
-	sig, err := base64.StdEncoding.DecodeString(r.Signature)
-	if err != nil {
-		return false
-	}
 	payload, err := r.SigningPayload()
 	if err != nil {
 		return false
 	}
-	return ed25519.Verify(pub, payload, sig)
+	switch r.Algorithm {
+	case AlgorithmEd25519:
+		return verifyEd25519Signature(r.PublicKey, r.Signature, payload)
+	case AlgorithmSSH:
+		return verifySSHSignature(r.PublicKey, r.Signature, payload)
+	default:
+		// An algorithm this warden does not implement verifies FALSE rather than
+		// erroring past the check. A newer warden could write a scheme an older
+		// one cannot read, and the safe reading of "I don't understand this
+		// signature" is "unverified", never "fine".
+		return false
+	}
+}
+
+// verifyEd25519Signature checks warden's own per-machine key scheme.
+func verifyEd25519Signature(pubKey, sig string, payload []byte) bool {
+	pub, err := base64.StdEncoding.DecodeString(pubKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return false
+	}
+	raw, err := base64.StdEncoding.DecodeString(sig)
+	if err != nil {
+		return false
+	}
+	return ed25519.Verify(pub, payload, raw)
 }
 
 // SignerFingerprint is a short, stable identifier for the signing key, for
 // display and for pinning a trusted signer in CI (`warden verify --key`).
-func (r RunRecord) SignerFingerprint() string { return KeyFingerprint(r.PublicKey) }
+//
+// It dispatches on Algorithm because the two schemes have different key
+// encodings AND different fingerprint conventions. An SSH key renders in
+// OpenSSH's own "SHA256:…" form deliberately: that is what `ssh-keygen -lf`
+// prints and what a forge shows beside a registered key, so a roster entry can
+// be checked against an identity nobody had to transcribe — which is the entire
+// reason to sign with an SSH key rather than warden's own.
+func (r RunRecord) SignerFingerprint() string {
+	if r.Algorithm == AlgorithmSSH {
+		return SSHKeyFingerprint(r.PublicKey)
+	}
+	return KeyFingerprint(r.PublicKey)
+}
 
 // KeyFingerprint hashes a base64 ed25519 public key to a 16-hex-char
 // fingerprint. An unparseable key yields "".

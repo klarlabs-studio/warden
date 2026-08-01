@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
@@ -32,7 +33,7 @@ type Service struct {
 	configs *config.Repository
 	forge   *forge.GH
 	runner  *application.Runner
-	signer  *signing.Signer
+	signer  provenanceSigner
 	version string
 	remote  string
 }
@@ -63,13 +64,54 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 		Settings: application.Settings{Version: version, Remote: DefaultRemote},
 	}
 	// Provenance signing is best-effort: if the key can't be loaded (e.g. a
-	// locked-down home in CI), runs still validate and write unsigned notes.
-	signer := loadSigner()
+	// locked-down home in CI), runs still validate and write unsigned notes —
+	// loudly, and refusably via signing.required.
+	signer := resolveSigner(repo, configs)
 	if signer != nil {
 		runner.Signer = signer
 	}
 	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, signer: signer, version: version, remote: DefaultRemote}, nil
 }
+
+// provenanceSigner is a Signer that can also identify itself for display and
+// for pinning — what `warden key show` needs on top of the signing operations.
+type provenanceSigner interface {
+	application.Signer
+	Fingerprint() string
+}
+
+// resolveSigner picks the signing scheme the repo asked for.
+//
+// A config that cannot be read, or an SSH signer that cannot be prepared, falls
+// back to warden's own key rather than to nothing: an unsigned note is a strictly
+// worse outcome than a differently-signed one, and the fallback is announced by
+// the run's unsigned/degraded reporting if it ends up producing nothing either.
+func resolveSigner(repo *git.Repo, configs application.ConfigRepository) provenanceSigner {
+	cfg, err := configs.Load()
+	if err != nil || !strings.EqualFold(cfg.Signing.Signer, signerSSH) {
+		if s := loadSigner(); s != nil {
+			return s
+		}
+		return nil
+	}
+	// An empty ssh_key falls back to git's own user.signingkey, which is already
+	// set in any repo that signs commits — so the common case needs no
+	// warden-specific configuration at all.
+	keyPath := cfg.Signing.SSHKey
+	if keyPath == "" && repo != nil {
+		keyPath = repo.ConfigValue("user.signingkey")
+	}
+	if s, err := signing.LoadSSH(keyPath); err == nil {
+		return s
+	}
+	if s := loadSigner(); s != nil {
+		return s
+	}
+	return nil
+}
+
+// signerSSH is the config value selecting SSH signing.
+const signerSSH = "ssh"
 
 // loadSigner loads (or first-time generates) the provenance signing key, or
 // returns nil if the key dir is unavailable — signing is optional (§9).
