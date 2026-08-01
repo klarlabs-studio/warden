@@ -6,6 +6,22 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The README leads with what warden proves, not what it is.** It opened with
+  "a configurable git commit/push gate", which is accurate and reads as
+  husky-with-extras — the category, not the claim. The differentiated thing
+  (a signed, hash-chained note that lets CI skip re-running checks, and makes an
+  agent's own attribution record tamper-evident) was buried below the fold.
+
+  Now it opens on the three questions warden can answer about a commit *and
+  prove to someone who was not there*, adds a section positioning gittuf,
+  sigstore, SLSA and Agent Trace as things warden composes with rather than
+  competes against, and states plainly why warden does not claim
+  `slsa.dev/provenance`. Every claim in the new text was checked against shipped
+  code before it went in.
+
+
 ### Removed
 
 - **Six dead nox baseline entries.** Five were the SEC-163 false positive on Go

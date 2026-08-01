@@ -12,9 +12,38 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/klarlabs-studio/warden" alt="License: MIT"></a>
 </p>
 
-A configurable git commit/push gate installed as **native git hooks** — `git commit` and `git push` themselves are the gated commands, no second remote and no changed muscle memory.
+**Prove what happened to a commit before it leaves your machine.**
 
-Warden runs a policy-driven pipeline (lint, test, review, …) in a **disposable worktree** so a run never touches your live checkout, then fast-forwards your real branch and performs the push itself once everything passes. Policy is a set of stacking **rules** (match on branch, path glob, and a risk heuristic → overrides), and the pipeline is extensible with a typed subprocess SDK.
+Warden answers three questions about every commit, and can prove the answers to
+someone who wasn't there:
+
+- **What produced it** — human, or which agent
+- **Was it actually checked** — which policy ran, and passed
+- **Can I trust that** — signed by an identity your forge already knows
+
+It does that by gating `git commit` and `git push` themselves — **native git
+hooks**, no second remote and no changed muscle memory — running your checks in a
+**disposable worktree** so a pass means a pass, then writing a signed,
+hash-chained note that travels with the repo. CI reads that note and **skips
+re-running the checks it already knows passed**.
+
+Policy is a set of stacking **rules** (branch, path glob, risk heuristic), and the
+pipeline is extensible with a typed subprocess SDK.
+
+### Why this matters now
+
+Most code review still assumes a human wrote the code. Increasingly one didn't —
+and the tools that record AI authorship all work the same way: **the agent that
+wrote the code also writes the record saying what it wrote.** That's a
+self-report, and nothing stops it being edited afterwards.
+
+Warden doesn't emit those records. It **notarizes** them — hashing whatever
+[Agent Trace](https://github.com/cursor/agent-trace) record is present at the
+moment it gates the commit and binding that digest into the signed note. Rewrite
+a `contributor: ai` range as `human` later and `warden why` says so.
+
+That's the difference between attribution you can *verify* and attribution an
+agent *claims*.
 
 Built on [`axi-go`](https://go.klarlabs.de/axi) (execution kernel — typed actions, effect-gated approval, tamper-evident evidence chain), [`fortify`](https://go.klarlabs.de/fortify) (resilience), [`statekit`](https://go.klarlabs.de/statekit) (policy visualization), and [`mcp-go`](https://go.klarlabs.de/mcp) (MCP surface).
 
@@ -28,15 +57,34 @@ Warden does what a Makefile can't:
   commit, so passing in warden means passing in CI — reproducibly.
 - **Can't be forgotten.** Native `git` hooks fire automatically; no discipline
   required, no changed muscle memory.
-- **Leaves proof.** Each gated commit gets a hash-chained validation note that
-  travels with the repo — so **CI can trust it and skip re-running the checks**,
-  cutting minutes and cost ([provenance-skip](docs/ci-provenance-skip.md)).
+- **Leaves proof.** Each gated commit gets a signed, hash-chained validation note
+  that travels with the repo — so **CI can trust it and skip re-running the
+  checks it already knows passed**, cutting minutes and cost on every push
+  ([provenance-skip](docs/ci-provenance-skip.md)). That is the same note the
+  attribution and audit surfaces read; proof is not a side feature bolted on.
 - **Scales with risk.** Rules match on branch / path / diff size, so heavy
   checks and human approval apply only where they matter.
 
 It complements your checks rather than replacing them: point warden at the
 commands you already run (`warden import` reads them from your Makefile, npm
 scripts, pre-commit config, lefthook, or CI).
+
+## How this relates to what you may already use
+
+Warden overlaps three tool categories and replaces none of them:
+
+| | They answer | Warden answers |
+|---|---|---|
+| **husky / lefthook / pre-commit** | *"run these checks on commit"* | …in a clean worktree, and leave proof |
+| **gittuf** | *"was this ref advanced by an authorized key?"* — authorization | *"did the checks actually run and pass on this tree?"* — validation |
+| **sigstore / gitsign** | *"who signed this, per a transparency log"* | warden signs with a local key or your SSH key; `signing.signer` is where a keyless signer would slot in |
+| **SLSA** | build provenance, at the artifact layer | source provenance, one layer earlier — exportable as a **VSA** (`warden attest --predicate vsa`) |
+| **Agent Trace** | a standard shape for AI attribution | makes someone else's trace **tamper-evident** |
+
+A gittuf policy requiring a warden attestation, or a warden note wrapped in a
+cosign envelope, are both sensible. Warden deliberately does not claim
+`slsa.dev/provenance`: that predicate means *build* provenance, and saying so
+would misrepresent what warden checked.
 
 ## Install
 
