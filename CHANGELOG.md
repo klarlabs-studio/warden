@@ -8,8 +8,89 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **Warden's provenance is now readable by agents** (#144). The MCP/axi surface
+  was three working tools against eighteen CLI commands, so an agent could
+  *execute* the gate but never *interrogate* it — the single most useful question
+  warden answers, "is this commit validated?", had no agent-facing answer at all.
+  `verify`, `verify_range`, `doctor`, `audit` and `status` are now exposed on both
+  surfaces, marked read-only, and need no trust opt-in: that checkpoint exists to
+  stop arbitrary shell from an untrusted `.warden.yaml`, and reading a note cannot
+  do that. No new service logic was required — every operation already existed;
+  only the adapter was missing.
+
+- **A per-repository trust grant** (#144), `warden trust add|list|remove`.
+  `WARDEN_MCP_ALLOW_RUN=1` authorized a *process*, not a repository, so an MCP
+  server trusted for one checkout stayed trusted for every repo it was later
+  pointed at — including one cloned minutes afterwards. The same fix git made
+  with `safe.directory`. The env var remains for containers and CI, where there
+  is no persistent config dir and the workspace is disposable.
+
+- **Findings carry their remediation** (#146). `domain.Finding` and
+  `stepsdk.Finding` gain `Rule`, `Why` and `Fix{Command,Patch}`, all optional and
+  omitted when unset. A failed gate becomes read → fix → re-run instead of
+  guess → re-run. Populated where warden already knew the answer and only said it
+  in prose: the install command for a missing toolchain, `--allow-parallel-runners`
+  for lock contention, the `timeouts:` key. Fixes are advisory — a step cannot
+  escalate itself into a tree write by attaching a patch.
+
+- **Runs are asynchronous over MCP** (#149). `run_trigger` returns immediately
+  with a `run_id`; `run_status` reports finished steps and then the verdict.
+  A five-minute test step was a five-minute silent tool call that most clients
+  timed out on. Measured: `run_trigger` returns in 0.03s against a step that
+  sleeps 2s. `phase: complete` means the run finished, not that the gate passed;
+  a pipeline that could not run at all reports `errored`, which is a different
+  thing from a rejected change.
+
+- **`warden fleet status`** (#150) — gate coverage and **bypass rate** across many
+  repositories. A gate that is routinely bypassed protects nothing *and* removes
+  the signal that it ever ran, and `doctor` answers that one repo at a time, which
+  is exactly the granularity at which fleet-wide drift stays invisible. Bypassed
+  deliberately excludes squash-merge gaps (reported as reattestable) — counting
+  them would inflate the number that is supposed to trigger an intervention.
+
+- **`warden attest --predicate vsa`** (#147) emits a SLSA Verification Summary
+  Attestation. A warden note already says "a verifier ran a policy against this
+  and here is the result", which is what a VSA says — one layer earlier than
+  SLSA's artifact-level definition. Verified levels are warden-namespaced on
+  purpose: warden does not produce a SLSA build level and will never claim one.
+
+- **Signing with an SSH key** (#155), `signing.signer: ssh`. Warden's own key is
+  per-machine and means nothing to anyone else, so a `trusted_keys` roster had to
+  be hand-maintained with no way to check an entry against any identity system.
+  An SSH key is one a forge already publishes and can revoke, and `ssh_key`
+  defaults to git's `user.signingkey` — so a repo already signing commits needs no
+  warden-specific configuration. Signatures are namespaced `warden-provenance`, so
+  one can never be replayed as a git commit signature or the reverse.
+
+- **Agent Trace notarization** (#156), `agent_trace.path`. Every Agent Trace
+  implementation is a self-report by the agent that wrote the code. Warden
+  notarizes instead: it hashes the record at gate time and binds that digest into
+  the signed note, so rewriting a `contributor: ai` range as `human` afterwards is
+  detectable. Deliberately not schema-validated beyond the fields that identify a
+  trace — the RFC is a draft and will move, and failing gates over a spec change
+  would be worse than notarizing a record warden does not fully understand.
+
+- **`signing.required`** (#151) refuses to write an unsigned note instead of
+  degrading silently. Signing was already optional by accident — three paths left
+  a note unsigned and none of them said so, and a repo could accumulate unsigned
+  notes for months before a CI `--require-signed` started failing. The degrade is
+  now announced with its reason whatever the setting.
+
+- **`warden import` reads `.pre-commit-config.yaml`** (#144), the largest
+  installed base warden migrates from. It maps to `pre-commit run` rather than
+  reconstructing each hook's command: those hooks execute in environments
+  pre-commit provisions, so a "faithfully reconstructed" command would name a
+  binary that is not on PATH.
+
+- **Build caches survive the worktree** (#153). A worktree holds tracked files
+  only, so a compiled language rebuilt from scratch on every gated push. Measured
+  on a six-crate Rust workspace, the real gate went from 86s to 4s. It is a
+  redirection, not a copy: a compiler writes to its cache and hardlinks share
+  inodes, so copying one could corrupt the developer's live cache.
+
+
 - **`internal/tui` and `stepsdk` are now enforced by a coverage minimum**
-  (#155). Neither belonged to any domain, so no minimum applied to either — the
+  (#157). Neither belonged to any domain, so no minimum applied to either — the
   gate reported "all 7 domains pass" while 204 statements sat outside every
   policy. Both were healthy (83.0% and 86.4%) but nothing held them there, and
   `stepsdk` is the public SDK third-party step binaries compile against.
@@ -19,7 +100,7 @@ All notable changes to warden are documented here. The format follows
   off to `cli.Run` belong to no domain by design, and excluding it keeps a
   future warning meaningful instead of routine.
 
-- **A per-file coverage floor the domain average cannot hide** (#153). The
+- **A per-file coverage floor the domain average cannot hide** (#154). The
   domain minimums are the quality bar; this is the smoke alarm for the failure
   they structurally cannot see. `internal/infrastructure/kernel/subprocess.go`
   sat at 0% — every one of its six functions — inside an `infrastructure`
@@ -38,33 +119,6 @@ All notable changes to warden are documented here. The format follows
   them from domain coverage too, inflating it. Their 80% domain minimum still
   applies.
 
-### Security
-
-- **`WARDEN_VERSION` could redirect an install to another GitHub repository**
-  (#148). All three installers interpolated the version straight into the
-  download URL, so a value of `../../../../someone/else/releases/download/v1`
-  traversed out of this repo's path: both the archive *and* `checksums.txt`
-  then resolved to `github.com/someone/else`. The checksum step could not catch
-  it, because it verified the download against a `checksums.txt` fetched from
-  the same redirected base — confirming the attacker's file matched the
-  attacker's digest. The host stays pinned to `github.com` by the literal URL
-  prefix, so this is a wrong-repository fetch rather than an arbitrary-origin
-  one, and reaching it requires control of the environment the installer runs
-  in. It should still never have been reachable.
-
-  All three now validate the version against a release-tag pattern before it
-  touches a URL, after the `latest` lookup so the resolved tag is checked too:
-  `scripts/install.sh`, `scripts/install.ps1` and
-  `.github/actions/install-warden.sh`.
-
-  Two anchoring traps were found while testing the fix rather than after
-  shipping it. `grep` matches line by line, so `^…$` accepted `v0.20.4\nid` on
-  its first line while the second still reached the URL — the shell guard
-  therefore rejects the character alphabet before checking the shape. And .NET's
-  `$` also matches before a trailing newline, so the PowerShell guard anchors
-  with `\z`.
-
-### Added
 
 - **The shipped installers are now covered by the Go suite** (#148),
   `scripts/version_guard_test.go`. It executes the real scripts — a test
@@ -88,6 +142,19 @@ All notable changes to warden are documented here. The format follows
 
 ### Changed
 
+- **A push warden performed itself now exits `3`, not `1`** (#144). That case is a
+  *success* — the commits are on the remote — and it shared an exit code with "the
+  gate rejected your change", making the most common successful outcome
+  indistinguishable from a rejection. Git does not propagate a hook's exit status,
+  so this is for what calls warden directly: retry wrappers, CI, and the agent
+  surfaces. **If you have a wrapper keying on `1`, treat `3` as success.**
+
+- **`blocker` and `retryable` reach the agent surfaces** (#146). The domain has
+  distinguished "the machine was not ready" from "your change is wrong" since the
+  exit-code split; the agent surfaces dropped it, leaving an agent to infer
+  whether to retry by parsing English.
+
+
 - The CI-gate pin example is documented against a pin that will not rot (#139),
   and `actions/checkout` is bumped to v7.0.1 (#138).
 
@@ -99,7 +166,38 @@ All notable changes to warden are documented here. The format follows
   `go.sum` hashes the whole module graph, so it lists modules that reach warden
   only through other modules' requirements and are never compiled in.
 
+### Removed
+
+- **44 dead entries pruned from the nox baseline** (#145), which was written in
+  July against nox 1.7.1 and had drifted badly by 1.24.0: two thirds of it
+  matched nothing in a current scan, including 28 `high` and 2 `critical`
+  suppressions for findings that no longer exist. Dead suppressions are not
+  inert — they make the baseline unreadable, and a reviewer cannot tell an
+  accepted risk from a fingerprint that rotted.
+
+  The 18 findings added in their place were each read before being accepted
+  rather than bulk-approved: fake SHAs and fixture email addresses in
+  `_test.go` files, plus `workflow_dispatch` on the release workflow, which is
+  deliberate and documented in the workflow itself.
+
+  The one `high` the baseline carries — `TAINT-006`, `WARDEN_VERSION` reaching
+  `Invoke-WebRequest` in `scripts/install.ps1` — was re-examined here and kept,
+  then **fixed outright in #148 above**. Its entry is retained because a taint
+  analyzer cannot see that a regex constrains the value, so it now suppresses a
+  mitigated flow rather than an accepted one.
+
+- **Three stale release-notes files** (`docs/release-notes-v0.6.0.md`,
+  `v0.7.0`, `v0.7.1`) from thirteen releases ago. Nothing linked to them, no
+  release since 0.7.1 produced one, and their content is in this file.
+
 ### Fixed
+
+- **An SSH-signed note reported an empty signer** (#155). `SignerFingerprint`
+  called the ed25519 fingerprint function unconditionally, so the note was
+  verifiable but impossible to pin or roster — which removes the only reason to
+  sign with an SSH key.
+
+
 
 - **Five doc comments described the wrong function** (#141). Inserting a
   function between an existing comment and its declaration leaves the comment
@@ -127,29 +225,41 @@ All notable changes to warden are documented here. The format follows
   guard's tests — an env override asserting *absence* has to clear the variable
   explicitly.
 
-### Removed
+### Security
 
-- **44 dead entries pruned from the nox baseline** (#145), which was written in
-  July against nox 1.7.1 and had drifted badly by 1.24.0: two thirds of it
-  matched nothing in a current scan, including 28 `high` and 2 `critical`
-  suppressions for findings that no longer exist. Dead suppressions are not
-  inert — they make the baseline unreadable, and a reviewer cannot tell an
-  accepted risk from a fingerprint that rotted.
+- **Two nox findings resolved** (#158, #155). An entropy rule flagged the Go
+  expression `domain.PrePush.ConfigKey(` as a possible secret key, and
+  `GO-2026-5932` surfaced once `x/crypto` became a direct dependency for SSHSIG
+  verification. Both are baselined with a recorded reason rather than reworded:
+  the first is a method call that cannot be renamed for a scanner's benefit, and
+  the second is unreachable — `x/crypto/openpgp` is not linked, govulncheck
+  confirms it, and no fixed version exists because the advisory is that the
+  package is unmaintained by design.
 
-  The 18 findings added in their place were each read before being accepted
-  rather than bulk-approved: fake SHAs and fixture email addresses in
-  `_test.go` files, plus `workflow_dispatch` on the release workflow, which is
-  deliberate and documented in the workflow itself.
 
-  The one `high` the baseline carries — `TAINT-006`, `WARDEN_VERSION` reaching
-  `Invoke-WebRequest` in `scripts/install.ps1` — was re-examined here and kept,
-  then **fixed outright in #148 above**. Its entry is retained because a taint
-  analyzer cannot see that a regex constrains the value, so it now suppresses a
-  mitigated flow rather than an accepted one.
+- **`WARDEN_VERSION` could redirect an install to another GitHub repository**
+  (#148). All three installers interpolated the version straight into the
+  download URL, so a value of `../../../../someone/else/releases/download/v1`
+  traversed out of this repo's path: both the archive *and* `checksums.txt`
+  then resolved to `github.com/someone/else`. The checksum step could not catch
+  it, because it verified the download against a `checksums.txt` fetched from
+  the same redirected base — confirming the attacker's file matched the
+  attacker's digest. The host stays pinned to `github.com` by the literal URL
+  prefix, so this is a wrong-repository fetch rather than an arbitrary-origin
+  one, and reaching it requires control of the environment the installer runs
+  in. It should still never have been reachable.
 
-- **Three stale release-notes files** (`docs/release-notes-v0.6.0.md`,
-  `v0.7.0`, `v0.7.1`) from thirteen releases ago. Nothing linked to them, no
-  release since 0.7.1 produced one, and their content is in this file.
+  All three now validate the version against a release-tag pattern before it
+  touches a URL, after the `latest` lookup so the resolved tag is checked too:
+  `scripts/install.sh`, `scripts/install.ps1` and
+  `.github/actions/install-warden.sh`.
+
+  Two anchoring traps were found while testing the fix rather than after
+  shipping it. `grep` matches line by line, so `^…$` accepted `v0.20.4\nid` on
+  its first line while the second still reached the URL — the shell guard
+  therefore rejects the character alphabet before checking the shape. And .NET's
+  `$` also matches before a trailing newline, so the PowerShell guard anchors
+  with `\z`.
 
 ## [0.20.4] — 2026-07-27
 
