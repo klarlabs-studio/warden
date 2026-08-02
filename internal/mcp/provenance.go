@@ -85,10 +85,10 @@ type AuditOutput struct {
 	// out of scope, not violations.
 	Adoption string `json:"adoption"`
 	Branch   string `json:"branch"`
-	// Verified counts commits carrying a note; Intact, those whose chain also
+	// Verified counts commits whose note ATTESTS them; Defective, those carrying
 	// verified; Unverified, those with no note at all.
 	Verified   int `json:"verified"`
-	Intact     int `json:"intact"`
+	Defective  int `json:"defective"`
 	Unverified int `json:"unverified"`
 	// Reattestable counts the unverified commits a tree-identical validated
 	// commit can vouch for — the recoverable share of the gap (the squash-merge
@@ -224,12 +224,12 @@ func newVerifyOutput(sha string, r ProvenanceRecord) VerifyOutput {
 // the tallies here so every caller reports the same numbers rather than each
 // re-deriving them.
 func newAuditOutput(rep domain.AuditReport) AuditOutput {
-	verified, intact, unverified := rep.Counts()
+	verified, defective, unverified := rep.Counts()
 	out := AuditOutput{
 		Adoption:     rep.Adoption,
 		Branch:       rep.Branch,
 		Verified:     verified,
-		Intact:       intact,
+		Defective:    defective,
 		Unverified:   unverified,
 		Reattestable: len(rep.Reattestable()),
 		Commits:      make([]AuditCommit, 0, len(rep.Commits)),

@@ -63,8 +63,11 @@ type auditExport struct {
 }
 
 type auditSummary struct {
-	Verified   int `json:"verified"`
-	Intact     int `json:"intact"`
+	Verified int `json:"verified"`
+	// Defective counts commits whose note does NOT attest them. Renamed from
+	// "intact": the value now counts the failures, not the successes, and a field
+	// that kept the old name would invert its own meaning for every consumer.
+	Defective  int `json:"defective"`
 	Unverified int `json:"unverified"`
 }
 
@@ -87,22 +90,25 @@ type auditCommit struct {
 // printAuditJSON marshals the report into the export shape. generated_at is a
 // wall-clock stamp (there is no injected clock); tests tolerate its value.
 func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
-	verified, intact, unverified := r.Counts()
+	verified, defective, unverified := r.Counts()
 	export := auditExport{
 		Branch:      r.Branch,
 		Adoption:    r.Adoption,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Summary:     auditSummary{Verified: verified, Intact: intact, Unverified: unverified},
+		Summary:     auditSummary{Verified: verified, Defective: defective, Unverified: unverified},
 		Commits:     make([]auditCommit, 0, len(r.Commits)),
 	}
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		export.Commits = append(export.Commits, auditCommit{
-			SHA:              c.SHA,
-			Author:           c.Author,
-			Date:             c.Date,
-			Subject:          c.Subject,
-			Validated:        c.HasNote,
+			SHA:     c.SHA,
+			Author:  c.Author,
+			Date:    c.Date,
+			Subject: c.Subject,
+			// Validated means the note ATTESTS this commit, not merely that one
+			// exists. It was c.HasNote, so a commit whose note failed to attest it
+			// exported validated=true — in the compliance artifact, of all places.
+			Validated:        c.ChainIntact,
 			ChainIntact:      c.ChainIntact,
 			RunID:            c.RunID,
 			Steps:            c.Steps,
@@ -143,9 +149,8 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
-	verified, intact, unverified := r.Counts()
-	_, _ = fmt.Fprintf(w, "summary: %d verified (%d chain-intact), %d unverified since adoption\n",
-		verified, intact, unverified)
+	verified, defective, unverified := r.Counts()
+	_, _ = fmt.Fprint(w, summaryLine("summary: ", verified, defective, unverified))
 }
 
 // printAuditMarkdown renders a table plus a summary line, suitable for pasting
@@ -170,7 +175,6 @@ func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
 		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s |\n",
 			short(c.SHA), c.Date, truncate(c.Subject, 40), status, run)
 	}
-	verified, intact, unverified := r.Counts()
-	_, _ = fmt.Fprintf(w, "\n**Summary:** %d verified (%d chain-intact), %d unverified since adoption.\n",
-		verified, intact, unverified)
+	verified, defective, unverified := r.Counts()
+	_, _ = fmt.Fprint(w, "\n**Summary:** "+summaryLine("", verified, defective, unverified))
 }

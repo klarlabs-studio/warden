@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -175,6 +177,7 @@ type fleetCounts struct {
 	Reattestable   int  `json:"reattestable"`
 	Unattributable int  `json:"unattributable"`
 	Unpushed       int  `json:"unpushed"`
+	Defective      int  `json:"defective"`
 }
 
 // A multi-commit push: warden validates ONE tree — the tip's — and vouches for
@@ -258,7 +261,7 @@ func TestGoldenFleet_BucketsAccountForEveryCommit(t *testing.T) {
 	g.git("push", "--no-verify", "origin", "main")
 
 	got := g.classify()
-	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable
+	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed + got.Defective
 	if sum != got.Commits {
 		t.Errorf("buckets sum to %d but there are %d commits since adoption (%+v)", sum, got.Commits, got)
 	}
@@ -290,7 +293,7 @@ func TestGoldenFleet_ARepoThatNeverPushedIsNotBypassed(t *testing.T) {
 	if got.Unpushed != 3 {
 		t.Errorf("unpushed = %d, want 3: the commits must be positively accounted for, not merely uncounted", got.Unpushed)
 	}
-	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed
+	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed + got.Defective
 	if sum != got.Commits {
 		t.Errorf("buckets sum to %d but there are %d commits (%+v)", sum, got.Commits, got)
 	}
@@ -353,6 +356,52 @@ func TestGoldenFleet_AttestOnlyLeavesTheBranchAlone(t *testing.T) {
 	}
 	if got := g.revParse("refs/remotes/origin/main"); got != remote {
 		t.Errorf("origin/main moved from %s to %s: --attest-only must not push", remote, got)
+	}
+}
+
+// The RENDERED summary must account for every commit too, not just the JSON.
+//
+// TestGoldenFleet_BucketsAccountForEveryCommit reads the JSON report, so a
+// bucket that is tallied but never PRINTED passes it — which is exactly what
+// happened when Defective was added: the JSON balanced while the human line
+// showed 124 of 131 commits. The printed line is what people actually read, so
+// it needs its own guard.
+func TestGoldenFleet_RenderedSummaryAccountsForEveryCommit(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("gated one")
+	g.commit("gated two")
+	g.gate()
+	g.commit("bypassed")
+	g.git("push", "--no-verify", "origin", "main")
+
+	out, _ := g.warden("fleet", "status", g.dir)
+	counts := g.classify()
+
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "commits since adoption:") {
+			line = l
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("no summary line in fleet output:\n%s", out)
+	}
+	// Sum every "<n> <bucket>" pair in the line, so a bucket added to the report
+	// and forgotten in the renderer reads as a shortfall rather than as nothing.
+	sum := 0
+	pairs := regexp.MustCompile(`(\d+) (verified|covered by a gated push|bypassed|reattestable|unattributable|unpushed|with a defective note)`)
+	for _, m := range pairs.FindAllStringSubmatch(line, -1) {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("unparsable count %q in %q", m[1], line)
+		}
+		sum += n
+	}
+	if sum != counts.Commits {
+		t.Errorf("the printed summary accounts for %d commits but there are %d\n  line: %s\n  json: %+v",
+			sum, counts.Commits, line, counts)
 	}
 }
 

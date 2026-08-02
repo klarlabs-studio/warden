@@ -83,8 +83,8 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
-	verified, intact, unverified := r.Counts()
-	_, _ = fmt.Fprintf(w, "%d verified (%d chain-intact), %d unverified since adoption\n", verified, intact, unverified)
+	verified, defective, unverified := r.Counts()
+	_, _ = fmt.Fprint(w, summaryLine("", verified, defective, unverified))
 	if r.NeverPushed {
 		_, _ = fmt.Fprintf(w, "branch %s has no remote-tracking ref: nothing here has been pushed, so the\n"+
 			"pre-push gate that writes the note has never run. These are not bypasses.\n", r.Branch)
@@ -93,6 +93,21 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 		_, _ = fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
 			"  warden reattest --all --branch %s --push\n", n, unverified, r.Branch)
 	}
+}
+
+// summaryLine renders the counts line shared by doctor and audit.
+//
+// "verified" now means the note ATTESTS the commit, not merely that one exists.
+// A defective note is called out separately rather than folded into verified
+// with a parenthetical: `warden verify` refuses those commits outright, and a
+// summary that calls them verified is the tool contradicting itself on the one
+// line most readers stop at.
+func summaryLine(prefix string, verified, defective, unverified int) string {
+	s := fmt.Sprintf("%s%d verified, %d unverified since adoption", prefix, verified, unverified)
+	if defective > 0 {
+		s += fmt.Sprintf(" (%d of them carry a note that does not attest the commit)", defective)
+	}
+	return s + "\n"
 }
 
 // noteDefectLabel renders why a note failed to attest its commit.

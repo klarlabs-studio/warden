@@ -6,6 +6,36 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **"verified" now means the note attests the commit, not merely that one
+  exists.** `Counts()` reported every commit carrying a note as verified, with
+  the failures relegated to a parenthetical. So a commit whose note does not
+  attest it — one `warden verify` refuses outright — was counted as verified in
+  the summary line, in `warden audit --format=json`'s `validated` field, and in
+  the MCP/axi payloads an agent reads.
+
+  That is the tool contradicting itself about the same commit, on the line most
+  readers stop at. On this repo it was 7 of 88.
+
+  `Counts()` now returns `(verified, defective, unverified)`, where unverified
+  deliberately INCLUDES defective — `doctor` gates its exit code on it, and a
+  repo whose notes no longer attest anything is exactly a repo that should be
+  flagged. **Breaking for consumers:** the `intact` field is now `defective` in
+  the audit JSON, the MCP `AuditOutput`, and the axi payload; it counts the
+  failures rather than the successes, so a field that kept the old name would
+  invert its own meaning. `audit --format=json`'s per-commit `validated` is now
+  the attestation result rather than "has a note".
+
+- **`fleet status` printed a summary that did not add up.** The new `Defective`
+  bucket was tallied in the JSON but never rendered, so the human line accounted
+  for 124 of 131 commits — the same shape as the dropped-bucket bug in 0.21.2,
+  in the other direction.
+
+  `TestGoldenFleet_BucketsAccountForEveryCommit` could not catch it: it reads the
+  JSON report, which balanced. A new e2e now parses the RENDERED line and sums
+  it, because that is the artifact people actually read.
+
 ## [0.22.0] — 2026-08-02
 
 A minor rather than a patch, for one reason: **`warden verify <sha>` now exits 2

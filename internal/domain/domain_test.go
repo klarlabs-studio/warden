@@ -157,9 +157,17 @@ func TestAuditReport_Counts(t *testing.T) {
 		{HasNote: true, ChainIntact: false},
 		{HasNote: false},
 	}}
-	v, i, u := r.Counts()
-	if v != 2 || i != 1 || u != 1 {
-		t.Errorf("Counts = %d,%d,%d want 2,1,1", v, i, u)
+	// verified counts only the note that ATTESTS its commit. The middle commit's
+	// note does not, so it is defective — and counts as unverified too, because
+	// "unverified" means everything not verified and doctor gates its exit code
+	// on it.
+	//
+	// This asserted 2,1,1 back when "verified" merely meant "has a note".
+	// `warden verify` refuses that middle commit outright, so reporting it as
+	// verified had the audit contradicting the verifier about the same commit.
+	v, d, u := r.Counts()
+	if v != 1 || d != 1 || u != 2 {
+		t.Errorf("Counts = %d,%d,%d want 1,1,2 (verified, defective, unverified)", v, d, u)
 	}
 }
 
