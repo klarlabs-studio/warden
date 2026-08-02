@@ -335,6 +335,34 @@ func TestGoldenFleet_AttestOnlyClosesTheForgeMergeGap(t *testing.T) {
 	}
 }
 
+// A passing --attest-only run must exit 0 and must not claim it pushed.
+//
+// This is the interface, and it is what actually broke in production. The two
+// tests around it assert the EFFECT — the branch does not move, the commit
+// stops being a bypass — and both passed while the run exited 3 ("passed;
+// warden performed the push") about a commit warden never touched. Exit 3
+// failed the CI step, so the note was written and then never published: the
+// gate passed and the commit stayed unattested.
+//
+// Asserting the effect is not enough when a caller keys on the exit code.
+func TestGoldenFleet_AttestOnlyExitsZeroAndClaimsNoPush(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("merged by the forge")
+	g.git("push", "--no-verify", "origin", "main")
+
+	out, code := g.warden("run", "pre-push", "--attest-only")
+	if code != 0 {
+		t.Errorf("exit = %d, want 0: --attest-only pushes nothing, so there is no stale push for git to stand down from\n%s", code, out)
+	}
+	if strings.Contains(out, "pushed") && !strings.Contains(out, "nothing pushed") {
+		t.Errorf("output claims a push that did not happen:\n%s", out)
+	}
+	if !strings.Contains(out, "attested") {
+		t.Errorf("a passing attest-only run should say what it DID (attest), got:\n%s", out)
+	}
+}
+
 // --attest-only must not move the branch. The branch is already published —
 // that is what triggered the job — and pushing from CI would race the next human
 // push and fail on a stale ref.

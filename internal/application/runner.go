@@ -50,7 +50,13 @@ type RunResult struct {
 	// report the push honestly, instead of having to fail on purpose and warn
 	// the developer to ignore git's resulting `error:` line (#89).
 	GitCompletesPush bool
-	Message          string
+	// AttestOnly echoes Settings.AttestOnly so delivery can tell a run that
+	// deliberately pushed nothing from one that pushed and needs git to stand
+	// down. Without it a passing attest-only run exited 3 — "warden performed the
+	// push" — about a commit warden never touched, failing the CI step and
+	// leaving the note written but unpublished.
+	AttestOnly bool
+	Message    string
 	// Warnings are non-fatal notices the run wants the developer to see —
 	// currently only a WARDEN_ALLOW_DISCARD override naming the commits it
 	// force-pushed over. Kept out of Message so the verdict line stays the
@@ -484,13 +490,14 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			_ = r.Git.PushNotes(r.Settings.Remote)
 		}
 	}
-	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes)
+	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes, r.Settings.AttestOnly)
 	if err := run.MarkPushed(*record, msg); err != nil {
 		return RunResult{}, err
 	}
 
 	res := r.result(run, "")
 	res.GitCompletesPush = gitCompletes
+	res.AttestOnly = r.Settings.AttestOnly
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
 	}
@@ -803,9 +810,23 @@ func (r *Runner) newRun(hook domain.Hook, resolved domain.ResolvedPolicy, branch
 // A delegating run makes no claim: git is about to report that push itself, and
 // warden asserting it first would be a second account of the same event, and a
 // false one if git's push then fails.
-func pushedMessage(sha, remote, branch string, gitCompletes bool) string {
+func pushedMessage(sha, remote, branch string, gitCompletes, attestOnly bool) string {
 	if gitCompletes {
 		return "gate passed; git is completing the push"
+	}
+	// --attest-only pushes nothing. Reporting "pushed X to origin/main" here said
+	// warden had done something it deliberately had not — and it said it about a
+	// commit the FORGE created, which is the one case this mode exists for. The
+	// note is the whole output of an attest-only run, so that is what to name.
+	if attestOnly {
+		short := sha
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		if short == "" {
+			short = "the merged commit"
+		}
+		return "gate passed; attested " + short + " (--attest-only: nothing pushed)"
 	}
 	short := sha
 	if len(short) > 12 {

@@ -79,7 +79,15 @@ func exitForBlocker(b domain.Blocker) int {
 //	1 / 75 / 78        the gate reached a verdict, or could not run
 func prePushExitCode(res application.RunResult) int {
 	if res.Outcome == domain.OutcomePassed {
-		if res.GitCompletesPush {
+		// exit 3 exists to stop git racing a push warden already performed. An
+		// --attest-only run performs NO push, so there is nothing to stand down
+		// and nothing stale to guard against: a pass is a plain success.
+		//
+		// Returning 3 here failed the CI step that runs it, which meant the note
+		// was written and then never published — the gate passed and the commit
+		// stayed unattested. It also claimed, in the exit code itself, that warden
+		// had pushed a commit the forge created.
+		if res.AttestOnly || res.GitCompletesPush {
 			return 0
 		}
 		return exitWardenPushed
