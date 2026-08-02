@@ -46,6 +46,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdVerify(rest, stdout, stderr)
 	case "attest":
 		return cmdAttest(rest, stdout, stderr)
+	case "attest-external":
+		return cmdAttestExternal(rest, stdout, stderr)
 	case "reattest":
 		return cmdReattest(rest, stdout, stderr)
 	case "key":
