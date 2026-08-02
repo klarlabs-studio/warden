@@ -256,6 +256,15 @@
       "severity": "info",
       "reason": "GO-2026-5932 (x/crypto openpgp unmaintained). NOT REACHABLE: warden imports only x/crypto/ssh for SSHSIG verification; x/crypto/openpgp appears 0 times in the dependency graph and govulncheck confirms \"your code doesn't appear to call these\". No fixed version exists — v0.54.0 is latest and the advisory is that the package is unmaintained by design, not a fixable defect. Re-evaluate if warden ever imports openpgp, or if the advisory is superseded.",
       "created_at": "2026-08-01T13:13:06.595749Z"
+    },
+    {
+      "fingerprint": "603d6538d4e71b7d4058db610cfc0e512f84f3e7f587695a04148e49e25895f7",
+      "rule_id": "IAC-314",
+      "file_path": ".github/workflows/provenance-main.yml",
+      "severity": "medium",
+      "reason": "Required capability, not an oversight: the provenance-main job pushes refs/notes/warden, which needs contents:write. No variant avoids it — a deploy key or PAT only relocates the credential and adds a second standing secret. Scoped as tightly as GHA allows: workflow-level permissions are {} and the write is granted on the single attest job, which never touches a branch (--attest-only).",
+      "owner": "klarlabs-studio",
+      "created_at": "2026-08-02T07:19:19.548248Z"
     }
   ]
 }

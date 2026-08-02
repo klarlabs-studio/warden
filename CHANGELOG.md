@@ -6,6 +6,39 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`warden run pre-push --attest-only`, and a post-merge CI workflow using it.**
+  warden's gate is client-side pre-push, so it can only note commits it pushed.
+  Anything the forge creates on its own — a GitHub squash-merge, a web edit, a
+  merged Dependabot PR — is a new commit object warden never saw, and it lands on
+  the default branch carrying no proof at all.
+
+  Not hypothetical: on the fleet this was measured against, **every one of the
+  eleven remaining "bypassed" commits across three repositories was committed by
+  GitHub**, not by a person evading anything. The pre-push gate was never in that
+  path and could not have been.
+
+  `--attest-only` runs the configured steps against the merged tree and writes the
+  note, but does **not** move or push the branch — pushing from CI would race the
+  next human push and fail on a stale ref, and the branch is already published by
+  the trigger. It refuses outright if a step rewrites the tree: the note binds to
+  HEAD, so attesting a rewritten tree would claim the checks passed on a tree they
+  never saw.
+
+  `.github/workflows/provenance-main.yml` wires it to `push: main`. It skips
+  commits that already carry a note (so it fires only for the forge-created gap),
+  serialises against itself, and **refuses to attest when `WARDEN_SIGNING_KEY` is
+  unset** — warden's signer mints a fresh keypair when it finds no key, so an
+  unguarded run would write notes signed by a throwaway signer that dies with the
+  runner. Those commits would read as attested while being signed by nobody
+  trusted, which manufactures provenance rather than recording it.
+
+  This is the SLSA model: the attestation of record is produced by CI, against the
+  exact tree that landed, on infrastructure the author does not control. The
+  long-lived signing secret is the weak part and is named as such — keyless OIDC
+  (sigstore/Fulcio) is the right answer, still tracked as ADR-0002 Phase 2.5.
+
 ### Fixed
 
 - **Commands no longer silently answer a question other than the one asked.**

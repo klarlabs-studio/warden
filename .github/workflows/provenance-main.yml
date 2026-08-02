@@ -1,0 +1,135 @@
+# Post-merge provenance: attest the commit that actually landed.
+#
+# warden's gate is client-side pre-push, so it can only note commits it pushed.
+# Anything the forge creates on its own — a GitHub squash-merge, a web edit, a
+# merged Dependabot PR — is a new commit object warden never saw, and it lands on
+# main carrying no proof at all.
+#
+# That is not a theory. On the fleet this workflow was written for, EVERY ONE of
+# the eleven remaining "bypassed" commits across three repositories was committed
+# by GitHub, not by a person evading anything. The pre-push gate was never in
+# that path and could not have been.
+#
+# This closes the gap the way SLSA says to: the attestation of record is produced
+# by CI, against the exact tree that landed, on infrastructure the author does
+# not control — rather than asserted by a laptop about a commit that no longer
+# exists after the squash.
+name: provenance-main
+
+on:
+  push:
+    branches: [main]
+
+# Serialise: two of these racing would both push refs/notes/warden and one would
+# lose. Do NOT cancel in progress — an attestation abandoned half-way just leaves
+# the commit unattested, which is the thing being fixed.
+concurrency:
+  group: provenance-main
+  cancel-in-progress: false
+
+# Default to nothing, and grant the write on the single job that needs it. The
+# only thing this workflow writes is refs/notes/warden; it never touches a branch
+# (see --attest-only below), so the token's reach is one notes ref wider than
+# read-only and no more.
+permissions: {}
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push refs/notes/warden — nothing else
+    steps:
+      # warden reads its signing key from <WARDEN_CONFIG_DIR>/signing.key. Set
+      # here rather than in job-level `env:` because the runner context is not
+      # available there. Deliberately OUTSIDE the workspace: a key directory
+      # inside the repo would be an untracked file in the very tree warden is
+      # about to gate.
+      - name: Locate the warden config dir
+        run: echo "WARDEN_CONFIG_DIR=${RUNNER_TEMP}/warden" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # notes and history both ride on the full clone
+
+      - name: Install warden
+        run: bash .github/actions/install-warden.sh
+        env:
+          WARDEN_VERSION: latest
+
+      - name: Fetch existing notes
+        run: git fetch origin 'refs/notes/warden:refs/notes/warden' || true
+
+      # The signing key must come from the secret. If it is absent, warden's
+      # signer GENERATES a fresh keypair — so an unguarded run would write notes
+      # signed by a throwaway key that is discarded when the runner dies. Those
+      # commits would read as signed-and-attested while being signed by nobody
+      # trusted, which is a worse failure than leaving them unattested: it
+      # manufactures provenance instead of recording it.
+      #
+      # A long-lived secret is the weak part of this design, and is deliberately
+      # named as such. Keyless OIDC (sigstore/Fulcio) is the right answer and is
+      # tracked as ADR-0002 Phase 2.5; until then this is a real improvement on an
+      # unsigned note, not the end state.
+      - name: Configure the signing key
+        id: key
+        env:
+          WARDEN_SIGNING_KEY: ${{ secrets.WARDEN_SIGNING_KEY }}
+        run: |
+          if [ -z "${WARDEN_SIGNING_KEY}" ]; then
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::WARDEN_SIGNING_KEY is not set — skipping attestation." \
+                 "Without it warden would mint an ephemeral key and write notes signed by" \
+                 "a signer nobody trusts. Add the secret (base64 ed25519 seed, see" \
+                 "'warden key show') and put its fingerprint in .warden.yaml trusted_keys."
+            exit 0
+          fi
+          echo "have_key=true" >> "$GITHUB_OUTPUT"
+          mkdir -p "${WARDEN_CONFIG_DIR}"
+          chmod 700 "${WARDEN_CONFIG_DIR}"
+          printf '%s' "${WARDEN_SIGNING_KEY}" > "${WARDEN_CONFIG_DIR}/signing.key"
+          chmod 600 "${WARDEN_CONFIG_DIR}/signing.key"
+
+      # A commit warden itself pushed already carries its note. Re-attesting it
+      # would burn a full CI run rewriting a record that already exists, so skip.
+      # This is also what keeps the job cheap: it fires only for forge-created
+      # commits, which is exactly the gap it exists to close.
+      - name: Skip if already attested
+        id: check
+        if: steps.key.outputs.have_key == 'true'
+        run: |
+          if warden verify --commit "${GITHUB_SHA}" --quiet; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_SHA} already carries provenance; nothing to do."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --attest-only runs the configured pre-push steps against the merged tree
+      # and writes the note, but does NOT move or push the branch. Pushing from
+      # here would race the next human push and fail on a stale ref, and there is
+      # nothing to publish that this job's own trigger did not already publish.
+      #
+      # It refuses outright if a step rewrites the tree: the note binds to HEAD,
+      # so attesting a rewritten tree would claim the checks passed on a tree they
+      # never saw. In CI the steps must be checks, not formatters.
+      - name: Gate and attest the merged commit
+        if: steps.key.outputs.have_key == 'true' && steps.check.outputs.already == 'false'
+        run: warden run pre-push --attest-only
+
+      - name: Publish the note
+        if: steps.key.outputs.have_key == 'true' && steps.check.outputs.already == 'false'
+        run: git push origin 'refs/notes/warden:refs/notes/warden'
+
+      # The key is a secret on disk; the runner is ephemeral, but leaving it for
+      # later steps to read is gratuitous.
+      - name: Remove the signing key
+        if: always()
+        run: rm -rf "${WARDEN_CONFIG_DIR}"
+
+      # Coverage of main after the fact. This is the number that says whether the
+      # scheme is working. It never fails the job: a historical gap is not this
+      # commit's fault, and a red check for someone else's old commit is how a
+      # useful signal gets ignored.
+      - name: Report coverage
+        if: always()
+        run: warden doctor || true

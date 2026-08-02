@@ -17,6 +17,20 @@ import (
 // worktree seeding and the fast-forward-back, aborting the push (§4.3).
 var ErrBranchMoved = errors.New("branch moved during run")
 
+// ErrRewriteUnderAttestOnly is returned when a step rewrote the tree during an
+// --attest-only run. The note binds to the repository's HEAD, so attesting a
+// rewritten tree would claim the checks passed on a tree they never saw — and
+// unlike the normal path there is no branch to carry the fix onto.
+var ErrRewriteUnderAttestOnly = errors.New("tree rewritten during an attest-only run")
+
+// short12 abbreviates a SHA for a message without pulling in a delivery helper.
+func short12(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 // RunResult is the application's output DTO for a completed run, projected from
 // the domain Run aggregate plus delivery-specific extras (the pre-commit fix
 // patch). The domain owns the outcome; this is just its read model.
@@ -82,6 +96,21 @@ type Runner struct {
 type Settings struct {
 	Version string
 	Remote  string
+	// AttestOnly runs the full gate and writes the provenance note, but does not
+	// move or push the branch.
+	//
+	// This is the CI-side mode. warden's gate is client-side pre-push, so a
+	// commit the forge creates on its own — a GitHub squash-merge, a web edit, a
+	// merged Dependabot PR — can never carry a note: warden was never in that
+	// path. Measured across one fleet, every remaining "bypass" was exactly that:
+	// eleven commits, all committed by GitHub, none of them a person evading
+	// anything.
+	//
+	// A post-merge CI job closes that gap by running the checks against the
+	// merged tree and attesting THAT commit. It must not push: the branch is
+	// already published — it is what triggered the job — and a gate that pushed
+	// from CI would race the next human push and fail on a stale ref.
+	AttestOnly bool
 }
 
 // Run executes the pipeline for hook against the repository.
@@ -344,6 +373,27 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		finalSHA, err := wt.HeadSHA()
 		if err != nil {
 			return domain.StepResult{}, err
+		}
+		// AttestOnly stops here: the checks have run against this tree and the
+		// note is written below, but the branch is already where it belongs. See
+		// Settings.AttestOnly — moving or pushing it from CI would race the next
+		// human push, and there is nothing to publish that the trigger did not
+		// already publish.
+		if r.Settings.AttestOnly {
+			// …with one refusal. The note is bound to the repository's HEAD, while
+			// the checks ran against the worktree. If a step rewrote the tree those
+			// are different commits, and writing the note anyway would attest that
+			// the checks passed on a tree they never saw — precisely the false claim
+			// this whole mode exists to avoid making. There is no branch to push the
+			// fix onto here, so the honest outcome is to fail.
+			repoHead, headErr := r.Git.HeadSHA()
+			if headErr == nil && repoHead != finalSHA {
+				return domain.StepResult{}, fmt.Errorf(
+					"%w: a step rewrote the tree (checked %s, HEAD is %s); "+
+						"--attest-only cannot attest a tree that is not the commit's",
+					ErrRewriteUnderAttestOnly, short12(finalSHA), short12(repoHead))
+			}
+			return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 		}
 		if err := r.Git.FastForwardTo(branch, finalSHA, seedTip); err != nil {
 			return domain.StepResult{}, fmt.Errorf("%w: %v", ErrBranchMoved, err)

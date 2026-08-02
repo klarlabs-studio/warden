@@ -96,12 +96,30 @@ func prePushExitCode(res application.RunResult) int {
 // See prePushExitCode.
 func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		_, _ = fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push>")
+		_, _ = fmt.Fprintln(stderr, "usage: warden run <pre-commit|pre-push> [--attest-only]")
 		return 2
 	}
 	hook, err := domain.ParseHook(args[0])
 	if err != nil {
 		return fail(stderr, err)
+	}
+	// --attest-only is the CI post-merge mode: gate the merged tree and write the
+	// note, but leave the branch alone. Parsed by hand rather than through a
+	// FlagSet because the hook name is positional and git invokes this with its
+	// own argv; a FlagSet here would have to tolerate that anyway.
+	attestOnly := false
+	for _, a := range args[1:] {
+		switch a {
+		case "--attest-only":
+			attestOnly = true
+		default:
+			_, _ = fmt.Fprintf(stderr, "warden: unknown argument %q; usage: warden run <pre-commit|pre-push> [--attest-only]\n", a)
+			return 2
+		}
+	}
+	if attestOnly && hook != domain.PrePush {
+		_, _ = fmt.Fprintln(stderr, "warden: --attest-only applies to pre-push (it is the hook that writes the note)")
+		return 2
 	}
 
 	// Git feeds a pre-push hook the refs being pushed on stdin; when the push
@@ -127,7 +145,8 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 
 	// A pre-push run on a real terminal gets the live TUI; the fast pre-commit
 	// path and non-interactive streams (CI, agents) print inline (§4.4).
-	if hook == domain.PrePush && isInteractive() {
+	// --attest-only is a CI mode and never wants the TUI.
+	if hook == domain.PrePush && isInteractive() && !attestOnly {
 		return runWithTUI(ctx, hook, stdout, stderr)
 	}
 
@@ -135,6 +154,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	svc.SetAttestOnly(attestOnly)
 
 	// A non-interactive pre-push still publishes to the attach socket, so another
 	// terminal can watch it with `warden attach`.
