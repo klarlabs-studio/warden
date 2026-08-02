@@ -103,3 +103,76 @@ func TestAttestExternal_RejectsPositionalArguments(t *testing.T) {
 		t.Errorf("code=%d err=%q", code, errb)
 	}
 }
+
+// End to end through the CLI: attest a commit, then verify it under each
+// policy. This is the whole feature in one test — a commit gets an attestation
+// naming the run that did the work, and `verify` accepts it only on opt-in.
+func TestAttestExternal_AttestsAndIsAcceptedOnlyOnOptIn(t *testing.T) {
+	gitRepo(t)
+	if code, _, errb := run("init", "--hooks=pre-push"); code != 0 {
+		t.Fatalf("init: %d %s", code, errb)
+	}
+
+	code, out, errb := run("attest-external",
+		"--checks", "lint,test",
+		"--provider", "github-actions",
+		"--run-id", "30747937107",
+		"--repository", "klarlabs-studio/warden")
+	if code != 0 {
+		t.Fatalf("attest-external: %d out=%q err=%q", code, out, errb)
+	}
+	if !strings.Contains(out, "attested") || !strings.Contains(out, "lint, test") {
+		t.Errorf("output must name what it attested and which checks: %q", out)
+	}
+	// Not published unless asked, and it says which.
+	if !strings.Contains(out, "not published") {
+		t.Errorf("a run without --push must say the note is unpublished: %q", out)
+	}
+
+	// Default policy refuses it…
+	if code, _, _ := run("verify"); code == 0 {
+		t.Error("plain verify must not accept an external attestation")
+	}
+	// …and says why, rather than reporting a missing note.
+	_, vout, _ := run("verify")
+	if !strings.Contains(vout, "EXTERNAL") {
+		t.Errorf("the refusal must name the reason: %q", vout)
+	}
+	// Opting in accepts it.
+	if code, vout, verr := run("verify", "--allow-external"); code != 0 {
+		t.Errorf("--allow-external must accept it: %d out=%q err=%q", code, vout, verr)
+	}
+}
+
+// Re-attesting an already-attested commit is a no-op, not an overwrite. A CI job
+// that re-runs must not replace the record of what happened the first time.
+func TestAttestExternal_SecondRunIsANoOp(t *testing.T) {
+	gitRepo(t)
+	if code, _, errb := run("init", "--hooks=pre-push"); code != 0 {
+		t.Fatalf("init: %d %s", code, errb)
+	}
+	args := []string{"attest-external", "--checks", "lint",
+		"--provider", "github-actions", "--run-id", "1", "--repository", "a/b"}
+	if code, _, errb := run(args...); code != 0 {
+		t.Fatalf("first attest: %d %s", code, errb)
+	}
+
+	code, out, _ := run(args...)
+	if code != 0 {
+		t.Errorf("a second attest must not be an error, got %d", code)
+	}
+	if !strings.Contains(out, "already carries an attestation") {
+		t.Errorf("it must say nothing was written: %q", out)
+	}
+}
+
+// A malformed --attempt is refused rather than silently dropped: it is part of
+// the run's identity, and a wrong attempt number points at the wrong run.
+func TestAttestExternal_RejectsANonNumericAttempt(t *testing.T) {
+	gitRepo(t)
+	code, _, errb := run("attest-external", "--checks", "lint", "--attempt", "two",
+		"--provider", "x", "--run-id", "1", "--repository", "a/b")
+	if code == 0 || !strings.Contains(errb, "not a number") {
+		t.Errorf("code=%d err=%q", code, errb)
+	}
+}
