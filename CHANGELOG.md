@@ -6,6 +6,50 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.1] — 2026-08-02
+
+### Fixed
+
+- **A `--attest-only` run that pushes nothing no longer exits "warden pushed".**
+  The post-merge gate ran green in CI — all five steps against the merged tree —
+  and the step still failed:
+
+  ```
+  warden: pushed ec0667e2aec1 to origin/main; local branch fast-forwarded
+  ##[error]Process completed with exit code 3
+  ```
+
+  Both halves are false. `--attest-only` pushes nothing, and that SHA is a commit
+  **GitHub** created on merge, which is the one case the mode exists for. Exit 3
+  means "passed; warden performed the push, git must stand down", so the CI step
+  failed, the publish step never ran, and the commit stayed unattested after a
+  gate that passed.
+
+  A passing attest-only run now exits 0 — there is no stale push to guard
+  against — and reports what it did: `attested <sha> (--attest-only: nothing
+  pushed)`.
+
+  The two end-to-end tests around this assert the EFFECT (the branch does not
+  move; the commit stops counting as a bypass) and both passed throughout,
+  including on the run that failed in production. Neither asserted the interface
+  a caller keys on. The new one does, and was verified to reproduce exit 3 with
+  only the fix reverted.
+
+- **`provenance-main.yml` installs the toolchain warden's own steps need.**
+  Installing warden was not enough: `pre_push` is
+  `[credentials, rebase, lint, security-scan, test]`, so on a bare runner `lint`
+  reported `step/missing-toolchain` and warden refused to attest a step that
+  never ran — the Blocker model working as designed. Go now comes from `go.mod`,
+  with `golangci-lint` and `nox` pinned alongside a note that the canonical pins
+  live centrally (#112). The nox install needs `GOTOOLCHAIN=auto`, scoped to that
+  step: nox requires a newer Go than warden targets, and `setup-go` pins
+  `GOTOOLCHAIN=local`.
+
+  This duplicates the shared CI's work on every merge to `main`. That cost buys
+  an attestation that re-ran the checks against the merged tree rather than
+  taking another workflow's word for it; removing it needs warden to attest an
+  EXTERNAL run, tracked in #177.
+
 ## [0.23.0] — 2026-08-02
 
 **A version-number correction, and the CI signer.**
