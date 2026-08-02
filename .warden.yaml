@@ -48,6 +48,7 @@ risk:
 trusted_keys:
   - 139e6eb9e2611c76   # felix — primary dev machine
   - b3746e61c4d49512   # recovery key — seed stored offline; restore into WARDEN_CONFIG_DIR to sign from a new machine
+  - 18df642847f69902   # CI — post-merge attestation (provenance-main.yml); a dedicated key, deliberately not a developer's, so `doctor` can still tell a human-gated commit from a CI-attested one
 rules:
   # Large changes on main get a human approval gate at push time.
   - match:
