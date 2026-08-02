@@ -297,7 +297,54 @@ func (r *Repo) PushNotes(remote string) error {
 	// --no-verify for the same reason as Push: a notes push would otherwise
 	// re-trigger the pre-push hook.
 	_, err := r.run("push", "--no-verify", remote, NotesRef+":"+NotesRef)
-	return err
+	if err == nil {
+		return nil
+	}
+	// A rejected notes push is usually non-fast-forward: something else wrote the
+	// ref since this clone last fetched it. That was rare while a developer's
+	// machine was the only writer. It is routine now that CI attests merge
+	// commits too (#186) — and the losing side's note stayed local forever, so
+	// the commit verified on one laptop and read as an ungated bypass everywhere
+	// else.
+	//
+	// Notes are per-object, so the overwhelmingly common case — this machine
+	// noted its commit, CI noted a different one — is a clean union with nothing
+	// to resolve. Reconcile and retry once.
+	return r.mergeAndRetryNotes(remote, err)
+}
+
+// notesIncomingRef is the scratch ref the remote's notes are fetched into. It
+// lives under refs/notes/ so `git notes merge` will accept it, and is removed
+// afterwards.
+const notesIncomingRef = "refs/notes/warden-incoming"
+
+// mergeAndRetryNotes reconciles a rejected notes push with the remote ref and
+// pushes again.
+//
+// pushErr — the ORIGINAL rejection — is carried into every error returned here,
+// because the recovery's own symptom is rarely the useful half of the story.
+func (r *Repo) mergeAndRetryNotes(remote string, pushErr error) error {
+	if _, err := r.run("fetch", "--force", remote, NotesRef+":"+notesIncomingRef); err != nil {
+		return fmt.Errorf("git: notes push rejected (%v), and the remote ref could not be fetched to reconcile: %w", pushErr, err)
+	}
+	defer func() { _, _ = r.run("update-ref", "-d", notesIncomingRef) }()
+
+	// git's DEFAULT strategy, on purpose: it unions non-overlapping notes and
+	// FAILS on a real conflict — two different attestations of the same commit.
+	// Resolving that automatically would mean silently discarding one side's
+	// record of a run that actually happened, which is not a decision a git hook
+	// should make on someone's behalf.
+	if _, err := r.run("notes", "--ref=warden", "merge", notesIncomingRef); err != nil {
+		// A failed notes merge leaves a partial worktree state that breaks the
+		// next attempt; clear it before returning.
+		_, _ = r.run("notes", "--ref=warden", "merge", "--abort")
+		return fmt.Errorf("git: notes push rejected (%v), and the remote holds a different note for a "+
+			"commit this run also attested — resolve refs/notes/warden by hand: %w", pushErr, err)
+	}
+	if _, err := r.run("push", "--no-verify", remote, NotesRef+":"+NotesRef); err != nil {
+		return fmt.Errorf("git: notes push still rejected after reconciling with the remote: %w", err)
+	}
+	return nil
 }
 
 // FetchNotes retrieves refs/notes/warden from remote, letting doctor verify

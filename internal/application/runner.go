@@ -494,11 +494,22 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			". It still proves the checks ran, but not WHO ran them — `warden verify --require-signed` will reject it. Set signing.required to fail instead."
 	}
 	var noteErr error
+	var notePushWarning string
 	if shaErr == nil {
 		// Note-push is best-effort in the GATE path: the push already happened, so
 		// failing the run now would block a developer over a side-channel (§9).
 		if noteErr = r.Git.WriteNote(finalSHA, *record); noteErr == nil {
-			_ = r.Git.PushNotes(r.Settings.Remote)
+			// Best-effort, but no longer SILENT. A note that reaches no remote is
+			// provenance nobody else can use: the commit verifies on this machine
+			// and reads as an ungated bypass everywhere else, including in the CI
+			// gate — which then accuses the author of something they did not do.
+			// Staying quiet about that was survivable while a developer's machine
+			// was the only writer of refs/notes/warden; CI is a second one now
+			// (#186).
+			if err := r.Git.PushNotes(r.Settings.Remote); err != nil {
+				notePushWarning = "provenance note written locally but NOT published: " + err.Error() +
+					". This commit will read as ungated to everyone else until the note reaches the remote."
+			}
 		}
 	}
 	// …but under --attest-only the note is the ENTIRE product of the run. There is
@@ -531,6 +542,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	if unsignedWarning != "" {
 		res.Warnings = append(res.Warnings, unsignedWarning)
+	}
+	if notePushWarning != "" {
+		res.Warnings = append(res.Warnings, notePushWarning)
 	}
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
