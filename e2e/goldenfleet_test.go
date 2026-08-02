@@ -94,9 +94,17 @@ func (g *goldenRepo) git(args ...string) {
 // hangs the gate indefinitely.
 func (g *goldenRepo) warden(args ...string) (string, int) {
 	g.t.Helper()
+	return g.wardenEnv(nil, args...)
+}
+
+// wardenEnv is warden with extra environment, for the cases where the
+// ENVIRONMENT is the thing under test.
+func (g *goldenRepo) wardenEnv(extra []string, args ...string) (string, int) {
+	g.t.Helper()
 	cmd := exec.Command(wardenBin, args...)
 	cmd.Dir = g.dir
 	cmd.Env = append(hookEnv(), "WARDEN_CONFIG_DIR="+g.t.TempDir())
+	cmd.Env = append(cmd.Env, extra...)
 	cmd.Stdin = nil
 	out, err := cmd.CombinedOutput()
 	code := 0
@@ -360,6 +368,52 @@ func TestGoldenFleet_AttestOnlyExitsZeroAndClaimsNoPush(t *testing.T) {
 	}
 	if !strings.Contains(out, "attested") {
 		t.Errorf("a passing attest-only run should say what it DID (attest), got:\n%s", out)
+	}
+}
+
+// An --attest-only run that cannot write its note must FAIL, not report success.
+//
+// This is the exact CI condition: `git notes add` writes a commit on
+// refs/notes/warden and needs a committer identity, which actions/checkout does
+// not configure. warden treated the failure as best-effort — right for the gate
+// path, where the push already happened and provenance is a side-channel —
+// swallowed it, printed
+//
+//	gate passed; attested b27a99d471cc
+//
+// and exited 0. Every step of the workflow went green and nothing was attested.
+// A green run that did nothing is worse than a red one: it stops anybody looking.
+//
+// Under --attest-only the note is the whole product of the run, so there is
+// nothing left to succeed at if it cannot be written.
+func TestGoldenFleet_AttestOnlyFailsWhenTheNoteCannotBeWritten(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("merged by the forge")
+	g.git("push", "--no-verify", "origin", "main")
+
+	// Strip the committer identity, reproducing a bare CI checkout. Unsetting the
+	// REPO config is not enough — a developer's global ~/.gitconfig would supply
+	// one and the run would quietly succeed, testing nothing. The global and
+	// system files have to be neutralized too, which is precisely the state
+	// actions/checkout leaves a runner in.
+	g.git("config", "--unset", "user.email")
+	g.git("config", "--unset", "user.name")
+	noIdentity := []string{
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_AUTHOR_NAME=",
+		"GIT_AUTHOR_EMAIL=",
+		"GIT_COMMITTER_NAME=",
+		"GIT_COMMITTER_EMAIL=",
+	}
+
+	out, code := g.wardenEnv(noIdentity, "run", "pre-push", "--attest-only")
+	if code == 0 {
+		t.Errorf("exit = 0 with no identity to write the note: a run that attested nothing must not report success\n%s", out)
+	}
+	if strings.Contains(out, "attested") && !strings.Contains(out, "could not") {
+		t.Errorf("output claims an attestation that was never written:\n%s", out)
 	}
 }
 

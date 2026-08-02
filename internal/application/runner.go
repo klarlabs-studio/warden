@@ -23,6 +23,15 @@ var ErrBranchMoved = errors.New("branch moved during run")
 // unlike the normal path there is no branch to carry the fix onto.
 var ErrRewriteUnderAttestOnly = errors.New("tree rewritten during an attest-only run")
 
+// ErrAttestationNotWritten is returned when an --attest-only run could not write
+// its note.
+//
+// In the gate path a failed note is best-effort by design: the push already
+// happened and provenance is a side-channel (§9). Under --attest-only there is
+// no push, so the note is the whole product of the run — swallowing the failure
+// reports success for a job that did nothing.
+var ErrAttestationNotWritten = errors.New("attestation note could not be written")
+
 // short12 abbreviates a SHA for a message without pulling in a delivery helper.
 func short12(sha string) string {
 	if len(sha) > 12 {
@@ -484,10 +493,29 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		unsignedWarning = "provenance note written UNSIGNED: " + reason +
 			". It still proves the checks ran, but not WHO ran them — `warden verify --require-signed` will reject it. Set signing.required to fail instead."
 	}
+	var noteErr error
 	if shaErr == nil {
-		// Note-push is best-effort: a failed note never fails the gate (§9).
-		if err := r.Git.WriteNote(finalSHA, *record); err == nil {
+		// Note-push is best-effort in the GATE path: the push already happened, so
+		// failing the run now would block a developer over a side-channel (§9).
+		if noteErr = r.Git.WriteNote(finalSHA, *record); noteErr == nil {
 			_ = r.Git.PushNotes(r.Settings.Remote)
+		}
+	}
+	// …but under --attest-only the note is the ENTIRE product of the run. There is
+	// no push, so a swallowed write failure means the job did nothing and said it
+	// succeeded — which is exactly what happened: `git notes add` needs a
+	// committer identity, CI checkouts have none, and warden reported
+	//
+	//   gate passed; attested b27a99d471cc
+	//
+	// then exited 0 with no note anywhere. A green run that attested nothing is
+	// worse than a red one, because it stops anybody looking.
+	if r.Settings.AttestOnly {
+		if shaErr != nil {
+			return r.result(run, ""), fmt.Errorf("%w: cannot read HEAD to bind the note to", ErrAttestationNotWritten)
+		}
+		if noteErr != nil {
+			return r.result(run, ""), fmt.Errorf("%w: %v", ErrAttestationNotWritten, noteErr)
 		}
 	}
 	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes, r.Settings.AttestOnly)
