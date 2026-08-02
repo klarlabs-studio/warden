@@ -1,0 +1,39 @@
+{
+  "id": "warden",
+  "title": "warden",
+  "description": "A configurable git commit/push gate that records verifiable provenance for every commit.\n\nWarden's product is a distinction, not a feature list: the difference between \"this was checked\" and \"someone says this was checked\". It gates `git commit` and `git push` themselves \u2014 native hooks, no bot, no forge integration required \u2014 and writes a hash-chained evidence note signed by a key the forge already knows.\n\nThe recurring defect in this codebase, named in its own commit history, is warden asserting more than its evidence supports. The design decisions below exist to keep a strong claim and a weak one impossible to confuse.",
+  "features": [
+    {
+      "id": "provenance-gate",
+      "title": "Provenance Gate",
+      "description": "Gate git commit and push through native hooks, run the configured policy, and record a hash-chained evidence note. Each entry carries the previous entry's hash, so a consumer walks the chain rather than trusting a summary.\n\nThe note is signed, and the trusted-signer roster is read from the range's BASE ref \u2014 never from the head being verified, which would let the thing under inspection nominate its own inspector.",
+      "requirements": []
+    },
+    {
+      "id": "external-attestation",
+      "title": "External Attestation",
+      "description": "`warden attest-external` records an existing CI run as a commit's attestation instead of re-running the same checks on the same tree (ADR 0003, #177, shipped 0.24.0).\n\nDeliberately a separate command rather than a flag on `run`: `run` means \"run the pipeline\", and a flag on it meaning \"run nothing\" would put a strong claim and a weak one on one code path. `--checks` is required and never inferred \u2014 every other detected field is a fact the platform states about itself, while what passed is a claim about work warden did not do.\n\n`verify` refuses external attestations by default (`--allow-external` defaults to false); `service.ExternalPolicy` selects the stance.",
+      "requirements": []
+    },
+    {
+      "id": "honest-diagnostics",
+      "title": "Honest Diagnostics",
+      "description": "A failure message must name the failure that actually occurred. A wrong diagnosis costs more than a vague one.\n\nDONE in 0.24.1 (#195, #196): `verdictFor` collapsed a note read ERROR into the absent case, so a corrupt note reported \"no warden note (pushed with --no-verify, or made outside warden)\" \u2014 naming two causes that were both wrong, and sending the reader to hook configuration while the real remedy was restoring the blob. `ReadNote` already distinguished the two; the distinction was discarded one line later. Added the `unreadable` reason.\n\nOPEN, same class: `git notes merge -s cat_sort_uniq` concatenates two records into one blob, which is exactly how the corruption above arose. Warden could detect and refuse that shape at write time rather than letting it surface as a confusing verify failure later.",
+      "requirements": []
+    },
+    {
+      "id": "coverage-and-review-debt",
+      "title": "Coverage and Review Debt",
+      "description": "Tracked in #194. Warden passes every gate it defines for itself \u2014 gofmt, vet, full suite, 9 of 9 coverage domains, nox security scan. These are the gaps BETWEEN passing those gates and being reviewed.\n\nDONE (2026-08-02):\n- AttestExternal 72.0% -> 76.0% (#198). Covers the unresolvable commitish, and the deliberate defaulting of an empty ref.Commit \u2014 asserting the record is genuinely BOUND rather than merely storing the SHA, since a record that stores it without attesting proves nothing.\n- cli 80.9% -> 81.5% (#199). noteDefectLabel and stepObserver.OnStep were both at 0%. Both guard against a failure that reads as a pass: an unrecognized defect rendering as a blank (a clean row in the doctor table), and a partial transcript a polling caller could mistake for a complete one. Both mutation-checked.\n\nOPEN:\n- AttestExternal's nil-signer and push-failure branches need injected failures rather than a fixture repo.\n- `cli` is the domain closest to its floor (81.5% against 80.0%) and is exempt from the per-file rule by design \u2014 command entry points block on stdio, so a per-file floor would measure how testable a main() is rather than whether logic is tested. The consequence is domain-level enforcement only, in the domain where every new command lands. Both functions covered by #199 sat at 0% and nothing in the tooling would have flagged them.\n- The 0.24.0 trust-boundary review read roughly 285 lines of one boundary. No claim is made about the rest of the codebase.",
+      "requirements": []
+    }
+  ],
+  "constraints": [
+    {
+      "id": "evidence-over-assertion",
+      "title": "Never assert more than the evidence supports",
+      "description": "The failure this project exists to prevent, and the one it keeps reproducing. It applies to warden's own diagnostics as much as to the claims it records: a message naming the wrong cause is the same defect as a gate that passes without checking."
+    }
+  ],
+  "version": "0.1.0"
+}
