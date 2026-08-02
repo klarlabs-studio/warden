@@ -20,7 +20,7 @@ var ErrExternalRunInvalid = errors.New("external run reference is not usable as 
 // this commit" — not "warden executed these checks". The two must stay
 // distinguishable at verify time, because a consumer enforcing a gate is
 // entitled to decide which it accepts. `verify` therefore defaults to refusing
-// external attestations; see service.VerifyPolicy.
+// external attestations; see service.ExternalPolicy.
 //
 // It follows the shape of RunRecord.ReattestedFrom, which exists for the same
 // reason along a different axis: to make a derived claim transparent rather than
@@ -86,7 +86,7 @@ func (e ExternalRunRef) BoundTo(sha string) bool {
 
 // IsExternal reports whether this record attests an external run rather than a
 // local execution. Callers enforcing a gate use it to decide acceptance; see
-// service.VerifyPolicy.
+// service.ExternalPolicy.
 func (r RunRecord) IsExternal() bool { return r.ExternalRun != nil }
 
 // ExternalEvidence builds the hash-chained evidence entries for an external-run
