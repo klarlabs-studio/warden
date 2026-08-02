@@ -98,6 +98,9 @@ type fleetReport struct {
 	// Measured on a real fleet this was 61 of 74 reported bypasses — one
 	// local-only repo, renamed away weeks earlier, with no remote at all.
 	Unpushed int `json:"unpushed"`
+	// Defective counts commits whose note does not attest them — verify refuses
+	// these, so counting them as verified had the rollup contradicting the gate.
+	Defective int `json:"defective"`
 	// BypassRate is Bypassed/Commits as a percentage, rounded to one decimal.
 	BypassRate float64 `json:"bypass_rate"`
 }
@@ -137,6 +140,11 @@ type fleetRepo struct {
 	// pre-push gate writes the note, so a branch that was never pushed never
 	// reached it — these are not bypasses.
 	Unpushed int `json:"unpushed"`
+	// Defective counts commits carrying a note that does NOT attest them. They
+	// used to be counted as verified, which meant the rollup disagreed with
+	// `warden verify` about the same commit. Its own bucket, so the buckets keep
+	// summing to the commit count now that Verified excludes them.
+	Defective int `json:"defective"`
 	// NeverPushed reports that the repo itself has no remote-tracking ref, which
 	// is why Unpushed is non-zero.
 	NeverPushed bool `json:"never_pushed,omitempty"`
@@ -215,6 +223,7 @@ func surveyFleet(paths []string, branch string) fleetReport {
 		rep.Reattestable += r.Reattestable
 		rep.Unattributable += r.Unattributable
 		rep.Unpushed += r.Unpushed
+		rep.Defective += r.Defective
 	}
 	if rep.Commits > 0 {
 		rep.BypassRate = round1(float64(rep.Bypassed) / float64(rep.Commits) * 100)
@@ -247,7 +256,8 @@ func surveyRepo(path, branch string) fleetRepo {
 	r.Branch = report.Branch
 	r.NeverPushed = report.NeverPushed
 	r.Commits = len(report.Commits)
-	verified, _, _ := report.Counts()
+	verified, defective, _ := report.Counts()
+	r.Defective = defective
 	r.Verified = verified
 	r.Reattestable = len(report.Reattestable())
 	r.Bypassed = countBypassed(report)
@@ -301,6 +311,9 @@ func printFleet(w io.Writer, rep fleetReport) {
 		}
 		if rep.Unpushed > 0 {
 			_, _ = fmt.Fprintf(w, ", %d unpushed", rep.Unpushed)
+		}
+		if rep.Defective > 0 {
+			_, _ = fmt.Fprintf(w, ", %d with a defective note", rep.Defective)
 		}
 		_, _ = fmt.Fprint(w, "\n\n")
 	} else {

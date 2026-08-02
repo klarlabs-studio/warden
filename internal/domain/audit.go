@@ -148,15 +148,30 @@ type AuditReport struct {
 	Commits     []CommitStatus
 }
 
-// Counts tallies verified/intact/unverified commits for the summary line.
-func (r AuditReport) Counts() (verified, intact, unverified int) {
+// Counts tallies commits by whether their provenance actually stands up.
+//
+//   - verified:   carries a note that ATTESTS it
+//   - defective:  carries a note that does not — unbound, chain broken, or empty
+//   - unverified: everything not verified, defective commits included
+//
+// "verified" used to mean "has a note", so a commit whose note failed to attest
+// it — one `warden verify` refuses outright — was reported as verified anyway,
+// merely with a parenthetical. Counting a commit as verified when the verifier
+// rejects it is the tool disagreeing with itself, and the summary line is
+// exactly where a reader stops looking.
+//
+// unverified deliberately INCLUDES defective, so it stays "everything not
+// verified". `doctor` gates its exit code on it, and a repo whose notes no
+// longer attest anything is precisely a repo that should be flagged.
+func (r AuditReport) Counts() (verified, defective, unverified int) {
 	for i := range r.Commits {
-		if r.Commits[i].HasNote {
+		switch {
+		case r.Commits[i].HasNote && r.Commits[i].ChainIntact:
 			verified++
-			if r.Commits[i].ChainIntact {
-				intact++
-			}
-		} else {
+		case r.Commits[i].HasNote:
+			defective++
+			unverified++
+		default:
 			unverified++
 		}
 	}

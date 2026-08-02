@@ -192,8 +192,13 @@ func TestHandleDoctorAndAudit_ShareTheSchemaAndCountCorrectly(t *testing.T) {
 		t.Fatalf("handleAudit: %v", err)
 	}
 
-	if doc.Verified != 2 || doc.Intact != 1 || doc.Unverified != 2 {
-		t.Errorf("counts = verified %d intact %d unverified %d, want 2/1/2", doc.Verified, doc.Intact, doc.Unverified)
+	// verified counts only notes that ATTEST their commit; commit "b"'s does not,
+	// so it is defective and counts as unverified too. This asserted 2/1/2 back
+	// when "verified" meant "has a note" — an agent reading that field was told a
+	// commit was verified that `verify` refuses outright.
+	if doc.Verified != 1 || doc.Defective != 1 || doc.Unverified != 3 {
+		t.Errorf("counts = verified %d defective %d unverified %d, want 1/1/3",
+			doc.Verified, doc.Defective, doc.Unverified)
 	}
 	// The recoverable share of the gap must be distinguishable from commits that
 	// were genuinely never gated — otherwise "2 unverified" reads as two holes
