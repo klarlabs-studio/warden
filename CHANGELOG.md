@@ -6,6 +6,39 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-02
+
+**A version-number correction, and the CI signer.**
+
+0.22.1 shipped a **breaking change as a patch**: it renamed `intact` to
+`defective` in the audit JSON, the MCP `AuditOutput` and the axi payload, and
+inverted what the value counts — the field now tallies the failures, not the
+successes. `audit --format=json`'s per-commit `validated` changed meaning in the
+same release, from "a note exists" to "the note attests this commit".
+
+A consumer reading `intact` gets a silent break on what its version number
+advertises as a routine patch. The code was right; the number was not. 0.23.0
+carries the same tree so the semver signal matches what actually changed —
+**if you pin warden's JSON output, read the 0.22.1 entry below, not this one.**
+
+### Added
+
+- **The CI signer joined `.warden.yaml`'s trusted roster** — the one genuine
+  change since 0.22.1. `provenance-main.yml` shipped in 0.22.0 but refused to
+  attest without `WARDEN_SIGNING_KEY`, on purpose: warden's signer mints a
+  throwaway keypair when it finds none, so an unguarded run would have written
+  notes signed by a signer that dies with the runner — commits reading as
+  attested while trusted by nobody.
+
+  The key is deliberately a dedicated one rather than a developer's. Had CI
+  signed as the primary dev key, `doctor` could no longer distinguish "a human
+  ran the checks locally" from "a runner attested the merge result", and those
+  are different claims with different trust properties.
+
+  It does not backfill: only commits merged from here on are attested. The
+  existing unverified history stays as it is, which is correct — nothing ran
+  checks on those trees in CI.
+
 ## [0.22.1] — 2026-08-02
 
 Three fixes to commands that answered confidently and wrongly.
