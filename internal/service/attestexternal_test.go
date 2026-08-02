@@ -163,3 +163,55 @@ func TestExternalEvidence_ChainsPerCheckAndVerifies(t *testing.T) {
 		t.Error("evidence for a different commit must hash differently")
 	}
 }
+
+// An unresolvable commitish must fail before anything is written. The error
+// names what could not be resolved, because "attest HEAD~5" in a shallow clone
+// is the common way to hit this and the fix depends on knowing which ref was
+// rejected.
+func TestAttestExternal_UnresolvableCommitish(t *testing.T) {
+	svc, _ := repoForAttest(t)
+
+	_, err := svc.AttestExternal("no-such-ref", extRef("lint"), false)
+	if err == nil {
+		t.Fatal("attesting an unresolvable commitish must fail")
+	}
+	if !strings.Contains(err.Error(), "no-such-ref") {
+		t.Errorf("error should name the unresolved commitish, got: %v", err)
+	}
+}
+
+// An empty ref.Commit defaults to the commit being attested. The defaulting is
+// deliberate — a caller that knows only "attest HEAD" cannot accidentally leave
+// the binding empty — and it must produce a record that is genuinely bound, not
+// merely one that passes validation.
+//
+// The inverse (an explicit, MISMATCHED commit must be refused rather than
+// overwritten) is covered by TestAttestExternal_RefusesAReferenceForAnotherCommit.
+// Both directions matter: defaulting that silently overrode an explicit value
+// would turn a real disagreement about what ran into a silent correction.
+func TestAttestExternal_DefaultsAnEmptyCommitToTheAttestedSHA(t *testing.T) {
+	svc, sha := repoForAttest(t)
+
+	ref := extRef("lint", "test")
+	ref.Commit = "" // caller said only "attest this commit"
+
+	if _, err := svc.AttestExternal(sha, ref, false); err != nil {
+		t.Fatalf("AttestExternal: %v", err)
+	}
+
+	rec, err := svc.Repo().ReadNote(sha)
+	if err != nil || rec == nil {
+		t.Fatalf("note not written: %v", err)
+	}
+	if rec.ExternalRun == nil {
+		t.Fatal("record carries no external run reference")
+	}
+	if rec.ExternalRun.Commit != sha {
+		t.Errorf("ref.Commit = %q, want it defaulted to %q", rec.ExternalRun.Commit, sha)
+	}
+	// Defaulting is only correct if the result actually attests the commit —
+	// a record that merely stores the SHA without binding proves nothing.
+	if !rec.Attests(sha) {
+		t.Error("defaulted record must attest the commit it was written for")
+	}
+}
