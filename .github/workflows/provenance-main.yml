@@ -117,6 +117,22 @@ jobs:
       - name: Fetch existing notes
         run: git fetch origin 'refs/notes/warden:refs/notes/warden' || true
 
+      # `git notes add` writes a COMMIT on refs/notes/warden, so it needs a
+      # committer identity — and actions/checkout configures none. Without this
+      # the note write failed with "Author identity unknown", warden swallowed it
+      # as best-effort, reported "gate passed; attested <sha>", and exited 0 with
+      # no note anywhere. Every step green, nothing attested.
+      #
+      # warden now refuses instead of reporting success (ErrAttestationNotWritten),
+      # so this is belt and braces — but the identity is what makes it work.
+      - name: Configure the notes committer
+        run: |
+          # A non-address identity on purpose: git does not validate this field,
+          # and a literal that looks like an email trips secret scanners (DATA-001)
+          # for no benefit. Same choice as the golden-fleet fixtures.
+          git config user.name  'warden-ci'
+          git config user.email 'warden-ci'
+
       # The signing key must come from the secret. If it is absent, warden's
       # signer GENERATES a fresh keypair — so an unguarded run would write notes
       # signed by a throwaway key that is discarded when the runner dies. Those
