@@ -6,6 +6,32 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-08-02
+
+### Fixed
+
+- **A corrupt provenance note is no longer reported as a missing one.**
+  `verdictFor` collapsed a read error into the absent case, so a note that
+  existed but would not decode was reported as `no warden note (pushed with
+  --no-verify, or made outside warden)`. Both causes named there are wrong for a
+  malformed note, and the message sent the reader to hook configuration while
+  the actual remedy is to restore the blob — re-committing through the gate does
+  not touch it. `ReadNote` already distinguished the two; the distinction was
+  discarded one line later.
+
+  Adds the `unreadable` verify reason, whose hint names the real cause and the
+  real fix. Encountered in practice after `git notes merge -s cat_sort_uniq`
+  concatenated two records for one commit, doubling the blob and breaking JSON
+  parsing. (#195, #196)
+
+### Changed
+
+- Two doc comments in `internal/domain/externalrun.go` pointed at
+  `service.VerifyPolicy`, which does not exist. The type is
+  `service.ExternalPolicy`. That file defines the weaker-claim boundary and its
+  comments are where a reader learns that `verify` refuses external attestations
+  by default, so the pointer being wrong mattered more than its size. (#193)
+
 ## [0.24.0] — 2026-08-02
 
 ### Added
