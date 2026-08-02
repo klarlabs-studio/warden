@@ -6,6 +6,41 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-02
+
+### Added
+
+- **`warden attest-external` records an existing CI run as the attestation.**
+  A post-merge job can now attest the merged commit by naming the run that
+  already did the work, instead of re-running the same checks a second time on
+  the same tree:
+
+  ```sh
+  warden attest-external --checks lint,test --push
+  ```
+
+  It is a separate command rather than a flag on `run`. ADR 0003 sketched
+  `run --attest-external`, but `run` means "run the hook pipeline", and a flag
+  on it meaning "run nothing" would put the strong claim and the weak one on a
+  single code path. Keeping the two impossible to confuse is the design.
+
+  Detection copies only what the platform states about itself — run id, attempt,
+  repository, url. `--checks` is **required and never inferred**: every other
+  field is a fact warden observed, while what passed is a claim about work
+  warden did not do, and warden does not manufacture that claim on the
+  operator's behalf. (#189, ADR 0003 Phase 1; read side landed in #185)
+
+### Changed
+
+- **`AGENTS.md` is tracked instead of excluded per-clone.** It sat in
+  `.git/info/exclude` — a local rule — so it had never been committed and
+  existed on exactly one machine. Its contents are project knowledge rather
+  than personal preference: the provenance invariants, the failure modes that
+  cost hours to rediscover, the exit-code table, the notes-race recovery. A
+  fresh clone got none of it. Rewritten in the same pass, having drifted far
+  enough to mislead — it claimed v0.12.0 against a shipped v0.23.2, and pointed
+  at `/brief` and `/capture` skills removed on 2026-07-21. (#190)
+
 ## [0.23.2] — 2026-08-02
 
 ### Fixed
