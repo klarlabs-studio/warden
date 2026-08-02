@@ -78,6 +78,20 @@ type RunRecord struct {
 	// Nil when no trace was configured or found, and omitempty so a note without
 	// one stays byte-identical to a note written before this field existed.
 	AgentTrace *AgentTraceRef `json:"agent_trace,omitempty"`
+	// ExternalRun, when set, names the platform run that executed the checks —
+	// warden did not run them itself (ADR 0003). It makes the record's claim
+	// WEAKER and says so: "the signer vouches that run X reported these checks
+	// passing", not "warden executed these checks".
+	//
+	// Inside the signed payload, so the reference cannot be attached to or
+	// stripped from a signed note. omitempty so a note without one stays
+	// byte-identical to a note written before this field existed.
+	//
+	// An older warden drops this field on unmarshal, recomputes SigningPayload
+	// without it, and fails signature verification — so a verifier that pins a
+	// signer rejects a claim it cannot understand, by construction. That is why
+	// IsExternal records MUST be signed (see Validate).
+	ExternalRun *ExternalRunRef `json:"external_run,omitempty"`
 	// PublicKey is the signer's public key (§9). Its encoding follows Algorithm:
 	// a base64 ed25519 key for warden's own signer, or an authorized_keys-style
 	// "ssh-ed25519 AAAA…" line for an SSH signer. It is covered by Signature, so

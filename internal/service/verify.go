@@ -19,7 +19,36 @@ type VerifyResult struct {
 	SignatureValid bool
 	Signer         string
 	Trusted        bool
+	// External reports that the note attests an EXTERNAL run — CI ran the checks
+	// and warden recorded the reference (ADR 0003). That claim is weaker than a
+	// local attestation, so a caller enforcing a gate is entitled to know which
+	// one it got.
+	External bool
+	// ExternalRefused is set when the note was otherwise sound and was rejected
+	// ONLY because it is external and the policy did not allow it. Without it,
+	// delivery can say nothing but "unverified", sending someone to look for a
+	// missing note that is sitting right there.
+	ExternalRefused bool
 }
+
+// ExternalPolicy decides whether a verification accepts an external-run
+// attestation (ADR 0003).
+//
+// The zero value REFUSES, deliberately. Every consumer of `warden verify` today
+// means "warden ran the checks"; widening that silently on upgrade would weaken
+// every gate already deployed, without anyone opting in. Accepting the weaker
+// claim has to be a decision somebody made.
+type ExternalPolicy int
+
+const (
+	// ExternalReject accepts local attestations only. The default.
+	ExternalReject ExternalPolicy = iota
+	// ExternalAllow accepts either kind.
+	ExternalAllow
+	// ExternalRequire accepts external attestations only — for a branch whose
+	// policy is that CI, not a developer's machine, is the attester of record.
+	ExternalRequire
+)
 
 // Verify checks whether a single commit carries an intact warden validation
 // note. It is the primitive behind `warden verify` and CI provenance-skip: CI
@@ -28,6 +57,13 @@ type VerifyResult struct {
 // those pinned keys (given as full base64 public keys or fingerprints). Notes
 // are fetched best-effort first so a fresh CI checkout sees them.
 func (s *Service) Verify(commitish string, trustedKeys ...string) (VerifyResult, error) {
+	return s.VerifyWithPolicy(commitish, ExternalReject, trustedKeys...)
+}
+
+// VerifyWithPolicy is Verify with an explicit decision about external-run
+// attestations. Verify itself keeps the strict default, so every existing caller
+// means exactly what it meant before this existed.
+func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trustedKeys ...string) (VerifyResult, error) {
 	_ = s.repo.FetchNotes(s.remote) // best-effort; provenance is a side-channel
 
 	sha, err := s.repo.ResolveSHA(commitish)
@@ -59,6 +95,27 @@ func (s *Service) Verify(commitish string, trustedKeys ...string) (VerifyResult,
 		// trusted key — otherwise it is not validated for provenance-skip.
 		res.Trusted = res.SignatureValid && keyTrusted(rec, trustedKeys)
 		res.Validated = res.Validated && res.Trusted
+	}
+
+	// The external-run policy is applied LAST, over an otherwise-decided result,
+	// so "this note is fine but you did not ask for this kind" stays reportable
+	// as its own thing rather than collapsing into a bare "unverified".
+	res.External = rec.IsExternal()
+	switch {
+	case res.External && policy == ExternalReject:
+		res.ExternalRefused = res.Validated
+		res.Validated = false
+	case res.External && res.Validated:
+		// An external record that reaches here must still satisfy its own
+		// invariants: bound to THIS commit, and signed. A note that fails them was
+		// written by something that did not go through warden's writer, so the
+		// safe reading is that it is not an attestation at all.
+		if err := rec.ValidateExternal(); err != nil {
+			res.Validated = false
+		}
+	case !res.External && policy == ExternalRequire:
+		res.ExternalRefused = res.Validated
+		res.Validated = false
 	}
 	return res, nil
 }

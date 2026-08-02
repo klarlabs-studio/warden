@@ -27,6 +27,12 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	jsonOut := fs.Bool("json", false, "in --range, emit per-commit verdicts as JSON")
 	quiet := fs.Bool("quiet", false, "print nothing; communicate only via exit code")
 	keys := fs.String("key", "", "comma-separated trusted signer key(s) or fingerprint(s); require a matching signature")
+	// External-run attestations assert something weaker than a local one: CI ran
+	// the checks and warden recorded the reference (ADR 0003). Refused unless
+	// asked for, because every existing caller of this command means "warden ran
+	// the checks" and upgrading must not quietly widen that.
+	allowExternal := fs.Bool("allow-external", false, "also accept an attestation of an EXTERNAL CI run, not just a local warden run")
+	requireExternal := fs.Bool("require-external", false, "accept ONLY an external CI-run attestation (for a branch where CI is the attester of record)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -48,7 +54,11 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
 	// roster, so a repo enforces trusted provenance without passing fingerprints.
 	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
-	res, err := svc.Verify(*commit, trusted...)
+	policy, err := externalPolicy(*allowExternal, *requireExternal)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	res, err := svc.VerifyWithPolicy(*commit, policy, trusted...)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -155,6 +165,19 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 			_, _ = fmt.Fprintf(w, "%s)", signerNote(res))
 		}
 		_, _ = fmt.Fprintln(w)
+		return
+	}
+	// A sound note refused only for its KIND is not a missing note. Reporting
+	// "no intact warden note" about one sitting right there sends the reader
+	// hunting for the wrong thing entirely.
+	if res.ExternalRefused && res.External {
+		_, _ = fmt.Fprintf(w, "unverified %s — carries an EXTERNAL CI-run attestation, which is not "+
+			"accepted by default; pass --allow-external to accept it\n", short(res.SHA))
+		return
+	}
+	if res.ExternalRefused && !res.External {
+		_, _ = fmt.Fprintf(w, "unverified %s — --require-external was given and this is a local warden "+
+			"attestation, not a record of a CI run\n", short(res.SHA))
 		return
 	}
 	// Give a specific reason when a pinned key is what failed.
@@ -279,5 +302,26 @@ func signerNote(res service.VerifyResult) string {
 		return ", signature INVALID"
 	default:
 		return ", unsigned"
+	}
+}
+
+// externalPolicy maps the two flags onto a policy, refusing the combination that
+// asks for both at once.
+//
+// --allow-external and --require-external are not a spectrum a caller can hold
+// simultaneously: one widens what is accepted and the other narrows it. Picking
+// a winner silently would mean a gate enforcing something other than what its
+// invocation says, which is the failure this whole area keeps producing.
+func externalPolicy(allow, require bool) (service.ExternalPolicy, error) {
+	switch {
+	case allow && require:
+		return service.ExternalReject, fmt.Errorf(
+			"--allow-external and --require-external are contradictory: one widens what is accepted, the other narrows it")
+	case require:
+		return service.ExternalRequire, nil
+	case allow:
+		return service.ExternalAllow, nil
+	default:
+		return service.ExternalReject, nil
 	}
 }
