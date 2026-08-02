@@ -394,6 +394,13 @@ func errVisible(err error) error {
 	return &visible{cause: err}
 }
 
+// VisibleError is errVisible for callers outside this package. A Facade
+// implementation that must refuse every call — the degraded surface served when
+// warden starts outside a repository — needs its reason to reach the client for
+// the same reason the refusals above do: "internal error" gives the caller
+// nothing to act on.
+func VisibleError(err error) error { return errVisible(err) }
+
 // errNotSupported reports an operation that has no meaning in synchronous v0.
 func errNotSupported(op string) error {
 	return fmt.Errorf("%s is not supported: Warden v0 runs synchronously, so run_trigger returns the final outcome directly", op)
