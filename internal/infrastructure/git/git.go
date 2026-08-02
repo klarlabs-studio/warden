@@ -26,6 +26,13 @@ const NotesRef = "refs/notes/warden"
 // clobbering work another process committed mid-run.
 var ErrBranchMoved = errors.New("branch moved during run")
 
+// ErrNotARepository reports that a path is not inside a git repository. It is a
+// sentinel so callers can tell "you pointed me somewhere without a repo" — a
+// user-fixable situation — from a repository that exists but could not be read.
+// The MCP server distinguishes the two: the first degrades to a surface that
+// explains itself, the second still fails at startup.
+var ErrNotARepository = errors.New("not a git repository")
+
 // Repo is a handle to a git repository rooted at Dir.
 type Repo struct {
 	Dir string
@@ -42,7 +49,7 @@ func Open(path string) (*Repo, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git: %s is not a repository: %w: %s", path, err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git: %s is not a repository: %w: %v: %s", path, ErrNotARepository, err, strings.TrimSpace(stderr.String()))
 	}
 	return &Repo{Dir: strings.TrimSpace(stdout.String())}, nil
 }

@@ -8,6 +8,30 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **`warden mcp serve` no longer dies when it starts outside a repository.** It
+  exited 1 before speaking a word of MCP, which over stdio reaches the user as
+  "server exited" or "failed to connect" — the reason went to a stderr stream
+  most clients discard, so the one piece of information needed was the one
+  piece not visible. The working directory is the client's choice here, not the
+  user's: it is whatever the editor or agent launched with, which makes landing
+  outside a repository a likely first run rather than an unusual mistake.
+
+  The handshake now completes, the tools list, and every call returns a
+  sentence naming the directory and saying how to fix it. Nothing is pretended
+  to work — each call fails, with `isError` set.
+
+  Reaching the client needed the existing `errVisible` seam: the dispatcher
+  flattens a raw handler error to a bare "internal error" before it leaves the
+  process, which is right for a failure that might leak internals and wrong for
+  a refusal the caller is meant to resolve. Without it the explanation landed
+  only in the server's own log, where nobody looks. That was caught by driving
+  a real MCP handshake against the built binary rather than by reading the code.
+
+  `git.ErrNotARepository` is new, so the degraded surface is chosen by matching
+  a sentinel rather than a message. Startup failures that are not "there is no
+  repository here" still exit, because relaunching elsewhere would not fix them.
+
+
 - **"verified" now means the note attests the commit, not merely that one
   exists.** `Counts()` reported every commit carrying a note as verified, with
   the failures relegated to a parenthetical. So a commit whose note does not
