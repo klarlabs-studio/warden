@@ -6,6 +6,10 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-08-02
+
+Three fixes to commands that answered confidently and wrongly.
+
 ### Fixed
 
 - **`warden mcp serve` no longer dies when it starts outside a repository.** It
