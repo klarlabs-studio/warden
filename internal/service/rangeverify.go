@@ -166,7 +166,16 @@ func (s *Service) applySpanCoverage(res *RangeVerifyResult, shas []string, opts 
 // so the reported reason is the *first* thing wrong, the most actionable one.
 func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitVerdict {
 	rec, err := s.repo.ReadNote(sha)
-	if err != nil || rec == nil {
+	// A read ERROR and an absent note are different failures. ReadNote already
+	// separates them — it returns (nil, nil) for a clean miss and (nil, err)
+	// only when a note exists but will not decode — and collapsing them here
+	// discarded that, reporting a corrupt note as "no warden note (pushed with
+	// --no-verify, or made outside warden)". Both causes named there are wrong
+	// for a note that is present but malformed. (#195)
+	if err != nil {
+		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonUnreadable}
+	}
+	if rec == nil {
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonMissing}
 	}
 	if !rec.Attests(sha) {

@@ -216,6 +216,8 @@ func reasonHint(r domain.VerifyReason) string {
 	switch r {
 	case domain.ReasonMissing:
 		return "no warden note (pushed with --no-verify, or made outside warden)"
+	case domain.ReasonUnreadable:
+		return "warden note is present but could not be decoded (malformed JSON — a hand-edit, or `git notes merge` concatenating two records); restore the blob, re-committing will not fix it"
 	case domain.ReasonBrokenChain:
 		return "note present but does not attest this commit (broken/transplanted)"
 	case domain.ReasonUnsigned:

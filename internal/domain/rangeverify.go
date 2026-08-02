@@ -22,6 +22,17 @@ const (
 	// ReasonUntrusted: the signature verifies but was made by a key outside the
 	// pinned trusted set (--key).
 	ReasonUntrusted VerifyReason = "untrusted"
+	// ReasonUnreadable: a note EXISTS for the commit but could not be decoded —
+	// malformed JSON, most often from a hand-edit or from `git notes merge`,
+	// whose cat_sort_uniq strategy concatenates two records into one blob.
+	//
+	// Kept distinct from ReasonMissing because the two need opposite fixes and
+	// the wrong one wastes real time: a missing note is recovered by committing
+	// through the gate again or by `reattest`, while an unreadable one means the
+	// blob must be restored — re-committing will not touch it. Reporting the
+	// corrupt case as "missing" sends the reader to `--no-verify` and hook
+	// configuration, neither of which is involved. (#195)
+	ReasonUnreadable VerifyReason = "unreadable"
 )
 
 // CommitVerdict is one commit's provenance outcome in a range gate. Reason is
