@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"os/exec"
@@ -247,4 +248,69 @@ func TestService_VerifyRange_SkipMerges(t *testing.T) {
 			t.Fatal("gate must flag the un-noted merge when merges are not skipped")
 		}
 	})
+}
+
+// A note that EXISTS but will not decode must not be reported as missing.
+//
+// The two need opposite fixes: a missing note is recovered by committing
+// through the gate again, while a corrupt one means the blob must be restored —
+// re-committing leaves it exactly as broken. Reporting the corrupt case as
+// "no warden note (pushed with --no-verify, or made outside warden)" names two
+// causes that are both wrong for it, and sends the reader to hook configuration
+// instead of to the note. Cost an hour of misdiagnosis in practice. (#195)
+func TestService_VerifyRange_CorruptNoteIsNotReportedMissing(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	corrupt := commit(t, dir, svc, "corrupt")
+	absent := commit(t, dir, svc, "absent")
+
+	// Exactly how this arises in the wild: `git notes merge -s cat_sort_uniq`
+	// concatenates two records for one commit, so the blob holds two JSON
+	// objects back to back and no longer parses.
+	good := attestRecord(corrupt, "r1")
+	if err := svc.Repo().WriteNote(corrupt, good); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := exec.Command("git", "-C", dir, "notes", "--ref=warden", "show", corrupt).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doubled := append(append([]byte{}, raw...), raw...)
+	cmd := exec.Command("git", "-C", dir, "notes", "--ref=warden", "add", "-f", "-F", "-", corrupt)
+	cmd.Stdin = bytes.NewReader(doubled)
+	if out, cerr := cmd.CombinedOutput(); cerr != nil {
+		t.Fatalf("corrupting note: %v: %s", cerr, out)
+	}
+
+	res, err := svc.VerifyRange(base, absent, RangeVerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reason := func(sha string) domain.VerifyReason {
+		for _, v := range res.Commits {
+			if v.SHA == sha {
+				return v.Reason
+			}
+		}
+		t.Fatalf("commit %s not in result", sha)
+		return ""
+	}
+
+	if got := reason(corrupt); got != domain.ReasonUnreadable {
+		t.Errorf("corrupt note: reason = %q, want %q", got, domain.ReasonUnreadable)
+	}
+	// The genuinely-absent case must keep reporting missing, or the fix has just
+	// moved the ambiguity rather than removed it.
+	if got := reason(absent); got != domain.ReasonMissing {
+		t.Errorf("absent note: reason = %q, want %q", got, domain.ReasonMissing)
+	}
 }
