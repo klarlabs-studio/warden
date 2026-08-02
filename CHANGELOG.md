@@ -6,6 +6,43 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.23.2] — 2026-08-02
+
+### Fixed
+
+- **A losing notes push is reconciled instead of dropped.** Since 0.22.0 two
+  things write `refs/notes/warden`: a developer's machine on every gated push,
+  and CI on every merge to `main`. `PushNotes` is a plain non-forced push, so the
+  second writer was rejected non-fast-forward — and the caller discarded the
+  error.
+
+  The note then existed on exactly one machine. The commit verified there and
+  read as an **ungated bypass everywhere else**, including in the CI gate, which
+  accused the author of a bypass that never happened. That is not hypothetical:
+  it failed this repo's own PRs #185 and #187, and the accusation was wrong both
+  times.
+
+  Notes are per-object, so the ordinary case — one machine notes its commit, CI
+  notes a different one — is a clean union. `PushNotes` now fetches, merges and
+  retries once. A genuine conflict (two different records for the SAME commit) is
+  **reported, not resolved**: auto-resolving would silently discard one side's
+  record of a run that actually happened. The uncontended push is unchanged and
+  does no extra fetch.
+
+  **Upgrade to get the fix.** The binary your git hooks call is the one that
+  writes notes, so a repo still running an older warden keeps losing them.
+
+- **A note that reaches no remote now says so.** Publication stays best-effort in
+  the gate path — a failed note must not block a developer whose push already
+  happened (§9) — but it is no longer silent:
+
+  ```
+  provenance note written locally but NOT published: …
+  This commit will read as ungated to everyone else until the note reaches the remote.
+  ```
+
+  Staying quiet about that was survivable while there was one writer.
+
 ## [0.23.1] — 2026-08-02
 
 ### Fixed
