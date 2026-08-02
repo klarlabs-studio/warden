@@ -6,6 +6,21 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-08-02
+
+A minor rather than a patch, for one reason: **`warden verify <sha>` now exits 2
+instead of silently verifying HEAD.** That was never intended behaviour, but it
+was reachable, and anything scripted against it changes meaning — see the first
+entry under Fixed.
+
+The rest continues 0.21.2's theme. That release corrected what the bypass rate
+*counted*; this one corrects what warden *claims*. A branch that was never pushed
+is not a bypass, a rebased note is not tampering, and a commit the forge created
+can now be attested rather than merely accused. On the fleet this was measured
+against the rate went **26.6% → 3.9%**, and inspecting what survived showed every
+one of the eleven remaining "bypasses" was committed by GitHub, not by a person
+evading anything. `--attest-only` exists to close exactly that.
+
 ### Added
 
 - **`warden run pre-push --attest-only`, and a post-merge CI workflow using it.**
