@@ -65,7 +65,7 @@ jobs:
       # price of an attestation that re-ran the checks against the merged tree
       # rather than taking another workflow's word for it. Removing the
       # duplication needs warden to be able to attest an EXTERNAL run, which is
-      # tracked separately — see the issue linked from provenance-main's docs.
+      # tracked separately in #177.
       #
       # PIN NOTE (#112): the canonical versions live once, centrally, in
       # klarlabs-studio/.github/.github/workflows/go-ci.yml — the same file

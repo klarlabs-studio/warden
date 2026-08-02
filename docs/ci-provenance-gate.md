@@ -377,3 +377,36 @@ Once `main` is covered, the PR-head `warden-gate` check can go back to being
 Dependabot, web edits, and machines without warden installed — disappears when
 CI produces the attestation, because every one of those paths generates one
 naturally.
+
+### It runs the RELEASED warden, not your working tree
+
+`provenance-main.yml` installs warden with `WARDEN_VERSION: latest`, which
+resolves to the latest **GitHub release**. A fix to warden itself therefore does
+not reach this job until it ships.
+
+That bites in exactly one place, and it is worth naming because the symptom
+looks like a code bug: the gate runs green, every step passes against the merged
+tree, and the step still fails — because the *released* binary behaves the old
+way. Check the run's "Install warden" step for the version before debugging the
+gate.
+
+Pin `warden-version:` if you want a job that does not move under you.
+
+### The duplication, and the way out
+
+These steps re-run what your CI already ran on the same commit — `.warden.yaml`
+in this repo says as much, describing `lint` and `test` as mirroring CI. That is
+deliberate: the note asserts "these checks ran and passed on this tree", and the
+only way to assert it honestly is to have run them.
+
+The alternatives are worse, not cheaper:
+
+- attesting after a `workflow_run` without executing anything makes the note
+  claim checks this job never ran
+- attesting with a reduced step set produces a note that looks identical to a
+  full gate at `verify` time while meaning far less
+
+Both manufacture provenance rather than record it. Removing the duplication
+properly needs warden to be able to attest an **external** run — which checks
+ran, where, and a verifiable reference to them. That is tracked in
+[#177](https://github.com/klarlabs-studio/warden/issues/177).
