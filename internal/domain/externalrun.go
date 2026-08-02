@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -86,6 +88,42 @@ func (e ExternalRunRef) BoundTo(sha string) bool {
 // local execution. Callers enforcing a gate use it to decide acceptance; see
 // service.VerifyPolicy.
 func (r RunRecord) IsExternal() bool { return r.ExternalRun != nil }
+
+// ExternalEvidence builds the hash-chained evidence entries for an external-run
+// record: one per reported check, in the order given.
+//
+// Be clear about what this chain is and is not. In a local run the chain is
+// built by the kernel AS THE STEPS EXECUTE, so it is evidence that warden
+// watched them. Here warden watched nothing — the chain covers the RECORD, and
+// what it buys is tamper-evidence: the set of checks claimed cannot be edited
+// after signing without breaking the chain and the signature.
+//
+// The distinction is why every entry's kind is prefixed "external." and its
+// source names the run. A reader of the note can see, per entry, that this was
+// reported rather than observed — the same information the ExternalRun field
+// carries, at the granularity a chain walker sees.
+func ExternalEvidence(ref ExternalRunRef) (root string, entries []EvidenceEntry) {
+	prev := ""
+	for _, check := range ref.Checks {
+		kind := "external." + check
+		source := ref.Provider + ":" + ref.RunID
+		// The commit is inside the hash so an entry cannot be lifted from one
+		// record onto another attesting a different commit.
+		sum := sha256.Sum256([]byte(prev + "\n" + kind + "\n" + source + "\n" + ref.Commit))
+		h := hex.EncodeToString(sum[:])
+		entries = append(entries, EvidenceEntry{
+			Kind:         kind,
+			Source:       source,
+			Hash:         h,
+			PreviousHash: prev,
+		})
+		prev = h
+	}
+	if len(entries) > 0 {
+		root = entries[0].Hash
+	}
+	return root, entries
+}
 
 // ValidateExternal checks the invariants an external-run record must satisfy
 // before it is written. It is deliberately separate from Attests, which asks
