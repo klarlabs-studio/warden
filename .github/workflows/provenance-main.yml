@@ -51,6 +51,49 @@ jobs:
         with:
           fetch-depth: 0 # notes and history both ride on the full clone
 
+      # The toolchain warden's OWN steps need. Installing warden is not enough:
+      # pre_push is [credentials, rebase, lint, security-scan, test], and on a
+      # bare runner `lint` reported
+      #
+      #   step/missing-toolchain — golangci-lint is not installed … exit 78
+      #
+      # which is warden correctly refusing to attest rather than passing a step
+      # that never ran.
+      #
+      # This DUPLICATES the shared CI's work on every merge to main: .warden.yaml
+      # describes these commands as mirroring CI, and they do. That cost is the
+      # price of an attestation that re-ran the checks against the merged tree
+      # rather than taking another workflow's word for it. Removing the
+      # duplication needs warden to be able to attest an EXTERNAL run, which is
+      # tracked separately — see the issue linked from provenance-main's docs.
+      #
+      # PIN NOTE (#112): the canonical versions live once, centrally, in
+      # klarlabs-studio/.github/.github/workflows/go-ci.yml — the same file
+      # .warden.yaml's security_scan.pin_file names. The two literals below are a
+      # SECOND copy and will drift. They are here rather than resolved at runtime
+      # because reading that file cross-repo needs a token this job should not
+      # have. Update them together with the central pin.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod # no new pin: go.mod is already the source of truth
+
+      - name: Install golangci-lint
+        run: |
+          # keep in sync with klarlabs-studio/.github .../go-ci.yml
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      - name: Install nox
+        run: |
+          # keep in sync with klarlabs-studio/.github .../go-ci.yml
+          go install github.com/nox-hq/nox/cli@v1.26.0
+          mv "$(go env GOPATH)/bin/cli" "$(go env GOPATH)/bin/nox"
+
+      - name: Report toolchain
+        run: |
+          go version
+          golangci-lint --version | head -1
+          nox version | head -1
+
       - name: Install warden
         run: bash .github/actions/install-warden.sh
         env:
