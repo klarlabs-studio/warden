@@ -82,7 +82,22 @@ jobs:
           # keep in sync with klarlabs-studio/.github .../go-ci.yml
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
+      # GOTOOLCHAIN=auto for this step only. setup-go pins GOTOOLCHAIN=local from
+      # go.mod, which is right for building warden — but nox requires a NEWER Go
+      # than warden targets, so a local-pinned toolchain refuses outright:
+      #
+      #   nox@v1.26.0 requires go >= 1.26.5 (running go 1.26.4; GOTOOLCHAIN=local)
+      #
+      # `auto` lets the go command fetch the toolchain that TOOL needs, without
+      # changing the one warden itself is built and tested with. Scoped to the
+      # step so it cannot leak into the gate run below.
+      #
+      # This could only fail on the runner: a local `go install` uses whatever Go
+      # the developer has, which is how it passed verification here and failed
+      # there.
       - name: Install nox
+        env:
+          GOTOOLCHAIN: auto
         run: |
           # keep in sync with klarlabs-studio/.github .../go-ci.yml
           go install github.com/nox-hq/nox/cli@v1.26.0
