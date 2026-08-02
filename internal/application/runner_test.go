@@ -899,17 +899,28 @@ func TestRunner_PRRunPushesBeforeOpeningIt(t *testing.T) {
 
 // TestPushedMessage_NamesWhatLandedWhere covers the reporting half of #89.
 func TestPushedMessage_NamesWhatLandedWhere(t *testing.T) {
-	got := pushedMessage("0123456789abcdef0123", "origin", "feature", false)
+	got := pushedMessage("0123456789abcdef0123", "origin", "feature", false, false)
 	if !strings.Contains(got, "pushed 0123456789ab to origin/feature") {
 		t.Errorf("pushedMessage = %q, want it to name the sha and target", got)
 	}
 	// A delegating run must not claim a push git has not performed yet.
-	if got := pushedMessage("0123456789abcdef0123", "origin", "feature", true); strings.Contains(got, "pushed 0123") {
+	if got := pushedMessage("0123456789abcdef0123", "origin", "feature", true, false); strings.Contains(got, "pushed 0123") {
 		t.Errorf("delegating run claimed a push it did not perform: %q", got)
 	}
 	// An unreadable HEAD must not render a blank sha into the success line.
-	if got := pushedMessage("", "origin", "feature", false); strings.Contains(got, "pushed  to") {
+	if got := pushedMessage("", "origin", "feature", false, false); strings.Contains(got, "pushed  to") {
 		t.Errorf("empty sha leaked into the message: %q", got)
+	}
+	// Nor must an --attest-only run, which pushes nothing by design. In
+	// production it printed "pushed ec0667e2aec1 to origin/main" — about a commit
+	// the FORGE created and warden never touched, in the one mode built for
+	// exactly that case.
+	got = pushedMessage("0123456789abcdef0123", "origin", "main", false, true)
+	if strings.Contains(got, "pushed 0123") {
+		t.Errorf("attest-only run claimed a push it did not perform: %q", got)
+	}
+	if !strings.Contains(got, "attested 0123456789ab") {
+		t.Errorf("attest-only run must name what it DID: %q", got)
 	}
 }
 
