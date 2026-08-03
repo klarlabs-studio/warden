@@ -171,7 +171,7 @@ func TestService_ReattestAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, unverified := report.Counts(); unverified != 0 {
+	if unverified := report.Counts().Unverified; unverified != 0 {
 		t.Errorf("branch should be fully verified after the sweep, %d unverified", unverified)
 	}
 }

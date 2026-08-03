@@ -165,9 +165,9 @@ func TestAuditReport_Counts(t *testing.T) {
 	// This asserted 2,1,1 back when "verified" merely meant "has a note".
 	// `warden verify` refuses that middle commit outright, so reporting it as
 	// verified had the audit contradicting the verifier about the same commit.
-	v, d, u := r.Counts()
-	if v != 1 || d != 1 || u != 2 {
-		t.Errorf("Counts = %d,%d,%d want 1,1,2 (verified, defective, unverified)", v, d, u)
+	got := r.Counts()
+	if got.Verified != 1 || got.Defective != 1 || got.Unverified != 2 {
+		t.Errorf("Counts = %+v, want verified 1, defective 1, unverified 2", got)
 	}
 }
 
@@ -202,7 +202,7 @@ func TestAuditReport_Reattestable(t *testing.T) {
 		t.Fatalf("Reattestable = %+v, want the two recoverable commits in branch order", got)
 	}
 	// It reports a subset of the unverified count, never more.
-	if _, _, unverified := r.Counts(); len(got) > unverified {
+	if unverified := r.Counts().Unverified; len(got) > unverified {
 		t.Errorf("reattestable (%d) exceeds unverified (%d)", len(got), unverified)
 	}
 }

@@ -44,6 +44,31 @@ func auditRepo(t *testing.T) {
 	if out, err := post.CombinedOutput(); err != nil {
 		t.Fatalf("post-adoption commit: %v: %s", err, out)
 	}
+	// …and it has to have been PUSHED to be that case. Without a remote-tracking
+	// ref the branch never reached the pre-push gate that writes notes, so warden
+	// reports the gap as unattributable rather than as drift — correctly, and not
+	// what this test is about. Point origin/<branch> at the tip to model the
+	// --no-verify push the comment above describes.
+	markPushed(t, dir)
+}
+
+// markPushed creates the remote-tracking ref a pushed branch would have, so a
+// note-less commit reads as a real gap rather than as one on a branch the gate
+// never had a chance to run on.
+func markPushed(t *testing.T, dir string) {
+	t.Helper()
+	branch := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branch.Dir = dir
+	name, err := branch.Output()
+	if err != nil {
+		t.Fatalf("resolve branch: %v", err)
+	}
+	ref := "refs/remotes/origin/" + strings.TrimSpace(string(name))
+	up := exec.Command("git", "update-ref", ref, "HEAD")
+	up.Dir = dir
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Fatalf("update-ref %s: %v: %s", ref, err, out)
+	}
 }
 
 func TestAudit_JSONExport(t *testing.T) {

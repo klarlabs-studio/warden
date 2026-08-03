@@ -256,9 +256,9 @@ func surveyRepo(path, branch string) fleetRepo {
 	r.Branch = report.Branch
 	r.NeverPushed = report.NeverPushed
 	r.Commits = len(report.Commits)
-	verified, defective, _ := report.Counts()
-	r.Defective = defective
-	r.Verified = verified
+	t := report.Counts()
+	r.Defective = t.Defective
+	r.Verified = t.Verified
 	r.Reattestable = len(report.Reattestable())
 	r.Bypassed = countBypassed(report)
 	// Every state the domain distinguishes must be counted here, or the buckets

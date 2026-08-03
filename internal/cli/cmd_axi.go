@@ -169,7 +169,7 @@ func axiAuditReport(report func(string) (domain.AuditReport, error), args []stri
 	if err != nil {
 		return fail(stderr, err)
 	}
-	verified, defective, unverified := rep.Counts()
+	t := rep.Counts()
 	commits := make([]any, 0, len(rep.Commits))
 	// Index rather than range-copy: CommitStatus is 128 bytes and an audit walks
 	// every commit since adoption.
@@ -189,9 +189,11 @@ func axiAuditReport(report func(string) (domain.AuditReport, error), args []stri
 	return emitTOON(stdout, stderr, map[string]any{
 		"adoption":     rep.Adoption,
 		"branch":       rep.Branch,
-		"verified":     verified,
-		"defective":    defective,
-		"unverified":   unverified,
+		"verified":     t.Verified,
+		"defective":    t.Defective,
+		"unverified":   t.Unverified,
+		"covered":      t.Covered,
+		"unknown":      t.Unknown,
 		"reattestable": len(rep.Reattestable()),
 		"commits":      commits,
 	})

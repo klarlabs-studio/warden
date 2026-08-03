@@ -69,6 +69,12 @@ type auditSummary struct {
 	// that kept the old name would invert its own meaning for every consumer.
 	Defective  int `json:"defective"`
 	Unverified int `json:"unverified"`
+	// Covered and Unknown were previously summed into Unverified, which reported
+	// a fully-gated multi-commit push as unchecked. They are exported separately
+	// so a consumer can tell "warden vouches for this via the push span" and
+	// "warden was never in a position to say" apart from a real gap.
+	Covered int `json:"covered"`
+	Unknown int `json:"unknown"`
 }
 
 type auditCommit struct {
@@ -90,13 +96,16 @@ type auditCommit struct {
 // printAuditJSON marshals the report into the export shape. generated_at is a
 // wall-clock stamp (there is no injected clock); tests tolerate its value.
 func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
-	verified, defective, unverified := r.Counts()
+	t := r.Counts()
 	export := auditExport{
 		Branch:      r.Branch,
 		Adoption:    r.Adoption,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		Summary:     auditSummary{Verified: verified, Defective: defective, Unverified: unverified},
-		Commits:     make([]auditCommit, 0, len(r.Commits)),
+		Summary: auditSummary{
+			Verified: t.Verified, Defective: t.Defective, Unverified: t.Unverified,
+			Covered: t.Covered, Unknown: t.Unknown,
+		},
+		Commits: make([]auditCommit, 0, len(r.Commits)),
 	}
 	for i := range r.Commits {
 		c := &r.Commits[i]
@@ -149,8 +158,7 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
-	verified, defective, unverified := r.Counts()
-	_, _ = fmt.Fprint(w, summaryLine("summary: ", verified, defective, unverified))
+	_, _ = fmt.Fprint(w, summaryLine("summary: ", r.Counts()))
 }
 
 // printAuditMarkdown renders a table plus a summary line, suitable for pasting
@@ -175,6 +183,5 @@ func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
 		_, _ = fmt.Fprintf(w, "| `%s` | %s | %s | %s | %s |\n",
 			short(c.SHA), c.Date, truncate(c.Subject, 40), status, run)
 	}
-	verified, defective, unverified := r.Counts()
-	_, _ = fmt.Fprint(w, "\n**Summary:** "+summaryLine("", verified, defective, unverified))
+	_, _ = fmt.Fprint(w, "\n**Summary:** "+summaryLine("", r.Counts()))
 }
