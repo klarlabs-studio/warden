@@ -6,6 +6,35 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`warden doctor` no longer exits 1 on a correctly gated history.** `Counts`
+  re-derived its classification from `HasNote` rather than from the commit-state
+  partition, so every note-less commit landed in `unverified` — including the
+  states the partition exists to keep out of it. A span-covered commit (every
+  commit below the tip of a gated multi-commit push) printed
+  `✓ (covered by the gated push …)` and was counted unverified one function
+  later, so an ordinary three-commit PR printed all ✓ and exited 1. A branch
+  with no remote-tracking ref printed `These are not bypasses` directly above
+  the exit code that failed on it.
+
+  `Counts` now returns a `Tally` whose buckets switch on the same predicates as
+  the partition: `Verified`, `Covered`, `Unverified` and `Unknown` account for
+  every commit exactly once, with `Defective` a subset of `Unverified`. The two
+  new buckets are surfaced in the summary line, the audit JSON (`covered`,
+  `unknown`), the axi output and the MCP audit shape. `Unverified` still covers
+  a defective note, a squash-merge binding gap and a real bypass, so the gate is
+  aimed rather than loosened.
+
+- **A gated push that could not write its note now says so.** The write error
+  was only consulted under `--attest-only`; in the gate path it was swallowed
+  entirely. Worse, because signing runs first, such a run reported
+  `provenance note written UNSIGNED: …` — asserting a note had been written when
+  none was. `git notes add` fails without a committer identity, which is the
+  same root cause fixed for `--attest-only` in #183. The write stays best-effort
+  (the push has already happened) but is no longer silent, and the unsigned
+  warning is suppressed when nothing was written.
+
 ## [0.24.1] — 2026-08-02
 
 ### Fixed
