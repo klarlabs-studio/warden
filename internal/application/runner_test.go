@@ -55,6 +55,7 @@ type fakeGit struct {
 	unmergedRemoteErr error
 	notesPushed       bool
 	wroteNote         bool
+	writeNoteErr      error
 	note              domain.RunRecord
 	ffErr             error
 	mergeBaseErr      error
@@ -104,6 +105,9 @@ func (g *fakeGit) UnmergedRemoteCommits(string, string) ([]string, error) {
 }
 
 func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
+	if g.writeNoteErr != nil {
+		return g.writeNoteErr
+	}
 	g.wroteNote = true
 	g.note = rec
 	return nil
