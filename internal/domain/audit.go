@@ -148,34 +148,71 @@ type AuditReport struct {
 	Commits     []CommitStatus
 }
 
+// Tally is an audit's commit counts, one bucket per state the commit-state
+// partition distinguishes.
+//
+// Verified, Covered, Unverified and Unknown account for every commit exactly
+// once — Total is their sum. Defective is the one deliberate SUBSET: it names
+// why a commit is unverified, so it is counted inside Unverified rather than
+// beside it.
+type Tally struct {
+	// Verified: carries a note that ATTESTS the commit.
+	Verified int
+	// Covered: no note of its own, but a gated push span published it. warden
+	// validates one tree per run and vouches for the span, so this is the normal
+	// state of every commit below the tip of a multi-commit push — not a gap.
+	Covered int
+	// Defective: carries a note that does NOT attest it — unbound, chain broken,
+	// or empty. A subset of Unverified.
+	Defective int
+	// Unverified: warden had both the ability and the opportunity to vouch for
+	// this commit and did not — a defective note, a squash-merge binding gap, or
+	// a genuine bypass. This is the number an exit code should gate on.
+	Unverified int
+	// Unknown: warden makes no claim, because it was never in a position to.
+	// A branch that was never pushed never reached the gate that writes notes;
+	// provenance older than push spans cannot say whether a gap was an
+	// intermediate commit or a bypass. Calling either unverified asserts more
+	// than the data supports.
+	Unknown int
+}
+
+// Total is the number of commits tallied.
+func (t Tally) Total() int { return t.Verified + t.Covered + t.Unverified + t.Unknown }
+
 // Counts tallies commits by whether their provenance actually stands up.
 //
-//   - verified:   carries a note that ATTESTS it
-//   - defective:  carries a note that does not — unbound, chain broken, or empty
-//   - unverified: everything not verified, defective commits included
+// It switches on the SAME predicates as the commit-state partition above rather
+// than re-deriving from HasNote, which is what let the two disagree. Counts used
+// to bucket every note-less commit as unverified, so a span-covered commit —
+// which doctor prints "✓ (covered by the gated push …)" — was simultaneously
+// reported as unverified in the summary line and gated on by doctor's exit code.
+// An ordinary three-commit PR (commit, commit, commit, push) therefore printed
+// all ✓ and exited 1. The same held for a branch that was never pushed, one line
+// after doctor prints "These are not bypasses".
 //
-// "verified" used to mean "has a note", so a commit whose note failed to attest
-// it — one `warden verify` refuses outright — was reported as verified anyway,
-// merely with a parenthetical. Counting a commit as verified when the verifier
-// rejects it is the tool disagreeing with itself, and the summary line is
-// exactly where a reader stops looking.
-//
-// unverified deliberately INCLUDES defective, so it stays "everything not
-// verified". `doctor` gates its exit code on it, and a repo whose notes no
-// longer attest anything is precisely a repo that should be flagged.
-func (r AuditReport) Counts() (verified, defective, unverified int) {
+// Unverified still deliberately INCLUDES defective, so it stays "warden should
+// have been able to vouch for this and cannot": a repo whose notes no longer
+// attest anything is precisely a repo that should be flagged.
+func (r AuditReport) Counts() Tally {
+	var t Tally
 	for i := range r.Commits {
+		c := &r.Commits[i]
 		switch {
-		case r.Commits[i].HasNote && r.Commits[i].ChainIntact:
-			verified++
-		case r.Commits[i].HasNote:
-			defective++
-			unverified++
-		default:
-			unverified++
+		case c.HasNote && c.ChainIntact:
+			t.Verified++
+		case c.HasNote:
+			t.Defective++
+			t.Unverified++
+		case c.Covered():
+			t.Covered++
+		case c.Unpushed(), c.Unattributable():
+			t.Unknown++
+		default: // Reattestable or Bypassed: a real gap either way
+			t.Unverified++
 		}
 	}
-	return
+	return t
 }
 
 // Reattestable returns the un-noted commits a validated tree-identical commit

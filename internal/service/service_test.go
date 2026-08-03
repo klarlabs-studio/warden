@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/application"
@@ -248,12 +249,26 @@ func TestService_DoctorFlagsUnverifiedCommit(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("commit: %v: %s", err, out)
 	}
+	// It must also have been PUSHED to be a bypass. A branch with no
+	// remote-tracking ref never reached the pre-push gate that writes the note,
+	// and warden reports those gaps as unattributable rather than as drift.
+	nameCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	nameCmd.Dir = dir
+	name, err := nameCmd.Output()
+	if err != nil {
+		t.Fatalf("resolve branch: %v", err)
+	}
+	ref := "refs/remotes/origin/" + strings.TrimSpace(string(name))
+	up := exec.Command("git", "update-ref", ref, "HEAD")
+	up.Dir = dir
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Fatalf("update-ref %s: %v: %s", ref, err, out)
+	}
 	report, err := svc.Doctor("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, unverified := report.Counts()
-	if unverified != 1 {
+	if unverified := report.Counts().Unverified; unverified != 1 {
 		t.Errorf("expected 1 unverified commit, got %d (%d commits)", unverified, len(report.Commits))
 	}
 }

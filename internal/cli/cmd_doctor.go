@@ -31,8 +31,11 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	}
 	printDoctor(stdout, report)
 
-	_, _, unverified := report.Counts()
-	if unverified > 0 {
+	// Gate on Unverified alone. It excludes commits a gated push span published,
+	// and commits on a branch the pre-push gate never had a chance to run on —
+	// both of which printDoctor already reports as fine, one of them with "These
+	// are not bypasses" written directly above this exit code.
+	if report.Counts().Unverified > 0 {
 		// Signal drift so CI can gate on it, without treating it as a crash.
 		return 1
 	}
@@ -83,15 +86,15 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 				short(c.SHA), c.Date, truncate(c.Subject, 40))
 		}
 	}
-	verified, defective, unverified := r.Counts()
-	_, _ = fmt.Fprint(w, summaryLine("", verified, defective, unverified))
+	t := r.Counts()
+	_, _ = fmt.Fprint(w, summaryLine("", t))
 	if r.NeverPushed {
 		_, _ = fmt.Fprintf(w, "branch %s has no remote-tracking ref: nothing here has been pushed, so the\n"+
 			"pre-push gate that writes the note has never run. These are not bypasses.\n", r.Branch)
 	}
 	if n := len(r.Reattestable()); n > 0 {
 		_, _ = fmt.Fprintf(w, "%d of the %d were gated under a different commit id (squash-merge); recover them with:\n"+
-			"  warden reattest --all --branch %s --push\n", n, unverified, r.Branch)
+			"  warden reattest --all --branch %s --push\n", n, t.Unverified, r.Branch)
 	}
 }
 
@@ -102,10 +105,20 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 // with a parenthetical: `warden verify` refuses those commits outright, and a
 // summary that calls them verified is the tool contradicting itself on the one
 // line most readers stop at.
-func summaryLine(prefix string, verified, defective, unverified int) string {
-	s := fmt.Sprintf("%s%d verified, %d unverified since adoption", prefix, verified, unverified)
-	if defective > 0 {
-		s += fmt.Sprintf(" (%d of them carry a note that does not attest the commit)", defective)
+// Covered and unknown commits are named rather than folded into either side:
+// summing them into unverified made a fully-gated multi-commit push read as a
+// pile of unchecked commits, and dropping them silently would leave a summary
+// whose numbers no longer add up to the history it just listed.
+func summaryLine(prefix string, t domain.Tally) string {
+	s := fmt.Sprintf("%s%d verified, %d unverified since adoption", prefix, t.Verified, t.Unverified)
+	if t.Defective > 0 {
+		s += fmt.Sprintf(" (%d of them carry a note that does not attest the commit)", t.Defective)
+	}
+	if t.Covered > 0 {
+		s += fmt.Sprintf("; %d covered by a gated push span", t.Covered)
+	}
+	if t.Unknown > 0 {
+		s += fmt.Sprintf("; %d unattributable (never pushed, or provenance predating push spans)", t.Unknown)
 	}
 	return s + "\n"
 }

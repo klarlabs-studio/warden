@@ -495,10 +495,26 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	var noteErr error
 	var notePushWarning string
+	// noteWriteWarning covers the failure one step earlier than notePushWarning:
+	// no note was written AT ALL, not even locally. It stays best-effort in the
+	// gate path — the push already happened, so failing now would block a
+	// developer over a side-channel (§9) — but it must not be SILENT. `git notes
+	// add` needs a committer identity and fails outright without one, which is
+	// how an --attest-only run once reported "attested" having written nothing
+	// (#183). The gate path had the same hole, minus the exit code.
+	var noteWriteWarning string
+	if shaErr != nil {
+		noteWriteWarning = "no provenance note was written: HEAD could not be read (" + shaErr.Error() +
+			"), so there was no commit to bind the record to. This commit will read as ungated everywhere."
+	}
 	if shaErr == nil {
 		// Note-push is best-effort in the GATE path: the push already happened, so
 		// failing the run now would block a developer over a side-channel (§9).
-		if noteErr = r.Git.WriteNote(finalSHA, *record); noteErr == nil {
+		if noteErr = r.Git.WriteNote(finalSHA, *record); noteErr != nil {
+			noteWriteWarning = "provenance note could NOT be written: " + noteErr.Error() +
+				". The push succeeded, but this commit carries no provenance and will read as an " +
+				"ungated bypass everywhere — including in the CI gate."
+		} else {
 			// Best-effort, but no longer SILENT. A note that reaches no remote is
 			// provenance nobody else can use: the commit verifies on this machine
 			// and reads as an ungated bypass everywhere else, including in the CI
@@ -540,7 +556,13 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
 	}
-	if unsignedWarning != "" {
+	// The unsigned warning says the note "was written UNSIGNED". When no note was
+	// written it is a false statement about the artifact, and the louder failure
+	// is the missing note, not its missing signature — so the two are mutually
+	// exclusive rather than stacked.
+	if noteWriteWarning != "" {
+		res.Warnings = append(res.Warnings, noteWriteWarning)
+	} else if unsignedWarning != "" {
 		res.Warnings = append(res.Warnings, unsignedWarning)
 	}
 	if notePushWarning != "" {

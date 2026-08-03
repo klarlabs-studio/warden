@@ -86,10 +86,18 @@ type AuditOutput struct {
 	Adoption string `json:"adoption"`
 	Branch   string `json:"branch"`
 	// Verified counts commits whose note ATTESTS them; Defective, those carrying
-	// verified; Unverified, those with no note at all.
+	// a note that does not; Unverified, the real gaps (Defective included).
 	Verified   int `json:"verified"`
 	Defective  int `json:"defective"`
 	Unverified int `json:"unverified"`
+	// Covered counts commits a gated push span published — warden validates one
+	// tree per run and vouches for the span, so these need no note of their own.
+	// Unknown counts commits warden cannot speak to at all: a branch that was
+	// never pushed, or provenance older than push spans. Both used to be summed
+	// into Unverified, which reported an ordinary gated multi-commit push as a
+	// pile of unchecked commits.
+	Covered int `json:"covered"`
+	Unknown int `json:"unknown"`
 	// Reattestable counts the unverified commits a tree-identical validated
 	// commit can vouch for — the recoverable share of the gap (the squash-merge
 	// signature), as opposed to commits that were genuinely never gated.
@@ -224,13 +232,15 @@ func newVerifyOutput(sha string, r ProvenanceRecord) VerifyOutput {
 // the tallies here so every caller reports the same numbers rather than each
 // re-deriving them.
 func newAuditOutput(rep domain.AuditReport) AuditOutput {
-	verified, defective, unverified := rep.Counts()
+	t := rep.Counts()
 	out := AuditOutput{
 		Adoption:     rep.Adoption,
 		Branch:       rep.Branch,
-		Verified:     verified,
-		Defective:    defective,
-		Unverified:   unverified,
+		Verified:     t.Verified,
+		Defective:    t.Defective,
+		Unverified:   t.Unverified,
+		Covered:      t.Covered,
+		Unknown:      t.Unknown,
 		Reattestable: len(rep.Reattestable()),
 		Commits:      make([]AuditCommit, 0, len(rep.Commits)),
 	}
