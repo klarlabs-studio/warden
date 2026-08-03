@@ -216,6 +216,26 @@ func TestGoldenFleet_MultiCommitPushIsNotABypass(t *testing.T) {
 	}
 }
 
+// The number CI actually gates on is `warden doctor`'s exit code, and it was the
+// one surface the assertions above did not reach. They read the fleet rollup,
+// which excluded span-covered commits correctly; doctor's own tally did not, so
+// this exact repo printed "✓ (covered by the gated push …)" for every commit and
+// exited 1 anyway. Two classifications of one fact, and the test suite only ever
+// asked the one that was right.
+func TestGoldenFleet_DoctorExitsZeroOnAGatedMultiCommitPush(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("first of three")
+	g.commit("second of three")
+	g.commit("third of three")
+	g.gate()
+
+	out, code := g.warden("doctor")
+	if code != 0 {
+		t.Errorf("doctor exited %d on a fully gated three-commit push, want 0\n%s", code, out)
+	}
+}
+
 // A real --no-verify must still be reported as a bypass. A metric that never
 // fires is exactly as useless as one that always does, and every correction so
 // far has moved in the direction of counting fewer things — so this is the guard
@@ -304,6 +324,13 @@ func TestGoldenFleet_ARepoThatNeverPushedIsNotBypassed(t *testing.T) {
 	sum := got.Verified + got.Covered + got.Bypassed + got.Reattestable + got.Unattributable + got.Unpushed + got.Defective
 	if sum != got.Commits {
 		t.Errorf("buckets sum to %d but there are %d commits (%+v)", sum, got.Commits, got)
+	}
+	// Same gap as the multi-commit case: doctor printed "These are not bypasses"
+	// and then failed on them anyway, because its tally counted every note-less
+	// commit as unverified regardless of whether the gate could ever have run.
+	out, code := g.warden("doctor")
+	if code != 0 {
+		t.Errorf("doctor exited %d on a branch that was never pushed, want 0\n%s", code, out)
 	}
 }
 
