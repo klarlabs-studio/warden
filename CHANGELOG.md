@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.2] — 2026-08-03
+
 ### Fixed
 
 - **`warden doctor` no longer exits 1 on a correctly gated history.** `Counts`
