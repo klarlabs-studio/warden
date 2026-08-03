@@ -215,3 +215,56 @@ func TestAttestExternal_DefaultsAnEmptyCommitToTheAttestedSHA(t *testing.T) {
 		t.Error("defaulted record must attest the commit it was written for")
 	}
 }
+
+// An external attestation carries a WEAKER claim than a local run, so its
+// signature is what makes it worth anything at all: without one, the record
+// says "some run reported these checks passing" with nothing binding that to a
+// signer a verifier trusts. Refusing outright is correct — writing an unsigned
+// external note would produce provenance that looks present and proves nothing.
+func TestAttestExternal_RefusesWithoutASigningKey(t *testing.T) {
+	svc, sha := repoForAttest(t)
+	svc.signer = nil
+
+	_, err := svc.AttestExternal(sha, extRef("lint"), false)
+	if err == nil {
+		t.Fatal("attesting without a signing key must fail")
+	}
+	if !errors.Is(err, ErrExternalAttestation) {
+		t.Errorf("error should wrap ErrExternalAttestation, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "must be signed") {
+		t.Errorf("error should say why a key is required, got: %v", err)
+	}
+	// Nothing may be written when the attestation is refused.
+	if rec, _ := svc.Repo().ReadNote(sha); rec != nil {
+		t.Error("a refused attestation must not leave a note behind")
+	}
+}
+
+// With --push, publishing is not best-effort: this command exists to make the
+// attestation available to others, so a note that reaches no remote is a
+// failure the caller must hear about. The RunID is still returned, because the
+// note WAS written locally and the operator needs to know what to publish.
+func TestAttestExternal_PushFailureIsReportedNotSwallowed(t *testing.T) {
+	svc, sha := repoForAttest(t)
+	svc.remote = "no-such-remote"
+
+	res, err := svc.AttestExternal(sha, extRef("lint", "test"), true)
+	if err == nil {
+		t.Fatal("a failed note push must surface as an error under --push")
+	}
+	if !errors.Is(err, ErrExternalAttestation) {
+		t.Errorf("error should wrap ErrExternalAttestation, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not published") {
+		t.Errorf("error should distinguish written-but-unpublished, got: %v", err)
+	}
+	// The local note exists despite the push failure — reporting otherwise would
+	// send the operator to re-attest when they only need to publish.
+	if rec, _ := svc.Repo().ReadNote(sha); rec == nil {
+		t.Error("the note should be written locally even when the push fails")
+	}
+	if res.RunID == "" {
+		t.Error("RunID should be returned so the operator knows what was written")
+	}
+}
