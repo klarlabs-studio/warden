@@ -68,6 +68,13 @@ type RunRecord struct {
 	// each content-digested. Being part of the record, it is covered by the
 	// evidence chain and the signature — a signed statement of exactly which
 	// dependency sets were in the tree warden gated (§9).
+	//
+	// Read that literally: it attests the lockfiles the COMMIT carries, not the
+	// packages the steps resolved against. Gitignored dependency directories are
+	// exposed from the live checkout rather than reinstalled (see
+	// git.exposeGitignoredDeps), so an installed tree that has drifted from the
+	// lockfile is what a JS step actually saw. The digests are still exactly what
+	// they say they are; they are not a claim that the run used them.
 	Dependencies []DependencyManifest `json:"dependencies,omitempty"`
 	// AgentTrace notarizes an Agent Trace record that was present when this
 	// commit was gated. Being inside the record, its digest is covered by the

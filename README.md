@@ -53,8 +53,13 @@ Built on [`axi-go`](https://go.klarlabs.de/axi) (execution kernel — typed acti
 fails CI"), and only when you **remember** to run it, leaving **no trace**.
 Warden does what a Makefile can't:
 
-- **Runs clean.** Every check runs in a disposable worktree seeded from the
-  commit, so passing in warden means passing in CI — reproducibly.
+- **Runs clean.** Every check runs in a disposable worktree whose *tracked* tree
+  is seeded from the commit, not from your dirty working copy — so a pass is a
+  pass on what you are actually shipping. (Gitignored dependency directories are
+  the deliberate exception: `node_modules` is exposed from your live checkout
+  rather than reinstalled, which is fast but means installed deps that have
+  drifted from the committed lockfile are the ones your checks see. See
+  [Dependencies come from your checkout](#dependencies-come-from-your-checkout).)
 - **Can't be forgotten.** Native `git` hooks fire automatically; no discipline
   required, no changed muscle memory.
 - **Leaves proof.** Each gated commit gets a signed, hash-chained validation note
@@ -879,11 +884,13 @@ under `.git/` that survives the worktree, so the second run onward is warm:
 Measured on a six-crate Rust workspace, the real pre-commit gate: **86s → 4s.**
 
 This is a *redirection*, not a copy — deliberately. Dependency directories are
-hardlink-copied into the worktree (see `symlink_deps`), which is safe because
-`node_modules` is read-mostly. A compiler **writes** to its cache, and hardlinks
-share inodes, so copying one that way could corrupt your live cache. Pointing the
-toolchain at its own directory lets its own locking handle concurrency — which is
-what those variables exist for.
+hardlink-copied into the worktree (see `symlink_deps`), which works because
+`node_modules` is read-mostly (with the in-place-write caveat under
+[Dependencies come from your checkout](#dependencies-come-from-your-checkout)).
+A compiler **writes** to its cache constantly, and hardlinks share inodes, so
+copying one that way would corrupt your live cache. Pointing the toolchain at its
+own directory lets its own locking handle concurrency — which is what those
+variables exist for.
 
 Warden never overrides a variable you already set: if you or your CI has
 deliberately placed a cache somewhere, that wins. **Go is absent on purpose** — its
@@ -946,6 +953,47 @@ above. `npm config set` overwrites it in place with the real credential, and the
 next `git add` stages a secret. The whole point of a gate is that its happy path
 can't end in a leak — so warden's built-in `credentials` step refuses the push if
 it happens anyway.
+
+### Dependencies come from your checkout
+
+A validation worktree holds **tracked files only**, so it starts with no
+`node_modules`. Warden does not reinstall — a per-run `npm ci` is the dominant
+cost on a large JS repo, and paying it on every commit would make the gate
+something people turn off. It exposes the dependency directories from your live
+checkout instead (hardlink-copied by default, symlinked under `symlink_deps`).
+
+That is a deliberate trade, and it has a consequence worth stating plainly:
+
+> The **tracked tree** warden checks is seeded from the commit. The
+> **dependency tree** is whatever is installed on your machine right now.
+
+If your `node_modules` has drifted from the committed lockfile — a branch switch
+without a reinstall, a local `npm link`, a half-applied upgrade — the checks run
+against dependencies the commit does not specify, and CI (installing fresh from
+the lockfile) can legitimately disagree. Warden cannot currently detect this;
+if a JS step passes here and fails in CI, an out-of-date install is the first
+thing to rule out:
+
+```bash
+npm ci   # or: pnpm install --frozen-lockfile / yarn install --immutable
+```
+
+The provenance note is honest about what it saw and no more: `dependencies`
+digests the **lockfiles in the worktree**, i.e. the ones the commit carries. It
+is a signed statement about the committed dependency set, not a claim that the
+run resolved against it.
+
+Two smaller consequences of the same mechanism:
+
+- **Hardlinks share inodes.** A tool that rewrites a dependency file **in place**
+  — `patch-package`, some cache writers — writes through to your real
+  `node_modules`. Creating and deleting files inside the worktree is isolated
+  (directories are recreated, not linked), so this is narrow, but it is not
+  nothing. `symlink_deps: true` does not help; it shares the whole directory.
+- **Compiler caches are never shared this way.** A compiler writes to its cache
+  constantly, so warden redirects each toolchain at its own directory rather
+  than linking one — see
+  [Compiled languages: build-cache reuse](#compiled-languages-build-cache-reuse).
 
 ### The `credentials` step
 
