@@ -98,10 +98,14 @@ func refExists(ctx context.Context, dir, ref string) bool {
 	return err == nil
 }
 
-// gitOut runs git in dir and returns combined output.
+// gitOut runs git in dir and returns combined output. The environment is
+// scrubbed of git's hook variables: dir is the disposable worktree, and a
+// GIT_INDEX_FILE inherited from the invoking hook points at the live checkout's
+// index — relatively, so it does not even resolve from here (see scrubbedEnv).
 func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = scrubbedEnv()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

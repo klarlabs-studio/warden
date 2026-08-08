@@ -202,15 +202,22 @@ func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, c
 	}
 }
 
+// scrubbedEnv is the process environment with git's hook variables
+// (GIT_INDEX_FILE, GIT_DIR, …) removed. It is the baseline for EVERY subprocess
+// a step starts, because every one of them runs with its working directory
+// inside the disposable worktree, where `.git` is a gitfile rather than a
+// directory. Git exports those variables to hook processes with paths relative
+// to the live checkout, so a subprocess that inherits them resolves `.git/index`
+// through the gitfile and dies with ENOTDIR — or, worse, quietly reads the live
+// repo's index instead of the worktree it was asked to judge (#205).
+func scrubbedEnv() []string { return git.ScrubHookEnv(os.Environ()) }
+
 // stepEnv augments the process environment with WARDEN_* variables so a command
 // can scope itself to what changed — the primitive for incremental checks. For
 // example: `go test $(echo "$WARDEN_CHANGED_FILES" | ...)`. The full change set
 // (not just a per-step subset) is exposed; scoping is the command's choice.
 func stepEnv(sc application.StepContext) []string {
-	// Strip the git hook env vars (GIT_INDEX_FILE, GIT_DIR, …) so a git-aware
-	// step run inside the disposable worktree — e.g. golangci-lint's
-	// new-from-rev — resolves git from the worktree, not the live hook index.
-	env := git.ScrubHookEnv(os.Environ())
+	env := scrubbedEnv()
 	// Pin golangci-lint's cache to a per-worktree dir. golangci caches analysis
 	// results keyed to absolute paths; because each run uses a fresh random
 	// worktree, a shared cache returns results referencing a deleted worktree

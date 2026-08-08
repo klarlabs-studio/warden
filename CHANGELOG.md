@@ -6,6 +6,22 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The gate no longer aborts with `.git/index: Not a directory` when it runs
+  from a git hook.** Git exports `GIT_INDEX_FILE`/`GIT_DIR` to hook processes,
+  usually as paths relative to the live checkout. The `rebase` step's git
+  subprocesses (and the coding-agent step's shell) did not scrub them, so with
+  their working directory inside the disposable worktree — where `.git` is a
+  gitfile, not a directory — `.git/index` resolved *through* that file and git
+  died with ENOTDIR. Every `git commit` and `git push` in an affected repo was
+  blocked before `vet`/`test` ever ran, and because `warden run pre-commit`
+  carries no such variables the failure was invisible to manual testing.
+
+  Warden's own git wrapper and the shell steps already scrubbed these
+  (`git.ScrubHookEnv`); the fix routes the two remaining subprocess sites
+  through the same baseline (#205).
+
 ## [0.24.2] — 2026-08-03
 
 ### Fixed
