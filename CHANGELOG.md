@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`cli` coverage: 81.3% → 83.0%.** `.coverctl.yaml` exempts `internal/cli`
+  from the per-file floor for a sound reason — a command entry point blocks on
+  stdio or a server loop, so a per-file rule there would measure how testable a
+  `main()` is — with the consequence that `cli` is enforced at the domain level
+  only, and it was the domain closest to its 80% floor while being where every
+  new command lands. `why`, `attach` and `reattest --all` are now covered
+  through their real output rather than left to the domain average: the trace
+  notarization line's three states, the base-policy and unsigned wordings, the
+  no-live-run answer, the sweep that actually writes, and reattest's usage
+  errors. The exemption is unchanged (#194).
 
 ### Fixed
 
@@ -275,7 +287,6 @@ Three fixes to commands that answered confidently and wrongly.
   a sentinel rather than a message. Startup failures that are not "there is no
   repository here" still exit, because relaunching elsewhere would not fix them.
 
-
 - **"verified" now means the note attests the commit, not merely that one
   exists.** `Counts()` reported every commit carrying a note as verified, with
   the failures relegated to a parenthetical. So a commit whose note does not
@@ -523,7 +534,6 @@ tally. Anyone acting on that number should re-run against this release.
   `slsa.dev/provenance`. Every claim in the new text was checked against shipped
   code before it went in.
 
-
 ### Removed
 
 - **Six dead nox baseline entries.** Five were the SEC-163 false positive on Go
@@ -623,7 +633,6 @@ coverage work on the things the numbers were hiding.
   redirection, not a copy: a compiler writes to its cache and hardlinks share
   inodes, so copying one could corrupt the developer's live cache.
 
-
 - **`internal/tui` and `stepsdk` are now enforced by a coverage minimum**
   (#157). Neither belonged to any domain, so no minimum applied to either — the
   gate reported "all 7 domains pass" while 204 statements sat outside every
@@ -653,7 +662,6 @@ coverage work on the things the numbers were hiding.
   whether the logic is tested — and coverctl's `exclude:` would have dropped
   them from domain coverage too, inflating it. Their 80% domain minimum still
   applies.
-
 
 - **The shipped installers are now covered by the Go suite** (#148),
   `scripts/version_guard_test.go`. It executes the real scripts — a test
@@ -688,7 +696,6 @@ coverage work on the things the numbers were hiding.
   distinguished "the machine was not ready" from "your change is wrong" since the
   exit-code split; the agent surfaces dropped it, leaving an agent to infer
   whether to retry by parsing English.
-
 
 - The CI-gate pin example is documented against a pin that will not rot (#139),
   and `actions/checkout` is bumped to v7.0.1 (#138).
@@ -732,8 +739,6 @@ coverage work on the things the numbers were hiding.
   verifiable but impossible to pin or roster — which removes the only reason to
   sign with an SSH key.
 
-
-
 - **Five doc comments described the wrong function** (#141). Inserting a
   function between an existing comment and its declaration leaves the comment
   behind, silently rebinding it to whatever now follows. `Worktree.Remove` came
@@ -770,7 +775,6 @@ coverage work on the things the numbers were hiding.
   the second is unreachable — `x/crypto/openpgp` is not linked, govulncheck
   confirms it, and no fixed version exists because the advisory is that the
   package is unmaintained by design.
-
 
 - **`WARDEN_VERSION` could redirect an install to another GitHub repository**
   (#148). All three installers interpolated the version straight into the
