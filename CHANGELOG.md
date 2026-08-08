@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-08-08
+
 ### Changed
 
 - **`cli` coverage: 81.3% → 83.0%.** `.coverctl.yaml` exempts `internal/cli`
