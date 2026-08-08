@@ -6,6 +6,7 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+
 ### Fixed
 
 - **The gate no longer aborts with `.git/index: Not a directory` when it runs
@@ -17,10 +18,27 @@ All notable changes to warden are documented here. The format follows
   died with ENOTDIR. Every `git commit` and `git push` in an affected repo was
   blocked before `vet`/`test` ever ran, and because `warden run pre-commit`
   carries no such variables the failure was invisible to manual testing.
-
   Warden's own git wrapper and the shell steps already scrubbed these
   (`git.ScrubHookEnv`); the fix routes the two remaining subprocess sites
   through the same baseline (#205).
+
+### Documentation
+
+- **The "runs clean" claim now carries its dependency caveat.** The README's
+  first Makefile-comparison bullet said every check runs in a worktree "seeded
+  from the commit, so passing in warden means passing in CI — reproducibly".
+  The *tracked* tree is seeded from the commit; gitignored dependency
+  directories are exposed from the live checkout instead, deliberately, because
+  a per-run reinstall is the dominant cost on a large JS repo. A `node_modules`
+  that has drifted from the committed lockfile is therefore what the checks see,
+  and CI installing fresh can legitimately disagree — the exact failure the
+  sentence promised to eliminate.
+  The bullet is now narrowed to the tracked tree, a new
+  *Dependencies come from your checkout* section states the trade and how to
+  rule it out, and `RunRecord.Dependencies` says in the type what it does and
+  does not attest. Also noted there: hardlink exposure shares inodes, so a tool
+  that rewrites a dependency file in place writes through to the live checkout
+  (#204).
 
 ## [0.24.2] — 2026-08-03
 
