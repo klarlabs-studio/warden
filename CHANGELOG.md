@@ -6,6 +6,24 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.4] - 2026-08-08
+
+### Changed
+
+- **`go.klarlabs.de/statekit` v1.12.0 → v1.13.2.** v1.13.0 regressed
+  `viz.ParseNativeJSON` — statekit's own XState exporter collapses a group of
+  one eventless transition to a JSON object, and the parser accepted only an
+  array, so statekit emitted output statekit could not read. v1.13.1 fixed
+  that; v1.13.2 additionally removed a 12 MB darwin/arm64 executable that had
+  been committed at statekit's module root since June and shipped in every
+  release through v1.13.1, taking the module zip from 12.6 MB to 6.2 MB.
+  warden does not import `statekit/viz`, so the regression was never
+  reachable here — the download size is the reason this lands on v1.13.2
+  (#209).
+- **`golang.org/x/crypto` promoted to a direct requirement.** warden imports
+  it directly, so `go mod tidy` on main was not a no-op; `golang.org/x/term`
+  is a transitive of it that `go.sum` was missing (#202).
+
 ## [0.24.3] - 2026-08-08
 
 ### Changed
