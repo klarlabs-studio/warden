@@ -92,6 +92,9 @@ func (s AgentStep) invoke(ctx context.Context, command string, sc application.St
 		// own flags and pipes; a zero exit means the step passed.
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
 		cmd.Dir = sc.WorktreeDir
+		// An agent CLI reads the repo through git like any other tool, so it
+		// needs the same scrubbed environment the shell steps get.
+		cmd.Env = scrubbedEnv()
 		// Own process group: a timed-out or cancelled agent CLI is killed with
 		// its whole subtree, not left running detached past the step.
 		proc.Isolate(cmd)
