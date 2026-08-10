@@ -6,6 +6,28 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Dependency drift is recorded in the provenance note.** `RunRecord` gains
+  `dependencies_drifted`, populated on a pre-push run when the installed
+  packages did not match the commit's lockfile.
+
+  `dependencies` digests the lockfiles the **commit** carries. Because warden
+  exposes `node_modules` from the live checkout rather than reinstalling, those
+  digests were never a claim that the run resolved against them — a caveat that
+  lived only in a source comment, where no verifier could read it. A signed
+  note showing digested lockfiles and nothing else overclaims by omission.
+
+  A terminal warning would not have fixed that: terminal output is ephemeral,
+  and the note is the durable artifact warden exists to produce. The field sits
+  inside the evidence chain and the signature, so the attestation says what it
+  actually knows (#204).
+
+  Detection is best-effort and the record does not pretend otherwise: an absent
+  field means nothing was detected, not that the install was verified. yarn and
+  pnpm write no equivalent manifest, and a never-installed tree reports
+  nothing.
+
 ## [0.25.0] - 2026-08-10
 
 ### Added

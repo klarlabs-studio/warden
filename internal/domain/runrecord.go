@@ -76,6 +76,17 @@ type RunRecord struct {
 	// lockfile is what a JS step actually saw. The digests are still exactly what
 	// they say they are; they are not a claim that the run used them.
 	Dependencies []DependencyManifest `json:"dependencies,omitempty"`
+	// DependenciesDrifted records lockfiles whose installed packages did not
+	// match at validation time. Empty means nothing was detected — which is
+	// not the same as verified clean: detection needs an npm-style hidden
+	// lockfile, so yarn, pnpm and never-installed trees report nothing.
+	//
+	// This exists so the record stops implying more than it knows. Dependencies
+	// above digests the lockfiles the commit carries; when this field is
+	// populated, the run demonstrably did NOT resolve against them. Being in
+	// the record, it is covered by the evidence chain and the signature, so a
+	// verifier reads the caveat rather than having to know it (#204).
+	DependenciesDrifted []DepDrift `json:"dependencies_drifted,omitempty"`
 	// AgentTrace notarizes an Agent Trace record that was present when this
 	// commit was gated. Being inside the record, its digest is covered by the
 	// evidence chain AND the signature — which is the whole point: the trace is

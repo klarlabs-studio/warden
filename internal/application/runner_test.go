@@ -1124,3 +1124,67 @@ func TestRunner_AllowDiscardRejectsFalseyValues(t *testing.T) {
 		}
 	}
 }
+
+// fakeDepDrift returns scripted drift.
+type fakeDepDrift struct{ drifts []domain.DepDrift }
+
+func (f fakeDepDrift) DetectDepDrift(string) []domain.DepDrift { return f.drifts }
+
+// Drift has to reach the signed record, not just a terminal.
+//
+// RunRecord.Dependencies digests the lockfiles the COMMIT carries. Warden
+// exposes node_modules from the live checkout rather than reinstalling, so
+// those digests are not a claim that the run resolved against them — a caveat
+// that lived only in a source comment. A verifier reading the note months
+// later saw digested lockfiles and nothing else.
+//
+// A warning would not fix that: the terminal output is ephemeral and the note
+// is the durable artifact warden exists to produce. Putting drift inside the
+// record puts it inside the evidence chain and the signature (#204).
+func TestRunner_PrePushRecordsDependencyDrift(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	r.Signer = newFakeSigner(t)
+	r.SBOM = fakeSBOM{manifests: []domain.DependencyManifest{{Ecosystem: "npm", Path: "package-lock.json", Digest: "sha256:abc"}}}
+	r.DepDrift = fakeDepDrift{drifts: []domain.DepDrift{{
+		Lockfile:   "package-lock.json",
+		Mismatched: []string{"node_modules/left-pad: 1.2.0 != 1.3.0"},
+	}}}
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(git.note.DependenciesDrifted) != 1 {
+		t.Fatalf("drift did not reach the note: %+v", git.note.DependenciesDrifted)
+	}
+	if got := git.note.DependenciesDrifted[0].Lockfile; got != "package-lock.json" {
+		t.Errorf("drift lockfile = %q, want package-lock.json", got)
+	}
+	// The whole point: a caveat the verifier cannot trust is not a caveat.
+	if !git.note.VerifySignature() {
+		t.Error("signature must cover the recorded drift")
+	}
+	// The SBOM still says what it always said; drift qualifies it, not replaces it.
+	if len(git.note.Dependencies) != 1 {
+		t.Errorf("recording drift must not drop the SBOM: %+v", git.note.Dependencies)
+	}
+}
+
+// No drift must leave the field absent, so a clean run's note carries no
+// empty array implying the check ran and found something to say.
+func TestRunner_NoDriftLeavesTheRecordSilent(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	r.Signer = newFakeSigner(t)
+	r.DepDrift = fakeDepDrift{drifts: nil}
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if len(git.note.DependenciesDrifted) != 0 {
+		t.Errorf("a clean run recorded drift: %+v", git.note.DependenciesDrifted)
+	}
+}

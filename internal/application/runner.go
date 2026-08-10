@@ -100,7 +100,11 @@ type Runner struct {
 	Signer Signer
 	// SBOM is optional: when set, a passing pre-push run records its dependency
 	// lockfile digests in the provenance note.
-	SBOM     SBOM
+	SBOM SBOM
+	// DepDrift is optional: when set, a passing pre-push run records any
+	// dependency drift it detected, so the note does not imply the run
+	// resolved against the lockfiles it digests (#204).
+	DepDrift DepDriftDetector
 	Settings Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -457,6 +461,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// signature. Best-effort: a collector that finds nothing leaves it empty.
 	if r.SBOM != nil {
 		record.Dependencies = r.SBOM.Collect(sc.WorktreeDir)
+	}
+	// Attach drift in the same place and for the same reason: it must be inside
+	// the signature. A caveat the verifier cannot see is not a caveat.
+	if r.DepDrift != nil {
+		record.DependenciesDrifted = r.DepDrift.DetectDepDrift(sc.WorktreeDir)
 	}
 	// Bind the record to the commit it attests BEFORE signing, so the commit SHA
 	// is covered by the signature and the note can't be transplanted to another

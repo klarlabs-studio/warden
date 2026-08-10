@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // writeLock writes a package-lock-shaped file with the given path→version map.
@@ -153,14 +155,14 @@ func TestDetectDepDriftIgnoresLockfilesInsideNodeModules(t *testing.T) {
 
 // A wall of package names is a warning nobody reads.
 func TestDepDriftExamplesAreBounded(t *testing.T) {
-	d := DepDrift{Lockfile: "package-lock.json"}
+	d := domain.DepDrift{Lockfile: "package-lock.json"}
 	for i := 0; i < 20; i++ {
 		d.Missing = append(d.Missing, string(rune('a'+i)))
 	}
 
 	ex := d.Examples()
-	if len(ex) != maxDriftExamples+1 {
-		t.Fatalf("got %d examples, want %d plus a summary line", len(ex), maxDriftExamples)
+	if len(ex) != domain.MaxDriftExamples+1 {
+		t.Fatalf("got %d examples, want %d plus a summary line", len(ex), domain.MaxDriftExamples)
 	}
 	if !strings.Contains(ex[len(ex)-1], "more") {
 		t.Errorf("truncated list does not say how many were omitted: %v", ex)
