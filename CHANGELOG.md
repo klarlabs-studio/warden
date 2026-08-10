@@ -6,6 +6,29 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-10
+
+### Added
+
+- **Dependency-drift detection.** Warden exposes `node_modules` from the live
+  checkout rather than reinstalling — a per-run `npm ci` is the dominant cost
+  on a large JS repo — so the tracked tree comes from the commit and the
+  dependency tree comes from the machine. After a branch switch without a
+  reinstall, a local `npm link`, or a half-applied upgrade, the checks run
+  against dependencies the commit does not specify, and CI can legitimately
+  disagree. The README said "warden cannot currently detect this"; it can now.
+
+  `git.DetectDepDrift` compares each committed lockfile against npm's
+  `node_modules/.package-lock.json`, the manifest of what is actually
+  installed — two file reads and a map diff per lockfile, no install and no
+  network.
+
+  Best-effort by construction: no lockfile, no install, or a package manager
+  that writes no hidden lockfile reports nothing rather than a false alarm.
+  Silence means "nothing detected", not "verified clean". Not yet surfaced in
+  run output — where the warning belongs is a product decision tracked in
+  #204 (#210).
+
 ## [0.24.4] - 2026-08-08
 
 ### Changed
