@@ -6,6 +6,8 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-10
+
 ### Added
 
 - **Dependency drift is recorded in the provenance note.** `RunRecord` gains
