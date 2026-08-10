@@ -54,8 +54,10 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 	if gitDir, err := repo.GitDir(); err == nil {
 		factory = factory.WithCache(cache.Open(gitDir))
 	}
+	gitAdapter := git.NewAdapter(repo)
 	runner := &application.Runner{
-		Git:      git.NewAdapter(repo),
+		Git:      gitAdapter,
+		DepDrift: gitAdapter,
 		Configs:  configs,
 		Kernels:  factory,
 		Approver: approver,

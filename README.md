@@ -970,9 +970,18 @@ That is a deliberate trade, and it has a consequence worth stating plainly:
 If your `node_modules` has drifted from the committed lockfile — a branch switch
 without a reinstall, a local `npm link`, a half-applied upgrade — the checks run
 against dependencies the commit does not specify, and CI (installing fresh from
-the lockfile) can legitimately disagree. Warden cannot currently detect this;
-if a JS step passes here and fails in CI, an out-of-date install is the first
-thing to rule out:
+the lockfile) can legitimately disagree.
+
+Warden detects this where it can. For npm projects it compares each committed
+lockfile against `node_modules/.package-lock.json`, the manifest npm keeps of
+what it actually installed, and records any mismatch in the provenance note as
+`dependencies_drifted`. That is a detection, not a guarantee: yarn and pnpm
+write no equivalent manifest, and a tree that was never installed reports
+nothing. **Silence means nothing was detected, not that the install was
+verified.**
+
+If a JS step passes here and fails in CI, an out-of-date install is still the
+first thing to rule out:
 
 ```bash
 npm ci   # or: pnpm install --frozen-lockfile / yarn install --immutable
@@ -981,7 +990,9 @@ npm ci   # or: pnpm install --frozen-lockfile / yarn install --immutable
 The provenance note is honest about what it saw and no more: `dependencies`
 digests the **lockfiles in the worktree**, i.e. the ones the commit carries. It
 is a signed statement about the committed dependency set, not a claim that the
-run resolved against it.
+run resolved against it — and when drift *is* detected, `dependencies_drifted`
+says so in the same signed record, so a verifier reads the caveat instead of
+having to know it.
 
 Two smaller consequences of the same mechanism:
 

@@ -167,6 +167,19 @@ type SBOM interface {
 	Collect(dir string) []domain.DependencyManifest
 }
 
+// DepDriftDetector reports dependency directories exposed into a worktree that
+// came from an install no longer matching the commit's lockfile.
+//
+// The live checkout is deliberately not a parameter: which directory the deps
+// came from is the git layer's business, and the runner should not have to
+// know that warden exposes them from the working copy at all.
+//
+// Optional, and best-effort even when set — nothing detected is reported as no
+// drift, never as verified clean.
+type DepDriftDetector interface {
+	DetectDepDrift(worktreeDir string) []domain.DepDrift
+}
+
 // Signer produces detached signatures over provenance payloads. It is optional:
 // a nil Signer leaves run records unsigned, and a signing failure never fails a
 // run by default — the note is still written, just without a signature (§9),

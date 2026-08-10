@@ -6,51 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
-
-// DepDrift reports that the dependencies exposed into a worktree are not the
-// ones the commit's lockfile specifies.
-type DepDrift struct {
-	// Lockfile is the repo-relative path of the committed lockfile, e.g.
-	// "web/package-lock.json".
-	Lockfile string
-	// Missing are packages the lockfile requires that are not installed.
-	Missing []string
-	// Mismatched are packages installed at a version other than the one the
-	// lockfile pins, rendered as "name: installed != locked".
-	Mismatched []string
-}
-
-// Summary renders the drift as a single human-readable line.
-func (d DepDrift) Summary() string {
-	switch {
-	case len(d.Mismatched) > 0 && len(d.Missing) > 0:
-		return fmt.Sprintf("%s: %d package(s) at a different version, %d missing",
-			d.Lockfile, len(d.Mismatched), len(d.Missing))
-	case len(d.Mismatched) > 0:
-		return fmt.Sprintf("%s: %d package(s) installed at a different version than the lockfile pins",
-			d.Lockfile, len(d.Mismatched))
-	default:
-		return fmt.Sprintf("%s: %d package(s) in the lockfile are not installed", d.Lockfile, len(d.Missing))
-	}
-}
-
-// maxDriftExamples bounds how many package names a report names outright.
-// A drifted install is usually drifted in bulk — after a branch switch every
-// changed package differs — and a thousand-line warning is a wall nobody
-// reads, which would defeat the point of warning at all.
-const maxDriftExamples = 5
-
-// Examples returns up to maxDriftExamples entries, most useful first, with a
-// trailing "and N more" when the list was truncated.
-func (d DepDrift) Examples() []string {
-	all := append(append([]string{}, d.Mismatched...), d.Missing...)
-	if len(all) <= maxDriftExamples {
-		return all
-	}
-	out := append([]string{}, all[:maxDriftExamples]...)
-	return append(out, fmt.Sprintf("...and %d more", len(all)-maxDriftExamples))
-}
 
 // lockPackages is the subset of a lockfile we compare: the resolved version of
 // every package, keyed by its node_modules path.
@@ -79,8 +37,8 @@ type lockPackages struct {
 // manager that writes no hidden lockfile (yarn, pnpm) reports no drift rather
 // than a false alarm — silence here means "nothing detected", not "verified
 // clean", and the caller must not imply otherwise.
-func DetectDepDrift(worktreeDir, liveDir string) []DepDrift {
-	var drifts []DepDrift
+func DetectDepDrift(worktreeDir, liveDir string) []domain.DepDrift {
+	var drifts []domain.DepDrift
 
 	for _, lockRel := range findLockfiles(worktreeDir) {
 		locked, err := readLockPackages(filepath.Join(worktreeDir, lockRel))
@@ -97,7 +55,7 @@ func DetectDepDrift(worktreeDir, liveDir string) []DepDrift {
 			continue
 		}
 
-		d := DepDrift{Lockfile: lockRel}
+		d := domain.DepDrift{Lockfile: lockRel}
 		for pkgPath, want := range locked {
 			// Skip the root project entry ("") and anything without a pinned
 			// version: workspace links and file: deps have no version to
