@@ -54,6 +54,7 @@ type fakeGit struct {
 	unmergedRemote    []string
 	unmergedRemoteErr error
 	notesPushed       bool
+	anchored          []string
 	wroteNote         bool
 	writeNoteErr      error
 	note              domain.RunRecord
@@ -112,7 +113,8 @@ func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	g.note = rec
 	return nil
 }
-func (g *fakeGit) PushNotes(string) error { g.notesPushed = true; return nil }
+func (g *fakeGit) AnchorAttested(sha string) error { g.anchored = append(g.anchored, sha); return nil }
+func (g *fakeGit) PushNotes(string) error          { g.notesPushed = true; return nil }
 
 // fakeKernel scripts step outcomes and invokes the push closure on approval,
 // mirroring how the real axi-backed kernel resolves the write-external gate.
@@ -358,6 +360,12 @@ func TestRunner_PrePushHappyPathPushesAndRecords(t *testing.T) {
 	}
 	if git.pushed {
 		t.Error("warden must not push behind git's back when git can do it")
+	}
+	// The gate must also anchor: a note whose commit gets collected once the
+	// branch is deleted is unrecoverable, and deleting the branch is the default
+	// merge flow (#212 §3).
+	if len(git.anchored) != 1 || git.anchored[0] != git.head {
+		t.Errorf("gate should anchor the attested commit %q, anchored %v", git.head, git.anchored)
 	}
 	if !git.wroteNote || !git.notesPushed {
 		t.Error("expected provenance note written and pushed")

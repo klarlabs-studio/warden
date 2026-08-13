@@ -524,6 +524,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 				". The push succeeded, but this commit carries no provenance and will read as an " +
 				"ungated bypass everywhere — including in the CI gate."
 		} else {
+			// Anchor before publishing: the note is worthless for re-attestation if
+			// the commit it annotates gets collected once the branch goes away, and
+			// `--delete-branch` is the default merge flow (#212 §3). Silent on
+			// failure — this is a durability hint, and the run has already pushed.
+			_ = r.Git.AnchorAttested(finalSHA)
 			// Best-effort, but no longer SILENT. A note that reaches no remote is
 			// provenance nobody else can use: the commit verifies on this machine
 			// and reads as an ungated bypass everywhere else, including in the CI

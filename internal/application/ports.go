@@ -56,6 +56,9 @@ type Git interface {
 	// form. Each entry is a short sha and subject, for naming them in a refusal.
 	UnmergedRemoteCommits(remote, branch string) ([]string, error)
 	WriteNote(sha string, rec domain.RunRecord) error
+	// AnchorAttested keeps an attested commit reachable so gc cannot prune the
+	// object out from under its own note (#212 §3).
+	AnchorAttested(sha string) error
 	PushNotes(remote string) error
 }
 

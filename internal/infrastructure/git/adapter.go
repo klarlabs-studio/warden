@@ -65,7 +65,8 @@ func (a *Adapter) UnmergedRemoteCommits(remote, branch string) ([]string, error)
 func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 	return a.repo.WriteNote(sha, rec)
 }
-func (a *Adapter) PushNotes(remote string) error { return a.repo.PushNotes(remote) }
+func (a *Adapter) AnchorAttested(sha string) error { return a.repo.AnchorAttested(sha) }
+func (a *Adapter) PushNotes(remote string) error   { return a.repo.PushNotes(remote) }
 
 // worktreeAdapter adapts *Worktree to application.Worktree (Dir field → method).
 type worktreeAdapter struct{ wt *Worktree }

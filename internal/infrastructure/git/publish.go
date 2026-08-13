@@ -291,13 +291,38 @@ func (r *Repo) ReadNote(sha string) (*domain.RunRecord, error) {
 	return &rec, nil
 }
 
+// AnchorAttested keeps an attested commit reachable by pointing a ref at it.
+//
+// #212 §3 blamed lost worktree provenance on notes staying local. They do not —
+// the gate pushes them. The real mechanism is worse and quieter: a note SURVIVES
+// gc while the commit it annotates does not. Delete the branch (which
+// `gh pr merge --delete-branch` does by default, and which removing a worktree
+// does too) and the attested commit becomes unreachable; the next gc prunes the
+// object and leaves the note dangling over nothing.
+//
+// Reattest then fails in the most unhelpful way available: NotedCommits still
+// lists the SHA, TreeSHA on it errors, and the candidate is skipped silently —
+// so the squash commit reports "no warden note" and looks like it was never
+// gated, rather than like something that was gated and then collected.
+//
+// An anchor ref costs one loose ref per attested commit and makes the object
+// permanently reachable, so the evidence outlives the branch that carried it.
+// Best-effort by the caller: failing a push over a durability hint would be a
+// worse trade than the gap it prevents.
+func (r *Repo) AnchorAttested(sha string) error {
+	_, err := r.run("update-ref", AnchorRefPrefix+sha, sha)
+	return err
+}
+
 // PushNotes publishes refs/notes/warden to remote so provenance travels with a
-// shared branch (§9).
+// shared branch (§9). Anchors ride along: a remote that keeps the note but
+// prunes the commit has the same dangling-note problem locally cured above.
 func (r *Repo) PushNotes(remote string) error {
 	// --no-verify for the same reason as Push: a notes push would otherwise
 	// re-trigger the pre-push hook.
 	_, err := r.run("push", "--no-verify", remote, NotesRef+":"+NotesRef)
 	if err == nil {
+		r.pushAnchors(remote)
 		return nil
 	}
 	// A rejected notes push is usually non-fast-forward: something else wrote the
@@ -436,4 +461,12 @@ func (r *Repo) CommitMeta(sha string) (author, date, subject string, err error) 
 		return "", "", "", fmt.Errorf("git: unexpected commit meta for %s: %q", sha, out)
 	}
 	return parts[0], parts[1], parts[2], nil
+}
+
+// pushAnchors publishes the anchor refs, so the remote keeps the attested
+// commits reachable too. Wholly best-effort and deliberately silent: anchors are
+// a durability hint, and a repository that refuses refs/warden/* still gets
+// working provenance — it just loses the ability to reattest after its own gc.
+func (r *Repo) pushAnchors(remote string) {
+	_, _ = r.run("push", "--no-verify", remote, AnchorRefPrefix+"*:"+AnchorRefPrefix+"*")
 }

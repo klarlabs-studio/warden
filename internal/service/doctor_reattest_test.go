@@ -351,3 +351,49 @@ func TestService_ReattestAllEmptyIsNotAnError(t *testing.T) {
 		t.Errorf("nothing was recoverable, got %+v", results)
 	}
 }
+
+// #212 §3: the report blamed lost worktree provenance on notes staying local.
+// They do not — the gate pushes them. The real mechanism is that a note SURVIVES
+// gc while the commit it annotates does not, so `NotedCommits` still lists a SHA
+// whose object is gone and reattest skips it silently. Anchoring is what keeps
+// the evidence alive; this test destroys the branch and collects the repo, which
+// is precisely what `gh pr merge --delete-branch` sets up.
+func TestService_AnchoredNoteSurvivesBranchDeleteAndGC(t *testing.T) {
+	dir, svc := initAdopted(t)
+	trunk := gitIn(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
+
+	gitIn(t, dir, "checkout", "-q", "-b", "feature")
+	// A real change, so the squash below produces a commit with a DISTINCT sha
+	// and an IDENTICAL tree — the exact shape reattest recovers from.
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "work on a branch that will be deleted")
+	src := gitIn(t, dir, "rev-parse", "HEAD")
+	if err := svc.Repo().WriteNote(src, signAs(t, svc, attestRecord(src, "rS"))); err != nil {
+		t.Fatal(err)
+	}
+	svc.anchorNotedCommits()
+
+	// Squash it onto the trunk the way the default merge flow does, then delete
+	// the branch and collect — the source commit's only other ref is now gone.
+	gitIn(t, dir, "checkout", "-q", trunk)
+	gitIn(t, dir, "merge", "-q", "--squash", "feature")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "squash")
+	target := gitIn(t, dir, "rev-parse", "HEAD")
+	gitIn(t, dir, "branch", "-qD", "feature")
+	gitIn(t, dir, "reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all")
+	gitIn(t, dir, "gc", "--prune=now", "-q")
+
+	if _, err := svc.Repo().TreeSHA(src); err != nil {
+		t.Fatalf("the anchor should have kept %s reachable through gc: %v", src, err)
+	}
+	res, err := svc.Reattest(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Wrote || res.Source != src {
+		t.Fatalf("squash commit should still be recoverable from the anchored source, got %+v", res)
+	}
+}

@@ -21,6 +21,11 @@ import (
 // and rewritten independently of history.
 const NotesRef = "refs/notes/warden"
 
+// AnchorRefPrefix namespaces the refs that keep attested commits reachable, so
+// gc cannot prune the evidence a re-attestation would be carried from. See
+// Repo.AnchorAttested.
+const AnchorRefPrefix = "refs/warden/attested/"
+
 // ErrBranchMoved reports that a branch advanced between the start of a run and
 // the attempt to fast-forward it. It is the guard that prevents Warden from
 // clobbering work another process committed mid-run.
