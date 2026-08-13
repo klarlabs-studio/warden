@@ -170,6 +170,35 @@ The coverage is not a weaker path to green:
 - a commit outside every trusted span keeps its original failure, so a
   `--no-verify` commit in the middle of a branch still fails the gate.
 
+### Watching the trunk, not just the PR (`warden-doctor`)
+
+`warden-verify` checks one commit — normally the PR head, which still carries
+its note and therefore passes. It cannot speak about the history that lands on
+your trunk, because a squash merge creates a new sha the note does not follow.
+
+That combination has a bad failure mode: the check stays green forever while
+trunk provenance goes to zero. It looks like coverage.
+
+Add the trunk audit as its own check:
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # doctor walks history
+      - uses: felixgeelhaar/warden/.github/actions/warden-doctor@main
+```
+
+It runs `warden doctor --ci`, which exits 3 on drift — distinct from exit 1, so
+a doctor that could not run at all (unadopted repo, shallow clone) fails loudly
+instead of being reported as tidy, actionable drift.
+
 ### Keeping the base branch green after a squash (`warden reattest`)
 
 The gate assures every merge, but the *squash commit itself* on the base branch

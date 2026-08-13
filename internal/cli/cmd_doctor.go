@@ -14,6 +14,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	branchFlag := fs.String("branch", "", "branch to audit (default: current)")
+	ci := fs.Bool("ci", false, "exit "+fmt.Sprint(exitDoctorDrift)+" on drift, so CI can tell drift from a doctor that could not run")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -37,10 +38,27 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 	// are not bypasses" written directly above this exit code.
 	if report.Counts().Unverified > 0 {
 		// Signal drift so CI can gate on it, without treating it as a crash.
+		if *ci {
+			return exitDoctorDrift
+		}
 		return 1
 	}
 	return 0
 }
+
+// exitDoctorDrift is `warden doctor --ci`'s exit code for "the branch has
+// unverified commits".
+//
+// Without it, drift and a doctor that could not run at all are both 1 — an
+// unadopted repo, a shallow clone with no history to walk, a broken notes fetch.
+// A CI job cannot tell them apart, so the failure mode is a check that reports
+// tidy, actionable drift when warden in fact never audited anything. That is the
+// same shape as #212 §2's original complaint (a check that looks like coverage),
+// which is not a bug worth reintroducing while fixing it.
+//
+// It lives behind --ci rather than replacing the default, because gating on
+// `warden doctor` exiting 1 is an existing contract.
+const exitDoctorDrift = 3
 
 func printDoctor(w io.Writer, r domain.AuditReport) {
 	_, _ = fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, short(r.Adoption))
