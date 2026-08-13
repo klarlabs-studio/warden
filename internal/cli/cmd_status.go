@@ -106,7 +106,7 @@ func pinSkewLine(pins map[domain.Hook]string, running string) string {
 	if len(skewed) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("note: %s, but %s is what runs (hooks prefer a warden on PATH).\n      re-pin with `warden hooks enable <hook>`.",
+	return fmt.Sprintf("note: %s, but %s is what runs (hooks prefer a warden on PATH).\n      re-pin with `warden hooks repin`.",
 		strings.Join(skewed, "; "), running)
 }
 
