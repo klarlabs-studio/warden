@@ -149,6 +149,98 @@ func TestService_Reattest(t *testing.T) {
 		}
 	})
 
+	t.Run("an untrusted note does not squat the commit", func(t *testing.T) {
+		// #212 §8: reattest stopped at Attests(), which says nothing about WHO
+		// signed. So anything able to write a note could permanently block a
+		// trusted one — the only repair being a force-push of the shared notes
+		// ref, which a protected repository may forbid outright.
+		dir, svc := newRepoSvc(t)
+		a := commit(t, dir, svc, "A")
+		b := commit(t, dir, svc, "B") // tree-identical to a
+
+		trustedPub, trustedPriv, _ := ed25519.GenerateKey(nil)
+		fp := domain.KeyFingerprint(base64.StdEncoding.EncodeToString(trustedPub))
+		writeConfig(t, dir, "trusted_keys:\n  - "+fp+"\n")
+
+		// A good source exists...
+		if err := svc.Repo().WriteNote(a, sign(t, attestRecord(a, "rA"), trustedPub, trustedPriv)); err != nil {
+			t.Fatal(err)
+		}
+		// ...and the target already carries a note from a key nobody trusts,
+		// exactly as an ephemeral CI runner's key produced in the field report.
+		squatPub, squatPriv, _ := ed25519.GenerateKey(nil)
+		if err := svc.Repo().WriteNote(b, sign(t, attestRecord(b, "squat"), squatPub, squatPriv)); err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := svc.Reattest(b, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.AlreadyHad || !res.Wrote || res.Source != a {
+			t.Fatalf("an untrusted note must not block a trusted re-attestation: %+v", res)
+		}
+		rec, err := svc.Repo().ReadNote(b)
+		if err != nil || rec == nil {
+			t.Fatalf("no note on b: %v", err)
+		}
+		if rec.PublicKey == base64.StdEncoding.EncodeToString(squatPub) {
+			t.Error("the squatting note survived; it should have been replaced")
+		}
+	})
+
+	t.Run("a trusted note is left alone even when a source exists", func(t *testing.T) {
+		// The other side of the same check: replacing notes that already hold
+		// would make reattest churn every commit it looked at.
+		dir, svc := newRepoSvc(t)
+		a := commit(t, dir, svc, "A")
+		b := commit(t, dir, svc, "B")
+		pub, priv, _ := ed25519.GenerateKey(nil)
+		fp := domain.KeyFingerprint(base64.StdEncoding.EncodeToString(pub))
+		writeConfig(t, dir, "trusted_keys:\n  - "+fp+"\n")
+		if err := svc.Repo().WriteNote(a, sign(t, attestRecord(a, "rA"), pub, priv)); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.Repo().WriteNote(b, sign(t, attestRecord(b, "rB"), pub, priv)); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.Reattest(b, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.AlreadyHad || res.Wrote {
+			t.Fatalf("a trusted note must be left alone: %+v", res)
+		}
+	})
+
+	t.Run("our own re-attestation is not redone on the next run", func(t *testing.T) {
+		// Termination. Reattest re-signs with the LOCAL key, so a roster listing
+		// only some other signer would judge warden's own note untrusted and
+		// rewrite it on every invocation, forever. Caught by the CLI suite when
+		// the roster check first ignored our own key.
+		dir, svc := newRepoSvc(t)
+		a := commit(t, dir, svc, "A")
+		b := commit(t, dir, svc, "B")
+		pub, priv, _ := ed25519.GenerateKey(nil)
+		fp := domain.KeyFingerprint(base64.StdEncoding.EncodeToString(pub))
+		writeConfig(t, dir, "trusted_keys:\n  - "+fp+"\n") // roster WITHOUT our key
+		if err := svc.Repo().WriteNote(a, sign(t, attestRecord(a, "rA"), pub, priv)); err != nil {
+			t.Fatal(err)
+		}
+
+		first, err := svc.Reattest(b, false)
+		if err != nil || !first.Wrote {
+			t.Fatalf("first re-attestation should write: %+v %v", first, err)
+		}
+		second, err := svc.Reattest(b, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second.Wrote || !second.AlreadyHad {
+			t.Fatalf("re-attesting twice must settle, got %+v", second)
+		}
+	})
+
 	t.Run("a roster-trusted source is carried over", func(t *testing.T) {
 		dir, svc := newRepoSvc(t)
 		a := commit(t, dir, svc, "A")

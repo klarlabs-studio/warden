@@ -31,7 +31,8 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	if err != nil {
 		return ReattestResult{}, fmt.Errorf("resolve %q: %w", commitish, err)
 	}
-	if rec, _ := s.repo.ReadNote(target); rec != nil && rec.Attests(target) {
+	if rec, _ := s.repo.ReadNote(target); rec != nil && rec.Attests(target) &&
+		s.noteHoldsUnderRoster(rec) {
 		// Already noted locally — but --push asks for the REMOTE to carry it, and
 		// a note written by an earlier push-less run is exactly the case that
 		// needs publishing. Returning here without pushing would report success
@@ -124,6 +125,38 @@ func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error
 		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
 	}
 	return out, nil
+}
+
+// noteHoldsUnderRoster reports whether an existing note is good enough to leave
+// alone, given the roster the repository currently enforces.
+//
+// Re-attestation used to stop at Attests() — evidence, chain, and commit
+// binding — which says nothing about WHO signed. That let an untrusted note
+// squat: anything able to write a note to a commit could permanently block a
+// trusted one, because reattest saw a "valid" note and declined to replace it.
+// The only repair was removing the note and force-pushing the shared notes ref,
+// which a protected repository may not allow at all.
+//
+// The asymmetry was the tell. treeEqualSource already refused to COPY FROM a
+// note that was not trusted-signed, while this path refused to REPLACE one. So
+// warden was stricter about what it carried over than about what it defended.
+//
+// Whether the repository enforces at all is decided by the CONFIGURED roster:
+// a repository that has not pinned trusted_keys has not opted into judging
+// signers, and any attesting note holds there exactly as before.
+//
+// What counts as trusted, once it does enforce, is reattestTrustSet() — the
+// roster PLUS this machine's key. That second term is not laxity, it is
+// required for termination: Reattest re-signs with the local key, so in a
+// repository whose roster lists some other signer, judging against the roster
+// alone would find warden's own re-attestation untrusted and redo it on every
+// run, forever.
+func (s *Service) noteHoldsUnderRoster(rec *domain.RunRecord) bool {
+	cfg, err := s.Config()
+	if err != nil || len(cfg.TrustedKeys) == 0 {
+		return true
+	}
+	return rec.VerifySignature() && keyTrusted(rec, s.reattestTrustSet())
 }
 
 // reattestTrustSet is the set of signers a re-attestation may carry provenance
