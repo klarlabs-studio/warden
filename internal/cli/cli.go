@@ -86,6 +86,7 @@ Usage:
   warden import [--write]                     generate .warden.yaml from existing CI/Makefile/scripts
   warden audit [--branch b] [--format json|md] export a commit-provenance report
   warden hooks enable|disable <hook>          change hook selection
+  warden hooks repin                          re-pin armed hooks to the running version
   warden run <pre-commit|pre-push>            run the gate (invoked by hooks)
   warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]
   warden steps list                           list built-in + custom steps

@@ -165,7 +165,10 @@ func TestPinSkewLine(t *testing.T) {
 		domain.PreCommit: "0.17.0",
 		domain.PrePush:   "0.17.0",
 	}, "0.18.16")
-	for _, want := range []string{"pre-commit pins 0.17.0", "pre-push pins 0.17.0", "0.18.16 is what runs"} {
+	// The remedy must name a command that exists and means what it says. It used
+	// to say `hooks enable <hook>`, which is the right effect under a verb that
+	// describes arming (#212 §6).
+	for _, want := range []string{"pre-commit pins 0.17.0", "pre-push pins 0.17.0", "0.18.16 is what runs", "warden hooks repin"} {
 		if !strings.Contains(skew, want) {
 			t.Errorf("skew line %q missing %q", skew, want)
 		}
@@ -339,3 +342,31 @@ type provenanceStub struct {
 
 func (p provenanceStub) Config() (domain.Config, error) { return p.cfg, nil }
 func (p provenanceStub) SigningKey() (string, string)   { return p.pub, p.fp }
+
+// repin exists to fix a pin, never to change which hooks run. A disabled hook
+// must survive it untouched — that is the whole reason it is not `hooks enable`
+// (#212 §6).
+func TestRepinTargets(t *testing.T) {
+	installed := map[domain.Hook]bool{domain.PreCommit: true, domain.PrePush: false}
+	pins := map[domain.Hook]string{domain.PreCommit: "0.7.1", domain.PrePush: "0.7.1"}
+
+	got := repinTargets(installed, pins, "0.26.0")
+	if len(got) != 1 || got[0] != domain.PreCommit {
+		t.Fatalf("repin must skip the disabled hook, got %v", got)
+	}
+
+	// A pin that already matches is left alone rather than rewritten.
+	if got := repinTargets(installed, map[domain.Hook]string{domain.PreCommit: "0.26.0"}, "0.26.0"); len(got) != 0 {
+		t.Errorf("a current pin needs no rewrite, got %v", got)
+	}
+
+	// An armed hook whose pin could not be read is repinned: unknown is drift.
+	if got := repinTargets(installed, nil, "0.26.0"); len(got) != 1 || got[0] != domain.PreCommit {
+		t.Errorf("an unreadable pin should be repinned, got %v", got)
+	}
+
+	// Nothing armed, nothing to do — even with stale pins on disk.
+	if got := repinTargets(map[domain.Hook]bool{}, pins, "0.26.0"); len(got) != 0 {
+		t.Errorf("no armed hooks means no targets, got %v", got)
+	}
+}
