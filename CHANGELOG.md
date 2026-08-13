@@ -6,6 +6,109 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-13
+
+Provenance now survives `gh pr merge --squash --delete-branch`, which is the
+default merge path on most repositories and previously destroyed it silently. A
+field report (#212) from a repo that had gated every commit for months and still
+showed 100% UNVERIFIED on its trunk drove all of the below.
+
+### Added
+
+- **Attested commits are anchored, so gc cannot collect the evidence.** A git
+  note SURVIVES garbage collection; the commit it annotates does not. Deleting
+  the merged branch — the default, and what removing a worktree does too — makes
+  the attested commit unreachable, the next gc prunes the object, and the note is
+  left dangling over nothing.
+
+  Re-attestation then failed in the least helpful way available: `NotedCommits`
+  still listed the sha, `TreeSHA` errored, and the candidate was skipped
+  silently, so the squash commit reported "no warden note" and read as though it
+  had never been gated. The field report blamed notes staying local; the gate
+  already pushes them, so that was never the mechanism.
+
+  Attested commits now get a ref under `refs/warden/attested/`, written at gate
+  time and at re-attestation and pushed alongside the notes. `reattest --all`
+  backfills anchors for notes written before this existed — worth running once on
+  an older repository, before its next gc. Commits already collected are skipped;
+  there is nothing left to save.
+
+- **Re-attestation carries the original attestation, so CI needs no signing
+  key.** `reattest` re-signed with the LOCAL key. That is invisible on a
+  developer machine, where the local key is usually the key that signed the
+  original, and fatal on a runner, where it is ephemeral: notes came out "signed
+  by untrusted key" and the repository's own roster correctly rejected them. A
+  merge-time repair job would have needed a provenance-signing key as a CI
+  secret.
+
+  Copying the source signature is not available — it covers a payload containing
+  `CommitSHA`, so a copied note would verify while attesting the WRONG commit,
+  and commit binding is exactly what stops a signed note being transplanted.
+
+  Instead a re-attestation carries the original record whole in
+  `carried_original`, and a verifier judges it on facts it can check itself: the
+  carried record is validly signed by a roster key and attests the source, and
+  the two commits have IDENTICAL TREES, read from git objects rather than claimed
+  by the note. The re-attester contributes only a pointer, and a wrong pointer
+  fails the tree comparison — so it needs no trust and no key.
+
+  `carried_original` is deliberately OUTSIDE the signing payload. Any new field
+  changes the bytes every version signs over, so a warden that predates it drops
+  the field, re-marshals, and reports "signature does not verify" — which reads
+  as tampering rather than version skew. Excluded, an older verifier sees the
+  payload it always saw.
+
+- **`warden-reattest` action** for `pull_request: [closed]` — the only moment the
+  squash commit exists and the branch has not been deleted, which is what makes
+  the repair automatic instead of something to remember. Needs no signing key,
+  per the above. Warns when the repository pins no `trusted_keys`, since a runner
+  recognizes a validated source only by its signer.
+
+- **`warden-doctor` action** audits the branch itself. `warden-verify` checks one
+  commit — normally the PR head, which still carries its note and passes — so it
+  could stay green permanently while trunk provenance was zero. `warden-verify`
+  now also states on every PR what it does not cover.
+
+- **`warden doctor --ci`** exits 3 on drift. Drift and a doctor that could not run
+  were both exit 1, so an unadopted repository or a shallow clone would have been
+  reported as tidy, actionable drift — the same "looks like coverage" failure the
+  new action exists to fix. The flag carries the new code so gating on
+  `warden doctor` exiting 1 keeps working.
+
+- **`warden reattest --all --dry-run`.** Omitting `--push` was not a dry run and
+  was widely read as one: it still wrote local notes, and the field report watched
+  its note count climb from 222 to 301 during what it took to be a preview. The
+  plan is produced by the sweep's own rules, so it is the run's decision made
+  twice minus the writing. The sweep also prints a line per commit — ~94 commits
+  produced no output for over ten minutes, which is indistinguishable from a hang.
+
+- **`warden hooks repin`.** `warden status` reported pin drift and named
+  `warden hooks enable <hook>` as the fix. That works and reads wrong: "enable"
+  describes arming, so the remedy for a stale pin looked like it would change
+  whether the hook runs. `repin` rewrites armed hooks and skips disabled ones.
+
+- **`warden status` reports which provenance mode the repository is in.** With no
+  `trusted_keys` a note proves "a warden ran here", not "a warden I trust ran
+  here" — a distinction that took reading the verify action's YAML to discover,
+  while hooks reported armed and the repository looked healthy. The line also says
+  whether this machine's key is on the roster: a repository can enforce a roster
+  this machine is not on, in which case the gate still runs but verify will reject
+  its notes.
+
+### Fixed
+
+- **An untrusted note no longer squats a commit.** Re-attestation stopped at
+  `Attests()` — evidence, chain, and commit binding — which says nothing about WHO
+  signed, so anything able to write a note could permanently block a trusted one.
+  The only repair was removing the note and force-pushing the shared notes ref,
+  which a protected repository may refuse.
+
+  The asymmetry was the tell: `treeEqualSource` already refused to copy FROM an
+  untrusted note while this path refused to REPLACE one, so warden was stricter
+  about what it carried than about what it defended. Whether the repository
+  enforces at all is decided by the configured roster, so a repository that pins
+  no `trusted_keys` is unaffected.
+
 ## [0.26.0] - 2026-08-10
 
 ### Added
