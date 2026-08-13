@@ -22,6 +22,7 @@ func cmdReattest(args []string, stdout, stderr io.Writer) int {
 	all := fs.Bool("all", false, "re-attest every recoverable commit since adoption (see --branch)")
 	branch := fs.String("branch", "", "branch to sweep with --all (default: current)")
 	push := fs.Bool("push", false, "push the re-attestation note to the remote")
+	dryRun := fs.Bool("dry-run", false, "report what --all would do and write nothing")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -33,7 +34,16 @@ func cmdReattest(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	if *all {
+		if *dryRun {
+			return reattestPlan(svc, *branch, stdout, stderr)
+		}
 		return reattestAll(svc, *branch, *push, stdout, stderr)
+	}
+	if *dryRun {
+		// Only the sweep has a plan worth previewing; for one commit the answer
+		// is the command itself. Saying so beats silently ignoring the flag.
+		_, _ = fmt.Fprintln(stderr, "warden: --dry-run applies to --all")
+		return 2
 	}
 	res, err := svc.Reattest(*commit, *push)
 	if err != nil {
@@ -61,7 +71,11 @@ func cmdReattest(args []string, stdout, stderr io.Writer) int {
 // remembering a SHA per merge. An empty sweep is success, not failure: it means
 // the branch has no recoverable gap, which is the state we want.
 func reattestAll(svc *service.Service, branch string, push bool, stdout, stderr io.Writer) int {
-	results, err := svc.ReattestAll(branch, push)
+	results, err := svc.ReattestAll(branch, push, func(sha string, n, total int) {
+		// Per-commit, before the work: a sweep over a trunk is minutes long and
+		// silence is indistinguishable from a hang.
+		_, _ = fmt.Fprintf(stdout, "warden: [%d/%d] %s\n", n, total, short(sha))
+	})
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -85,5 +99,23 @@ func reattestAll(svc *service.Service, branch string, push bool, stdout, stderr 
 		suffix = "pushed to the remote"
 	}
 	_, _ = fmt.Fprintf(stdout, "warden: %d commit(s) re-attested; %s.\n", len(results), suffix)
+	return 0
+}
+
+// reattestPlan answers "what would this do" without writing, which omitting
+// --push was mistaken for and is not: that still files local notes.
+func reattestPlan(svc *service.Service, branch string, stdout, stderr io.Writer) int {
+	plan, err := svc.ReattestPlan(branch)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if len(plan) == 0 {
+		_, _ = fmt.Fprintln(stdout, "warden: nothing to re-attest; no unverified commit has a validated tree-identical source.")
+		return 0
+	}
+	for _, r := range plan {
+		_, _ = fmt.Fprintf(stdout, "warden: would re-attest %s from tree-identical validated %s.\n", short(r.Target), short(r.Source))
+	}
+	_, _ = fmt.Fprintf(stdout, "warden: %d commit(s) would be re-attested; nothing was written.\n", len(plan))
 	return 0
 }

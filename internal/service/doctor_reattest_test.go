@@ -129,6 +129,83 @@ func TestService_DoctorLeavesRealHolesAlone(t *testing.T) {
 
 // ReattestAll is the form that actually gets run: one sweep closes every
 // recoverable gap on the branch, and re-running it is a no-op.
+// TestService_ReattestPlan is #212 §4's core assertion: omitting --push was
+// mistaken for a dry run and is not — it still writes local notes. A real plan
+// has to leave the note count untouched, and has to agree with the sweep.
+func TestService_ReattestPlan(t *testing.T) {
+	dir, svc := initAdopted(t)
+	a := commit(t, dir, svc, "A (gated)")
+	b := commit(t, dir, svc, "B (squash of A)")
+
+	if err := svc.Repo().WriteNote(a, signAs(t, svc, attestRecord(a, "rA"))); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := svc.Repo().NotedCommits()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := svc.ReattestPlan("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 1 || plan[0].Target != b || plan[0].Source != a {
+		t.Fatalf("plan should name B recoverable from A, got %+v", plan)
+	}
+
+	after, err := svc.Repo().NotedCommits()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("a plan must write nothing: notes went %d -> %d", len(before), len(after))
+	}
+
+	// And the plan must match what the sweep then does, or it is a lie about
+	// what is about to happen.
+	results, err := svc.ReattestAll("", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Target != plan[0].Target || results[0].Source != plan[0].Source {
+		t.Fatalf("plan %+v disagrees with sweep %+v", plan, results)
+	}
+}
+
+// The progress callback is the other half of §4: ~94 commits produced no output
+// for ten minutes, which reads as a hang. It must fire once per candidate,
+// before the work, with a position a human can watch advance.
+func TestService_ReattestAllReportsProgress(t *testing.T) {
+	dir, svc := initAdopted(t)
+	a := commit(t, dir, svc, "A (gated)")
+	commit(t, dir, svc, "B (squash 1)")
+	commit(t, dir, svc, "C (squash 2)")
+	if err := svc.Repo().WriteNote(a, signAs(t, svc, attestRecord(a, "rA"))); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	var totals []int
+	if _, err := svc.ReattestAll("", false, func(sha string, n, total int) {
+		seen = append(seen, sha)
+		totals = append(totals, total)
+		if n != len(seen) {
+			t.Errorf("position should be 1-based and sequential: got %d on call %d", n, len(seen))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("expected at least one progress call")
+	}
+	for _, total := range totals {
+		if total != len(seen) {
+			t.Errorf("total should be the sweep size %d, got %d", len(seen), total)
+		}
+	}
+}
+
 func TestService_ReattestAll(t *testing.T) {
 	dir, svc := initAdopted(t)
 	a := commit(t, dir, svc, "A (gated)")
@@ -139,7 +216,7 @@ func TestService_ReattestAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results, err := svc.ReattestAll("", false)
+	results, err := svc.ReattestAll("", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +237,7 @@ func TestService_ReattestAll(t *testing.T) {
 	}
 
 	// The branch is now clean, so a second sweep writes nothing.
-	again, err := svc.ReattestAll("", false)
+	again, err := svc.ReattestAll("", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +284,7 @@ func TestService_ReattestAllPushesEvenWhenNothingNewIsWritten(t *testing.T) {
 	}
 
 	// First sweep: write the notes but deliberately do not publish them.
-	wrote, err := svc.ReattestAll("", false)
+	wrote, err := svc.ReattestAll("", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +296,7 @@ func TestService_ReattestAllPushesEvenWhenNothingNewIsWritten(t *testing.T) {
 	}
 
 	// Second sweep WITH --push: nothing new to write, but the remote is stale.
-	again, err := svc.ReattestAll("", true)
+	again, err := svc.ReattestAll("", true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +343,7 @@ func TestService_ReattestAllEmptyIsNotAnError(t *testing.T) {
 	dir, svc := initAdopted(t)
 	commit(t, dir, svc, "A (never gated)")
 
-	results, err := svc.ReattestAll("", false)
+	results, err := svc.ReattestAll("", false, nil)
 	if err != nil {
 		t.Fatalf("empty sweep must not error: %v", err)
 	}

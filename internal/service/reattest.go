@@ -103,7 +103,12 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 // success while the remote never learns. So push is unconditional whenever it
 // is asked for; PushNotes is idempotent and a no-op push costs one cheap
 // round trip.
-func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error) {
+// onProgress, when non-nil, is called before each commit is attempted, with the
+// commit and its 1-based position in the sweep. A sweep over a trunk's whole
+// backlog is minutes of silence otherwise — the field report watched ~94
+// commits produce no output for over ten minutes, which is indistinguishable
+// from a hang and is the point most people reach for Ctrl-C.
+func (s *Service) ReattestAll(branch string, push bool, onProgress func(sha string, n, total int)) ([]ReattestResult, error) {
 	report, err := s.Doctor(branch)
 	if err != nil {
 		return nil, err
@@ -112,6 +117,9 @@ func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error
 	gaps := report.Reattestable()
 	for i := range gaps {
 		sha := gaps[i].SHA
+		if onProgress != nil {
+			onProgress(sha, i+1, len(gaps))
+		}
 		// Push per-commit is suppressed: one push after the batch beats N.
 		res, err := s.Reattest(sha, false)
 		if err != nil {
@@ -123,6 +131,44 @@ func (s *Service) ReattestAll(branch string, push bool) ([]ReattestResult, error
 	}
 	if push {
 		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
+	}
+	return out, nil
+}
+
+// ReattestPlan reports what a sweep WOULD do, writing nothing.
+//
+// Omitting --push was not a dry run and was widely read as one: it still wrote
+// local notes, and the field report watched its note count climb from 222 to
+// 301 during what it took to be a preview. A repair tool aimed at a trunk needs
+// a way to be asked before it is trusted.
+//
+// It answers with the same rules the sweep uses — the target is judged by the
+// roster, the source must be tree-identical and trusted — so the plan is not an
+// approximation of the run, it is the run's own decision made twice.
+func (s *Service) ReattestPlan(branch string) ([]ReattestResult, error) {
+	report, err := s.Doctor(branch)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.repo.FetchNotes(s.remote) // same best-effort fetch Reattest performs
+
+	var out []ReattestResult
+	gaps := report.Reattestable()
+	for i := range gaps {
+		target := gaps[i].SHA
+		if rec, _ := s.repo.ReadNote(target); rec != nil && rec.Attests(target) &&
+			s.noteHoldsUnderRoster(rec) {
+			continue // already holds; the sweep would skip it too
+		}
+		tree, err := s.repo.TreeSHA(target)
+		if err != nil {
+			continue
+		}
+		source, _, err := s.treeEqualSource(target, tree, s.reattestTrustSet())
+		if err != nil || source == "" {
+			continue // the sweep would write nothing here
+		}
+		out = append(out, ReattestResult{Target: target, Source: source})
 	}
 	return out, nil
 }

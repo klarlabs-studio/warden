@@ -179,9 +179,15 @@ the provenance across locally — no bot, no CI signing key:
 
 ```bash
 git checkout main && git pull
+warden reattest --all --dry-run # preview: prints the plan, writes nothing
 warden reattest --all --push    # close every recoverable gap on the branch
 warden reattest --push          # or just HEAD, right after a single merge
 ```
+
+Reach for `--dry-run` first on a trunk. Omitting `--push` is *not* a preview —
+it still writes notes locally, it only declines to publish them. `--dry-run` is
+the flag that writes nothing. The sweep also prints a line per commit, because a
+backlog of a hundred commits is otherwise minutes of silence.
 
 `reattest` finds a commit whose tree SHA matches HEAD and whose note is intact,
 commit-bound, validly signed, **and signed by a trusted key** (a key in the
