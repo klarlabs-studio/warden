@@ -282,3 +282,60 @@ func TestPrintFindings_CarriesTheWholeFailureOutput(t *testing.T) {
 		}
 	}
 }
+
+// TestProvenanceMode pins the wording of the line #212 §5 and §9 asked for: the
+// repository's provenance mode was invisible, so "signed by an untrusted key"
+// was something you learned from a rejection rather than from status.
+func TestProvenanceMode(t *testing.T) {
+	type key struct{ pub, fp string }
+	stub := func(keys []string, k key) interface {
+		Config() (domain.Config, error)
+		SigningKey() (publicKey, fingerprint string)
+	} {
+		return provenanceStub{cfg: domain.Config{TrustedKeys: keys}, pub: k.pub, fp: k.fp}
+	}
+
+	t.Run("no roster says notes prove a warden ran, not whose", func(t *testing.T) {
+		got := provenanceMode(stub(nil, key{pub: "AAAA", fp: "abc"}))
+		if !strings.Contains(got, "unsigned") || !strings.Contains(got, "not whose") {
+			t.Errorf("got %q", got)
+		}
+		if !strings.Contains(got, "trusted_keys") {
+			t.Error("must name the setting that changes it")
+		}
+	})
+
+	t.Run("no roster and no key says notes will be unsigned", func(t *testing.T) {
+		got := provenanceMode(stub(nil, key{}))
+		if !strings.Contains(got, "notes will be unsigned") {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("a roster including us reports enforcement", func(t *testing.T) {
+		got := provenanceMode(stub([]string{"abc"}, key{pub: "AAAA", fp: "abc"}))
+		if !strings.Contains(got, "signed") || !strings.Contains(got, "1 key(s)") {
+			t.Errorf("got %q", got)
+		}
+		if !strings.Contains(got, "including this machine's") {
+			t.Errorf("should say our key is on the roster, got %q", got)
+		}
+	})
+
+	t.Run("a roster excluding us says so", func(t *testing.T) {
+		// The case that bit the field report: the gate runs, the notes are
+		// written, and verify rejects them. Worth knowing before a push.
+		got := provenanceMode(stub([]string{"deadbeef"}, key{pub: "AAAA", fp: "abc"}))
+		if !strings.Contains(got, "not on it") {
+			t.Errorf("should warn our key is absent from the roster, got %q", got)
+		}
+	})
+}
+
+type provenanceStub struct {
+	cfg     domain.Config
+	pub, fp string
+}
+
+func (p provenanceStub) Config() (domain.Config, error) { return p.cfg, nil }
+func (p provenanceStub) SigningKey() (string, string)   { return p.pub, p.fp }

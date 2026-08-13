@@ -53,6 +53,8 @@ func cmdStatus(stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stdout, "\nnot initialized — run `warden init`")
 	}
 
+	_, _ = fmt.Fprintf(stdout, "\nprovenance: %s\n", provenanceMode(svc))
+
 	pre, push, err := svc.StepsList()
 	if err == nil {
 		_, _ = fmt.Fprintln(stdout, "\nsteps:")
@@ -180,4 +182,53 @@ func watchTip(installed map[domain.Hook]bool, pre, push []domain.StepName) strin
 	}
 	return fmt.Sprintf("tip: `warden watch` re-runs these on save, so deferred steps (%s) don't wait for push.",
 		domain.JoinSteps(deferred))
+}
+
+// provenanceMode describes, in one line, which of warden's two provenance modes
+// the repository is actually in.
+//
+// #212 §5 and §9: nothing surfaced this. A repository with no trusted_keys
+// reports hooks armed and looks entirely healthy, while its notes mean only "a
+// warden ran here" rather than "a warden I trust ran here" — a distinction that
+// took reading the verify action's YAML to discover. And adding trusted_keys
+// turns enforcement on immediately, which surprised even the author of the
+// docs; verify starts rejecting anything the roster does not cover.
+//
+// Both facts are one line of output. Neither was printed.
+// Takes a narrow interface rather than *service.Service, matching the other
+// diagnostics in this file, so the wording can be tested without a repository.
+func provenanceMode(svc interface {
+	Config() (domain.Config, error)
+	SigningKey() (publicKey, fingerprint string)
+}) string {
+	cfg, err := svc.Config()
+	if err != nil {
+		return "unknown (config unreadable)"
+	}
+	n := len(cfg.TrustedKeys)
+	if n == 0 {
+		signed := ""
+		if pub, _ := svc.SigningKey(); pub == "" {
+			signed = "; no signing key either, so notes will be unsigned"
+		}
+		return fmt.Sprintf(
+			"unsigned — notes prove a warden ran, not whose%s\n"+
+				"  add fingerprints to .warden.yaml trusted_keys: to enforce a roster (`warden key show`)",
+			signed)
+	}
+
+	// Say whether OUR key is in the roster. A repository can enforce a roster
+	// this machine is not on, in which case the gate here still runs but its
+	// notes will be rejected by verify — worth knowing before a push, not after.
+	mine := ""
+	if _, fp := svc.SigningKey(); fp != "" {
+		mine = "; this machine's key is not on it"
+		for _, k := range cfg.TrustedKeys {
+			if strings.EqualFold(strings.TrimSpace(k), fp) {
+				mine = "; including this machine's"
+				break
+			}
+		}
+	}
+	return fmt.Sprintf("signed — enforcing a roster of %d key(s)%s", n, mine)
 }
