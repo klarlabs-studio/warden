@@ -19,6 +19,11 @@ type VerifyResult struct {
 	SignatureValid bool
 	Signer         string
 	Trusted        bool
+	// CarriedTrust records that Trusted was earned by the note's carried original
+	// plus tree equality, rather than by the note's own signer. Reported so the
+	// difference stays visible: the run that validated this content is somebody
+	// else's, on a commit with a different id.
+	CarriedTrust bool
 	// External reports that the note attests an EXTERNAL run — CI ran the checks
 	// and warden recorded the reference (ADR 0003). That claim is weaker than a
 	// local attestation, so a caller enforcing a gate is entitled to know which
@@ -94,6 +99,13 @@ func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trus
 		// A pinned run must attest this commit, signature-verify, and be signed by a
 		// trusted key — otherwise it is not validated for provenance-skip.
 		res.Trusted = res.SignatureValid && keyTrusted(rec, trustedKeys)
+		// …unless it is a re-attestation carrying the original. Then the trust
+		// comes from the carried record and the trees, not from whoever relocated
+		// it, so an untrusted (or absent) local signature is not disqualifying.
+		if !res.Trusted && s.carriedOriginalHolds(sha, rec, trustedKeys) {
+			res.Trusted = true
+			res.CarriedTrust = true
+		}
 		res.Validated = res.Validated && res.Trusted
 	}
 
@@ -139,4 +151,52 @@ func keyTrusted(rec *domain.RunRecord, trustedKeys []string) bool {
 		}
 	}
 	return false
+}
+
+// carriedOriginalHolds decides whether a re-attestation is trustworthy on the
+// strength of the record it carries, rather than on who signed the note.
+//
+// Re-attestation used to re-sign with the local key, which meant the repair
+// could only be done by a machine already on the roster. A merge-time CI job —
+// the one place the repair can happen automatically, because it is the only
+// moment the squash commit and the source branch both exist — has an ephemeral
+// key, so its notes were correctly rejected by the repo's own roster (#212 §7).
+//
+// The way out is that a re-attestation makes a claim nobody needs to be trusted
+// for. All three parts are checkable:
+//
+//  1. the carried record is validly signed by a TRUSTED key, and attests the
+//     source commit — this is the original validation, untouched;
+//  2. the source and target commits have IDENTICAL TREES, read from git objects
+//     rather than asserted by the note;
+//  3. the note under inspection is bound to the target.
+//
+// Together those say: this exact content was validated by a run we trust. The
+// re-attester contributes only the pointer, and a wrong pointer fails (2).
+//
+// Both commits must still exist for (2) — which is why attested commits are
+// anchored (#212 §3). A pruned source is not a verification failure to paper
+// over: without the tree comparison there is nothing here but a claim.
+func (s *Service) carriedOriginalHolds(target string, rec *domain.RunRecord, trustedKeys []string) bool {
+	if rec == nil || rec.ReattestedFrom == "" || rec.CarriedOriginal == nil {
+		return false
+	}
+	orig := rec.CarriedOriginal
+	// The carried record must be the real thing: bound to the source commit,
+	// chain intact, signature valid, signer on the roster. Anything less and this
+	// is just a note claiming to quote one.
+	if !orig.Attests(rec.ReattestedFrom) || !orig.VerifySignature() || !keyTrusted(orig, trustedKeys) {
+		return false
+	}
+	// And the content must actually be the same content. This is the step that
+	// makes the re-attester's honesty irrelevant.
+	srcTree, err := s.repo.TreeSHA(rec.ReattestedFrom)
+	if err != nil {
+		return false
+	}
+	tgtTree, err := s.repo.TreeSHA(target)
+	if err != nil || srcTree != tgtTree {
+		return false
+	}
+	return true
 }

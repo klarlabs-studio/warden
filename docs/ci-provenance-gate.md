@@ -170,6 +170,54 @@ The coverage is not a weaker path to green:
 - a commit outside every trusted span keeps its original failure, so a
   `--no-verify` commit in the middle of a branch still fails the gate.
 
+### Repairing at merge time (`warden-reattest`), with no key in CI
+
+The squash merge is where provenance is lost, and the moment the PR closes is
+the only time the repair is automatic: the squash commit exists and the branch
+has not been deleted yet.
+
+```yaml
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  reattest:
+    if: github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # push refs/notes/warden and the anchors
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+      - uses: felixgeelhaar/warden/.github/actions/warden-reattest@main
+```
+
+**This needs no signing key**, which is what makes it shippable. Re-attestation
+used to re-sign with the local key, so a CI job doing the repair would have
+needed a roster-trusted key as a secret — a much bigger ask than "add an
+action". Instead the note it writes *carries the original attestation intact*,
+and a verifier accepts it by checking two things it can check for itself:
+
+1. the carried record is validly signed by a key on your roster, and attests the
+   source commit;
+2. the source and target commits have **identical trees**, read from git objects
+   rather than claimed by the note.
+
+The runner is trusted for nothing. It contributes a pointer, and a wrong pointer
+fails (2).
+
+Your repo does need `trusted_keys` in `.warden.yaml`: a runner recognizes a
+validated source by its signer, and with no roster there is nothing it can
+identify. The action warns when the repo has not pinned one.
+
+Verifiers older than this read such notes as "signed by untrusted key" — the
+same as they did before, so nothing regresses; they just do not get the benefit.
+Re-attestations made on a developer machine with a roster key keep verifying on
+old and new warden alike, byte for byte.
+
 ### Watching the trunk, not just the PR (`warden-doctor`)
 
 `warden-verify` checks one commit — normally the PR head, which still carries

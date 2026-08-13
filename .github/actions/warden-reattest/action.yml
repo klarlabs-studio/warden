@@ -1,0 +1,131 @@
+name: "Warden Reattest"
+description: >-
+  Repair provenance at merge time: carry the gated PR head's attestation onto
+  the squash commit, in the one window where both still exist.
+
+# WHY THIS EXISTS (#212 §1)
+#
+# `gh pr merge --squash --delete-branch` is the default path on most repos, and
+# it does two things provenance cannot survive on its own:
+#
+#   1. the squash creates a NEW commit id, so the validated commit's note does
+#      not follow it;
+#   2. --delete-branch removes the only ref to the commit that carried the note.
+#
+# The result is a repository that ran the gate on every commit for months and
+# reports 100% UNVERIFIED on its trunk.
+#
+# `pull_request: [closed]` is the only moment the repair is automatic: the squash
+# commit exists AND the branch has not been collected yet. Run it there and
+# provenance stops being something you have to remember.
+#
+#   on:
+#     pull_request:
+#       types: [closed]
+#
+#   jobs:
+#     reattest:
+#       if: github.event.pull_request.merged
+#       runs-on: ubuntu-latest
+#       permissions:
+#         contents: write        # to push refs/notes/warden and the anchors
+#       steps:
+#         - uses: actions/checkout@v4
+#           with:
+#             fetch-depth: 0
+#             ref: ${{ github.event.pull_request.base.ref }}
+#         - uses: felixgeelhaar/warden/.github/actions/warden-reattest@main
+#
+# NO SIGNING KEY IS NEEDED, and that is the point.
+#
+# Re-attestation used to re-sign with the local key, so this job would have
+# needed a roster-trusted signing key as a CI secret — a materially bigger ask
+# than "add an action", and one many teams rightly decline. It no longer does:
+# the note it writes CARRIES the original attestation intact, and a verifier
+# accepts it by checking that carried record under the roster and confirming the
+# two commits have identical trees, read from git objects. The runner is not
+# trusted for anything, so its ephemeral key does not matter.
+#
+# Verifiers older than that support will read this job's notes as "signed by
+# untrusted key", exactly as they did before — no worse, just not yet better.
+
+inputs:
+  branch:
+    description: "Branch to sweep (default: the checked-out branch)"
+    required: false
+    default: ""
+  remote:
+    description: "Remote holding refs/notes/warden"
+    required: false
+    default: origin
+  dry-run:
+    description: "Report the plan and write nothing. Useful for a first run."
+    required: false
+    default: "false"
+  warden-version:
+    description: "warden version to install (e.g. v0.26.0, or 'latest')."
+    required: false
+    default: latest
+
+outputs:
+  reattested:
+    description: "Number of commits re-attested (0 when there was nothing to repair)"
+    value: ${{ steps.repair.outputs.reattested }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install warden
+      shell: bash
+      env:
+        WARDEN_VERSION: ${{ inputs.warden-version }}
+      run: ${{ github.action_path }}/../install-warden.sh
+
+    - name: Fetch warden provenance
+      shell: bash
+      run: |
+        git fetch "${{ inputs.remote }}" 'refs/notes/warden:refs/notes/warden' || true
+        git fetch "${{ inputs.remote }}" 'refs/warden/attested/*:refs/warden/attested/*' || true
+
+    # `git notes add` needs a committer identity and fails outright without one,
+    # which a fresh CI checkout does not have. Without this the job reports
+    # success having written nothing at all.
+    - name: Configure committer
+      shell: bash
+      run: |
+        git config user.name  "${{ github.actor }}"
+        git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+    # A runner recognizes a validated source only by its SIGNER. The developer
+    # keys that signed the originals are named by .warden.yaml trusted_keys, and
+    # this runner's own key is ephemeral and matches nothing. With no roster
+    # there is nothing it can identify, so the sweep finds no source and reports
+    # "nothing to re-attest" — success, having repaired nothing. Say so instead.
+    - name: Check the repo names its trusted signers
+      shell: bash
+      run: |
+        if ! warden status 2>/dev/null | grep -q '^provenance: signed'; then
+          echo "::warning::This repo pins no trusted_keys, so a CI runner cannot tell which notes came from a signer you trust — the sweep will find no source to carry provenance from. Add fingerprints to .warden.yaml trusted_keys: (\`warden key show\` on a developer machine)."
+        fi
+
+    - id: repair
+      shell: bash
+      run: |
+        BRANCH_ARG=()
+        if [ -n "${{ inputs.branch }}" ]; then BRANCH_ARG=(--branch "${{ inputs.branch }}"); fi
+
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          warden reattest --all --dry-run "${BRANCH_ARG[@]}"
+          echo "reattested=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        OUT=$(warden reattest --all --push "${BRANCH_ARG[@]}" 2>&1) || {
+          echo "$OUT"
+          echo "::error::warden reattest failed."
+          exit 1
+        }
+        echo "$OUT"
+        COUNT=$(printf '%s\n' "$OUT" | grep -c '^warden: re-attested ' || true)
+        echo "reattested=$COUNT" >> "$GITHUB_OUTPUT"
+        echo "::notice::Re-attested $COUNT commit(s) on this branch."

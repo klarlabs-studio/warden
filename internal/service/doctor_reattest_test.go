@@ -397,3 +397,229 @@ func TestService_AnchoredNoteSurvivesBranchDeleteAndGC(t *testing.T) {
 		t.Fatalf("squash commit should still be recoverable from the anchored source, got %+v", res)
 	}
 }
+
+// #212 §7: re-attestation used to re-sign with the local key, so the repair
+// could only be done by a machine already on the roster. The merge-time CI job
+// that is the only place it can happen automatically has an ephemeral key, and
+// its notes were correctly rejected by the repo's own trusted_keys.
+//
+// A re-attestation now carries the original record whole, and a verifier judges
+// it on that plus tree equality read from git — so the re-attester needs no
+// trust and no key. This test does the repair with NO SIGNER AT ALL and requires
+// a roster-enforcing verify to accept the result.
+func TestService_KeylessReattestIsTrustedViaCarriedOriginal(t *testing.T) {
+	dir, svc := initAdopted(t)
+	trunk := gitIn(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
+
+	// The repo enforces a roster — that is the situation §7 describes, where the
+	// runner's ephemeral key is correctly rejected by it. Committed on the trunk,
+	// so branching and merging do not disturb it.
+	roster := []string{svc.signer.Fingerprint()}
+	writeTrustedKeys(t, dir, roster)
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "pin trusted_keys")
+
+	gitIn(t, dir, "checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "gated work")
+	src := gitIn(t, dir, "rev-parse", "HEAD")
+
+	// The original validation, by the trusted developer key.
+	orig := signAs(t, svc, attestRecord(src, "rOrig"))
+	if err := svc.Repo().WriteNote(src, orig); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "checkout", "-q", trunk)
+	gitIn(t, dir, "merge", "-q", "--squash", "feature")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "squash")
+	target := gitIn(t, dir, "rev-parse", "HEAD")
+
+	// Now be the CI runner: no signing key whatsoever.
+	devSigner := svc.signer
+	svc.signer = nil
+	res, err := svc.Reattest(target, false)
+	if err != nil {
+		t.Fatalf("a keyless runner must still be able to re-attest: %v", err)
+	}
+	if !res.Wrote || res.Source != src {
+		t.Fatalf("expected a re-attestation from %s, got %+v", src, res)
+	}
+	svc.signer = devSigner
+
+	note, err := svc.Repo().ReadNote(target)
+	if err != nil || note == nil {
+		t.Fatalf("no note written: %v", err)
+	}
+	if note.Signature != "" {
+		t.Errorf("a keyless run should not have signed anything, got %q", note.Signature)
+	}
+	if note.CarriedOriginal == nil || note.CarriedOriginal.CommitSHA != src {
+		t.Fatalf("the original record should have been carried, got %+v", note.CarriedOriginal)
+	}
+
+	// The point of all of it: a roster-enforcing verify accepts this.
+	vr, err := svc.Verify(target, roster...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vr.Validated || !vr.Trusted {
+		t.Fatalf("carried original should satisfy the roster: %+v", vr)
+	}
+	if !vr.CarriedTrust {
+		t.Error("trust came from the carried original; the result should say so")
+	}
+}
+
+// The carried original must not become a way to launder provenance onto content
+// that was never validated. Tree equality is the check that makes the
+// re-attester's honesty irrelevant, so it has to actually bite.
+func TestService_CarriedOriginalRejectedWhenTreesDiffer(t *testing.T) {
+	dir, svc := initAdopted(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("validated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "validated content")
+	src := gitIn(t, dir, "rev-parse", "HEAD")
+	orig := signAs(t, svc, attestRecord(src, "rOrig"))
+	if err := svc.Repo().WriteNote(src, orig); err != nil {
+		t.Fatal(err)
+	}
+	roster := []string{svc.signer.Fingerprint()}
+
+	// Different content entirely, with a hand-built note that quotes the genuine
+	// signed original and points at it. Everything about the quote is authentic;
+	// only the claim that the trees match is false.
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("never validated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "unvalidated content")
+	target := gitIn(t, dir, "rev-parse", "HEAD")
+
+	forged := orig
+	forged.CommitSHA = target
+	forged.ReattestedFrom = src
+	forged.CarriedOriginal = &orig
+	forged.PublicKey, forged.Signature = "", ""
+	if err := svc.Repo().WriteNote(target, forged); err != nil {
+		t.Fatal(err)
+	}
+
+	vr, err := svc.Verify(target, roster...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vr.Trusted || vr.Validated {
+		t.Fatalf("differing trees must not be laundered into trust: %+v", vr)
+	}
+}
+
+// writeTrustedKeys pins a roster in .warden.yaml, so the repo is in the
+// enforcing provenance mode.
+func writeTrustedKeys(t *testing.T, dir string, keys []string) {
+	t.Helper()
+	body := "trusted_keys:\n"
+	for _, k := range keys {
+		body += "  - " + k + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".warden.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The carried original is only worth carrying because a TRUSTED key signed it.
+// A note quoting a self-signed original must not be trusted just because the
+// trees line up — otherwise anyone could attest their own commit and then
+// relocate that attestation at will.
+func TestService_CarriedOriginalRejectedWhenSignerUntrusted(t *testing.T) {
+	dir, svc := initAdopted(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "content")
+	src := gitIn(t, dir, "rev-parse", "HEAD")
+
+	// Genuinely signed, by a key the roster does not list.
+	orig := signAs(t, svc, attestRecord(src, "rOrig"))
+	if err := svc.Repo().WriteNote(src, orig); err != nil {
+		t.Fatal(err)
+	}
+
+	// An empty commit reproduces the tree exactly, so tree equality HOLDS here
+	// and the signer is the only thing standing between this and trust.
+	gitIn(t, dir, "commit", "--no-verify", "--allow-empty", "-qm", "same tree, new id")
+	target := gitIn(t, dir, "rev-parse", "HEAD")
+
+	carried := orig
+	relocated := orig
+	relocated.CommitSHA = target
+	relocated.ReattestedFrom = src
+	relocated.CarriedOriginal = &carried
+	relocated.PublicKey, relocated.Signature = "", ""
+	if err := svc.Repo().WriteNote(target, relocated); err != nil {
+		t.Fatal(err)
+	}
+
+	vr, err := svc.Verify(target, "someone-elses-fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vr.Trusted || vr.Validated {
+		t.Fatalf("an original signed off-roster must not confer trust: %+v", vr)
+	}
+}
+
+// A keyless re-attestation must be recognized as already-good on the next
+// sweep. Otherwise every run finds it untrusted, rewrites it, and --dry-run
+// reports work that never finishes.
+func TestService_KeylessReattestIsStableAcrossSweeps(t *testing.T) {
+	dir, svc := initAdopted(t)
+	trunk := gitIn(t, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	roster := []string{svc.signer.Fingerprint()}
+	writeTrustedKeys(t, dir, roster)
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "pin trusted_keys")
+
+	gitIn(t, dir, "checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "gated work")
+	src := gitIn(t, dir, "rev-parse", "HEAD")
+	if err := svc.Repo().WriteNote(src, signAs(t, svc, attestRecord(src, "rOrig"))); err != nil {
+		t.Fatal(err)
+	}
+
+	gitIn(t, dir, "checkout", "-q", trunk)
+	gitIn(t, dir, "merge", "-q", "--squash", "feature")
+	gitIn(t, dir, "commit", "--no-verify", "-qm", "squash")
+	target := gitIn(t, dir, "rev-parse", "HEAD")
+
+	svc.signer = nil // the keyless runner
+	if _, err := svc.Reattest(target, false); err != nil {
+		t.Fatal(err)
+	}
+	// Second pass: nothing left to do, and the plan agrees.
+	res, err := svc.Reattest(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.AlreadyHad || res.Wrote {
+		t.Fatalf("a keyless re-attestation should hold on the next sweep, got %+v", res)
+	}
+	plan, err := svc.ReattestPlan("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range plan {
+		if p.Target == target {
+			t.Fatalf("plan should not keep proposing an already-good commit: %+v", plan)
+		}
+	}
+}

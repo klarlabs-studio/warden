@@ -42,15 +42,21 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 		}
 		return ReattestResult{Target: target, AlreadyHad: true}, nil
 	}
-	if s.signer == nil {
-		return ReattestResult{Target: target}, fmt.Errorf("no signing key available to re-attest with")
-	}
-
 	targetTree, err := s.repo.TreeSHA(target)
 	if err != nil {
 		return ReattestResult{}, fmt.Errorf("tree of %s: %w", target, err)
 	}
-	source, srcRec, err := s.treeEqualSource(target, targetTree, s.reattestTrustSet())
+	trust := s.reattestTrustSet()
+	if len(trust) == 0 {
+		// No local key AND no roster: there is nothing this run could recognize as
+		// a validated source, so it would search the whole history and report
+		// "nothing to re-attest" — indistinguishable from a repo with no gaps.
+		// A keyless runner is a supported case now (#212 §7), but only in a repo
+		// that says whose attestations count.
+		return ReattestResult{Target: target}, fmt.Errorf(
+			"no signing key and no trusted_keys in .warden.yaml: nothing identifies a validated commit to carry provenance from")
+	}
+	source, srcRec, err := s.treeEqualSource(target, targetTree, trust)
 	if err != nil {
 		return ReattestResult{}, err
 	}
@@ -61,16 +67,34 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	rec := *srcRec
 	rec.CommitSHA = target
 	rec.ReattestedFrom = source
-	// Drop the source's signature and re-sign as ourselves: the re-attestation is
-	// our statement, bound to the target commit.
-	rec.PublicKey = s.signer.PublicKey()
+	// Carry the ORIGINAL record whole, signature and all. That record verifies
+	// against the source commit and nothing else, which is what makes it worth
+	// carrying: a verifier can check it under the roster and then check that the
+	// two trees are identical, straight from git objects. Neither step trusts us
+	// (#212 §7). Root() keeps this exactly one level deep however many times the
+	// content has been relocated.
+	rec.CarriedOriginal = srcRec.Root()
+
+	// Sign as ourselves ON TOP when we can. This is not what makes the
+	// re-attestation trustworthy any more — the carried original is — but it
+	// keeps older verifiers, which know only "is this note trusted-signed",
+	// working exactly as before on a developer machine.
 	rec.Signature = ""
-	payload, err := rec.SigningPayload()
-	if err != nil {
-		return ReattestResult{}, err
-	}
-	if rec.Signature, err = s.signer.Sign(payload); err != nil {
-		return ReattestResult{}, fmt.Errorf("sign re-attestation: %w", err)
+	if s.signer != nil {
+		rec.PublicKey = s.signer.PublicKey()
+		payload, err := rec.SigningPayload()
+		if err != nil {
+			return ReattestResult{}, err
+		}
+		if rec.Signature, err = s.signer.Sign(payload); err != nil {
+			return ReattestResult{}, fmt.Errorf("sign re-attestation: %w", err)
+		}
+	} else {
+		// A keyless runner is the case §7 is about: a merge-time repair job whose
+		// key is ephemeral and therefore never on the roster. It still produces a
+		// note a roster-enforcing verifier accepts, because what it publishes is
+		// somebody else's signed statement plus a checkable fact about trees.
+		rec.PublicKey = ""
 	}
 
 	if err := s.repo.WriteNote(target, rec); err != nil {
@@ -210,7 +234,15 @@ func (s *Service) noteHoldsUnderRoster(rec *domain.RunRecord) bool {
 	if err != nil || len(cfg.TrustedKeys) == 0 {
 		return true
 	}
-	return rec.VerifySignature() && keyTrusted(rec, s.reattestTrustSet())
+	if rec.VerifySignature() && keyTrusted(rec, s.reattestTrustSet()) {
+		return true
+	}
+	// A re-attestation whose carried original holds under the roster is already
+	// good, however it was signed — including not at all, which is what a keyless
+	// merge-time runner produces (#212 §7). Without this, every sweep would find
+	// those notes untrusted and rewrite them forever, and --dry-run would report
+	// work that never finishes.
+	return rec.CommitSHA != "" && s.carriedOriginalHolds(rec.CommitSHA, rec, s.reattestTrustSet())
 }
 
 // reattestTrustSet is the set of signers a re-attestation may carry provenance
