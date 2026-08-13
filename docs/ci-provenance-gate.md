@@ -184,6 +184,16 @@ warden reattest --all --push    # close every recoverable gap on the branch
 warden reattest --push          # or just HEAD, right after a single merge
 ```
 
+Warden also anchors each attested commit under `refs/warden/attested/`, and
+pushes those refs alongside the notes. This is what makes the repair still
+possible later: a git note *survives* garbage collection but the commit it
+annotates does not, so deleting the merged branch (the default in
+`gh pr merge --delete-branch`, and what removing a worktree does too) leaves the
+note dangling over a pruned object. Reattest then finds nothing to copy from and
+the squash commit reads as though it was never gated. `warden reattest --all`
+backfills anchors for notes written before this existed — worth running once on
+an older repository, before its next `gc`.
+
 Reach for `--dry-run` first on a trunk. Omitting `--push` is *not* a preview —
 it still writes notes locally, it only declines to publish them. `--dry-run` is
 the flag that writes nothing. The sweep also prints a line per commit, because a

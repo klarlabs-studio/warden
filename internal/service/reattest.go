@@ -76,6 +76,7 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	if err := s.repo.WriteNote(target, rec); err != nil {
 		return ReattestResult{}, fmt.Errorf("write re-attestation note: %w", err)
 	}
+	_ = s.repo.AnchorAttested(target) // keep the evidence reachable (#212 §3)
 	if push {
 		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
 	}
@@ -113,6 +114,13 @@ func (s *Service) ReattestAll(branch string, push bool, onProgress func(sha stri
 	if err != nil {
 		return nil, err
 	}
+	// Preserve before repairing. Anchoring arrived after most notes were written,
+	// so an existing repository is full of attested commits that only a deleted
+	// branch still holds; the next gc turns them into dangling notes and the
+	// squash commits they could have covered become unrecoverable. Do it first,
+	// so a sweep interrupted halfway has still saved what it found.
+	s.anchorNotedCommits()
+
 	var out []ReattestResult
 	gaps := report.Reattestable()
 	for i := range gaps {
@@ -254,4 +262,29 @@ func (s *Service) treeEqualSource(target, targetTree string, trusted []string) (
 		}
 	}
 	return "", nil, nil
+}
+
+// anchorNotedCommits points an anchor ref at every commit that carries a note
+// and still exists, so gc cannot collect the evidence a future re-attestation
+// would be carried from (#212 §3).
+//
+// It is a backfill: the gate anchors as it attests, but anchoring arrived long
+// after most notes were written, so an existing repository holds attested
+// commits kept alive only by branches that are already scheduled for deletion.
+// Commits that are ALREADY gone are skipped rather than reported — their notes
+// dangle over nothing and there is no longer anything to preserve.
+//
+// Wholly best-effort: this runs inside a repair sweep, and failing that sweep
+// because a ref could not be written would be a worse outcome than the gap.
+func (s *Service) anchorNotedCommits() {
+	noted, err := s.repo.NotedCommits()
+	if err != nil {
+		return
+	}
+	for _, c := range noted {
+		if _, err := s.repo.TreeSHA(c); err != nil {
+			continue // object already collected; the note dangles over nothing
+		}
+		_ = s.repo.AnchorAttested(c)
+	}
 }
