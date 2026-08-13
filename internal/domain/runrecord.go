@@ -47,6 +47,26 @@ type RunRecord struct {
 	// is re-signed locally, so a re-attestation is transparent: it asserts "the
 	// same validated content, under a new commit id" — never a fresh validation.
 	ReattestedFrom string `json:"reattested_from,omitempty"`
+	// CarriedOriginal, when set, is the ORIGINAL record from ReattestedFrom, kept
+	// intact with its own signature — the one that verifies against that commit.
+	//
+	// It exists because re-attestation cannot simply copy a signature. The
+	// signature covers a payload containing CommitSHA, so a copied note would
+	// verify while attesting the WRONG commit, and commit binding is precisely
+	// what stops a signed note being transplanted. Re-signing locally is the
+	// alternative, and it forces anything doing the repair — a CI runner at merge
+	// time, say — to hold a roster-trusted signing key (#212 §7).
+	//
+	// Carrying the original whole avoids both. A verifier checks that this record
+	// attests ReattestedFrom under a trusted key, and that the two commits have
+	// IDENTICAL TREES — a fact read from git objects, not claimed by anyone. Every
+	// step is independently checkable, so the re-attester needs no trust at all,
+	// and needs no key.
+	//
+	// Always the ROOT original: re-attesting a re-attestation carries the record
+	// that actually did the validating, never a chain of wrappers. See
+	// RunRecord.Root.
+	CarriedOriginal *RunRecord `json:"carried_original,omitempty"`
 	// CoversFrom is the commit this push started from: everything in
 	// (CoversFrom, CommitSHA] was published by the same gated push. It is part of
 	// the signed payload, so the span cannot be widened after the fact.
@@ -147,6 +167,21 @@ const (
 // fields in declaration order and map keys sorted, so the bytes are stable.
 func (r RunRecord) SigningPayload() ([]byte, error) {
 	r.Signature = "" // value receiver — clears only this copy's field
+	// CarriedOriginal is excluded, and must stay excluded.
+	//
+	// Any field inside the payload changes the bytes every version signs over, so
+	// a warden that predates the field unmarshals a note, drops what it does not
+	// know, re-marshals, and computes a DIFFERENT payload. It then reports
+	// "signature does not verify" — which reads as tampering, not as version
+	// skew. Keeping the carried record out means an older verifier sees exactly
+	// the payload it saw before and a re-attestation keeps verifying for it.
+	//
+	// Leaving it unsigned costs nothing, because it defends itself: the carried
+	// record is only ever believed after ITS OWN signature verifies under a
+	// trusted key and the two commits are shown to have identical trees. Swapping
+	// in a different one requires a trusted signature over tree-identical
+	// content, which is the legitimate case rather than an attack on it.
+	r.CarriedOriginal = nil
 	return json.Marshal(r)
 }
 
@@ -294,4 +329,19 @@ func (r RunRecord) VerifyChain() bool {
 		}
 	}
 	return true
+}
+
+// Root returns the record that performed the original validation: the carried
+// original when this is a re-attestation, otherwise the record itself.
+//
+// Re-attestation is transitive in practice — a squash of a squash, a trunk
+// repaired twice — and nesting wrappers would make both the note and the
+// verification unbounded. Carrying the root keeps a re-attestation exactly one
+// level deep no matter how many times content is relocated, and keeps the claim
+// honest: what is being carried is the run that actually checked the tree.
+func (r RunRecord) Root() *RunRecord {
+	if r.CarriedOriginal != nil {
+		return r.CarriedOriginal.Root()
+	}
+	return &r
 }

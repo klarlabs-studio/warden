@@ -118,3 +118,61 @@ func TestVerifySignature_AlgorithmIsCoveredByTheSignature(t *testing.T) {
 		t.Error("flipping the algorithm after signing must invalidate the signature")
 	}
 }
+
+// CarriedOriginal is the same hazard as Algorithm above, and was caught the
+// same way — by running a released warden against a note a newer one wrote.
+// A verifier that predates the field drops it on unmarshal, re-marshals without
+// it, and computes a different payload; it then reports "signature does not
+// verify", which reads as tampering rather than version skew (#212 §7).
+//
+// So the field stays OUT of the payload. It loses nothing: a carried original is
+// believed only after its own signature verifies under a trusted key and the two
+// commits are shown to have identical trees, so swapping one in requires a
+// trusted signature over tree-identical content — the legitimate case, not an
+// attack on it.
+func TestSigningPayloadExcludesCarriedOriginal(t *testing.T) {
+	base := RunRecord{
+		CommitSHA:         "aaaa",
+		RunID:             "r1",
+		EvidenceChainRoot: "root",
+		Evidence:          []EvidenceEntry{{Kind: "step", Source: "test", Hash: "h"}},
+	}
+	without, err := base.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	carried := base
+	carried.CommitSHA = "bbbb"
+	withCarried := base
+	withCarried.CarriedOriginal = &carried
+	with, err := withCarried.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(without) != string(with) {
+		t.Fatalf("carrying an original must not change the signed bytes.\n without: %s\n with:    %s", without, with)
+	}
+	if strings.Contains(string(with), "carried_original") {
+		t.Errorf("carried_original leaked into the signed payload: %s", with)
+	}
+}
+
+// Re-attesting a re-attestation must stay one level deep, or both the note and
+// the verification grow without bound.
+func TestRootFlattensReattestationChains(t *testing.T) {
+	original := RunRecord{CommitSHA: "aaaa", RunID: "the-real-run"}
+	first := RunRecord{CommitSHA: "bbbb", RunID: "the-real-run", CarriedOriginal: &original}
+	second := RunRecord{CommitSHA: "cccc", RunID: "the-real-run", CarriedOriginal: first.Root()}
+
+	if got := second.Root(); got.CommitSHA != "aaaa" {
+		t.Fatalf("Root should reach the run that actually validated, got %q", got.CommitSHA)
+	}
+	if second.CarriedOriginal.CarriedOriginal != nil {
+		t.Error("a re-attestation of a re-attestation must not nest wrappers")
+	}
+	if got := original.Root(); got.CommitSHA != "aaaa" {
+		t.Errorf("a plain record is its own root, got %q", got.CommitSHA)
+	}
+}

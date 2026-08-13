@@ -296,6 +296,20 @@ func printRangeJSON(stdout, stderr io.Writer, res service.RangeVerifyResult) int
 // signerNote describes the signature state for a validated line.
 func signerNote(res service.VerifyResult) string {
 	switch {
+	case res.CarriedTrust:
+		// Say whose run this actually was, and on which commit. Printing "signed by
+		// trusted <fp>" here would be the misreading #212 §7 already fell for once:
+		// it looks like the note in front of you was signed by that key, when in
+		// fact the key signed a DIFFERENT commit and this note inherits the claim
+		// through identical trees.
+		src, signer := "", ""
+		if res.Record != nil {
+			src = short(res.Record.ReattestedFrom)
+			if orig := res.Record.CarriedOriginal; orig != nil {
+				signer = orig.SignerFingerprint()
+			}
+		}
+		return fmt.Sprintf(", re-attested from %s whose run was signed by trusted %s (identical trees)", src, signer)
 	case res.Trusted:
 		return fmt.Sprintf(", signed by trusted %s", res.Signer)
 	case res.SignatureValid:
