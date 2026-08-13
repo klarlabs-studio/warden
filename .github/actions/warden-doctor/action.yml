@@ -1,0 +1,114 @@
+name: "Warden Doctor"
+description: >-
+  Audit a branch's provenance and fail when commits on it are unverified. This
+  is the check that speaks about the history people actually read, as opposed to
+  warden-verify, which speaks about one commit.
+
+# WHY THIS EXISTS (#212 §2)
+#
+# warden-verify checks a single commit — normally the PR head, which by
+# definition still carries its note, so it passes. It cannot say anything about
+# the post-merge history, and the post-merge history is what an auditor reads.
+#
+# A repository ran the gate on every commit for months, kept a permanently green
+# verify check, and had 100% UNVERIFIED on its trunk. That is the worst shape a
+# check can have: it looks like coverage. The squash commit is a new sha whose
+# note did not follow it, and nothing was watching the branch it landed on.
+#
+# Run this on push to your trunk. It audits every commit since adoption and
+# fails on drift, so provenance loss is visible the day it happens rather than
+# the month someone goes looking.
+#
+#   on:
+#     push:
+#       branches: [main]
+#
+#   jobs:
+#     provenance:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#           with: { fetch-depth: 0 }   # REQUIRED: doctor walks history
+#         - uses: felixgeelhaar/warden/.github/actions/warden-doctor@main
+#
+# Pair it with a merge-time `warden reattest --all --push`, or the drift it
+# reports is real but nothing repairs it.
+
+inputs:
+  branch:
+    description: "Branch to audit (default: the checked-out branch)"
+    required: false
+    default: ""
+  remote:
+    description: "Remote holding refs/notes/warden"
+    required: false
+    default: origin
+  fail-on-drift:
+    description: >-
+      Fail the job when unverified commits are found. Set to false to report
+      only — useful for the first weeks of adoption, when a backlog predating
+      the gate would otherwise keep the check permanently red and therefore
+      permanently ignored.
+    required: false
+    default: "true"
+  warden-version:
+    description: "warden version to install (e.g. v0.26.0, or 'latest')."
+    required: false
+    default: latest
+
+outputs:
+  clean:
+    description: "true when no unverified commit was found on the branch"
+    value: ${{ steps.audit.outputs.clean }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install warden
+      shell: bash
+      env:
+        WARDEN_VERSION: ${{ inputs.warden-version }}
+      run: ${{ github.action_path }}/../install-warden.sh
+
+    # Notes AND anchors: the anchors keep attested commits reachable, and doctor
+    # reports a commit as reattestable only when its tree-identical source still
+    # exists (#212 §3).
+    - name: Fetch warden provenance
+      shell: bash
+      run: |
+        git fetch "${{ inputs.remote }}" 'refs/notes/warden:refs/notes/warden' || true
+        git fetch "${{ inputs.remote }}" 'refs/warden/attested/*:refs/warden/attested/*' || true
+
+    - id: audit
+      shell: bash
+      run: |
+        BRANCH_ARG=()
+        if [ -n "${{ inputs.branch }}" ]; then BRANCH_ARG=(--branch "${{ inputs.branch }}"); fi
+
+        # --ci makes drift exit 3, so it is distinguishable from warden failing to
+        # run at all (an unadopted repo, a shallow clone with no history). Both
+        # are exit 1 without it, and reporting a broken audit as tidy drift is the
+        # same "looks like coverage" failure this action exists to fix.
+        set +e
+        warden doctor --ci "${BRANCH_ARG[@]}"
+        STATUS=$?
+        set -e
+
+        if [ "$STATUS" -eq 0 ]; then
+          echo "clean=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "clean=false" >> "$GITHUB_OUTPUT"
+
+        # Exit 3 is drift, which is a finding. Anything else is warden failing to
+        # run at all, which must never be reported as clean history — so it fails
+        # the job even when fail-on-drift is off.
+        if [ "$STATUS" -ne 3 ]; then
+          echo "::error::warden doctor could not complete (exit $STATUS)."
+          exit "$STATUS"
+        fi
+
+        echo "::warning::Unverified commits on this branch. If they are squash merges, \`warden reattest --all --push\` recovers them; run it at merge time to stop the gap reopening."
+        if [ "${{ inputs.fail-on-drift }}" = "true" ]; then
+          exit 1
+        fi

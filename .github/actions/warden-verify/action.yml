@@ -4,6 +4,10 @@ description: >-
   gate (an intact refs/notes/warden record), so CI can trust it and skip
   re-running the checks warden already ran.
 
+  This speaks about ONE COMMIT. It is not a statement about your branch's
+  history — see warden-doctor for that, and see the note below before treating a
+  green check here as provenance coverage.
+
 inputs:
   commit:
     description: "Commit to verify"
@@ -48,6 +52,20 @@ runs:
     - name: Fetch warden notes
       shell: bash
       run: git fetch "${{ inputs.remote }}" 'refs/notes/warden:refs/notes/warden' || true
+
+    # #212 §2: on a pull_request this verifies the PR head (or the ephemeral
+    # merge commit), which still carries its note and therefore passes. The
+    # squash commit that actually lands on the trunk is a NEW sha whose note does
+    # not follow it. A repository ran the gate on every commit for months, kept
+    # this check permanently green, and had 100% UNVERIFIED on its trunk.
+    #
+    # Say so, once, where somebody reading the log will see it. Silence here is
+    # what made a green check read as coverage it never provided.
+    - name: Note what this check does not cover
+      if: github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        echo "::notice::warden-verify checks this PR's commit only. A squash merge creates a new sha whose note does not follow it — add the warden-doctor action on your trunk, and reattest at merge time, or trunk provenance can be zero while this check stays green."
 
     - id: check
       shell: bash

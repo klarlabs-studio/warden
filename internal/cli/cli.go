@@ -90,7 +90,7 @@ Usage:
   warden run <pre-commit|pre-push>            run the gate (invoked by hooks)
   warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]
   warden steps list                           list built-in + custom steps
-  warden doctor [--branch b]                  audit provenance since adoption
+  warden doctor [--branch b] [--ci]           audit provenance since adoption (--ci: exit 3 on drift)
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
   warden verify [--commit c] [--key fp] [--quiet]  exit 0 if the commit is warden-validated (CI skip)
   warden verify --range base..head [--require-signed] [--key fp] [--json]  gate every commit in a range
