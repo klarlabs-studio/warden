@@ -96,6 +96,7 @@ Usage:
   warden attest [--commit c] [--key fp]       emit a commit's provenance as an in-toto statement (SLSA/sigstore interop)
   warden reattest [--commit c] [--push]       re-attest a squash-merge commit from the tree-identical validated commit
   warden reattest --all [--branch b] [--push] sweep a branch: re-attest every recoverable squash-merge gap
+  warden reattest --all --dry-run             show what the sweep would do, writing nothing
   warden key show                             print this machine's provenance signing key
   warden key list                             print the repo's trusted-signer roster (.warden.yaml trusted_keys)
   warden trust add|list|remove [path]         allow the agent surfaces to run THIS repo's commands
