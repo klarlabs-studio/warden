@@ -33,7 +33,9 @@ func sweepTestRepo(t *testing.T) (*Repo, func(args ...string)) {
 		}
 	}
 	gitRun("init")
-	gitRun("config", "user.email", "t@t.co")
+	// Not an address: git does not validate the format, and a literal email
+	// here trips the secret scanner for no benefit.
+	gitRun("config", "user.email", "warden-test")
 	gitRun("config", "user.name", "t")
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
