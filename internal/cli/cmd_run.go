@@ -130,6 +130,16 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// An upgrade leaves every shim pinning the previous version, and the shim
+	// says so on every single run until someone repins by hand. Since a warden
+	// on PATH runs whatever the pin says, that notice reported a difference
+	// that changed nothing -- the kind of recurring warning people learn to
+	// read past, which is exactly what you do not want a gate to teach.
+	//
+	// Do it here rather than after gating: the run may exit early (a push that
+	// advances no branch), and this must not depend on reaching the end.
+	autoRepin(stdout)
+
 	// Git feeds a pre-push hook the refs being pushed on stdin; when the push
 	// advances no branch — a notes-only push (e.g. refs/notes/warden), a tag, a
 	// lone branch deletion, an unrelated ref — there is nothing to gate, so let

@@ -32,6 +32,26 @@ func PredatesSpanRecording(version string) bool {
 	return compareVersions(strings.TrimPrefix(strings.TrimSpace(version), "v"), SpanRecordingSince) < 0
 }
 
+// IsNewer reports whether version a is strictly newer than b.
+//
+// Used to decide whether a hook shim's recorded pin should be rewritten to the
+// running binary. The direction matters: rewriting FORWARD records a fact that
+// is already true, since a warden on PATH runs regardless of what the shim
+// pinned. Rewriting BACKWARD would be a different act -- it would quietly make
+// a downgrade permanent for anyone whose checkout falls back to downloading the
+// pinned version, turning "someone ran an old binary once" into "this
+// repository is pinned to an old binary".
+//
+// An unparseable or empty a sorts below everything, so it is never newer; an
+// unparseable b is treated as older, which makes an unpinned shim eligible for
+// its first pin.
+func IsNewer(a, b string) bool {
+	return compareVersions(
+		strings.TrimPrefix(strings.TrimSpace(a), "v"),
+		strings.TrimPrefix(strings.TrimSpace(b), "v"),
+	) > 0
+}
+
 // compareVersions compares dotted numeric versions, returning -1, 0 or 1. A
 // segment that does not parse sorts as 0, and a version with no parseable
 // leading segment sorts below everything — see PredatesSpanRecording for why

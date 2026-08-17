@@ -62,6 +62,65 @@ func repinTargets(installed map[domain.Hook]bool, pins map[domain.Hook]string, r
 	return out
 }
 
+// autoRepinTargets decides which armed hooks a run should re-pin on its own:
+// those whose recorded pin is strictly OLDER than the running binary.
+//
+// Separate from repinTargets, and deliberately narrower. `warden hooks repin`
+// is someone asking for the shim to match whatever they are running, in either
+// direction. This is warden deciding for them, and it only moves forward.
+//
+// Forward is a no-op in practice: a warden on PATH already runs whatever its
+// version, so the shim's number was simply stale and the drift notice was the
+// only consequence. Backward would be a real change -- a checkout with no
+// warden on PATH downloads exactly the pinned version, so silently pinning
+// backwards would turn one developer running an old binary into a repository
+// that fetches an old binary for everyone.
+func autoRepinTargets(installed map[domain.Hook]bool, pins map[domain.Hook]string, running string) []domain.Hook {
+	var out []domain.Hook
+	for _, h := range domain.AllHooks {
+		if installed[h] && domain.IsNewer(running, pins[h]) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// autoRepin brings armed hook shims up to the running version, so an upgrade
+// does not leave every hook reporting drift until someone runs `warden hooks
+// repin` by hand.
+//
+// Safe to call from inside a hook. The shim's last line is `exec warden run`,
+// which replaces the shell process, so by the time this executes no shell is
+// still reading the file being rewritten.
+//
+// Best-effort and quiet on failure: a repository where the shim cannot be
+// rewritten is one that keeps working with a stale pin, which is the situation
+// this improves rather than a reason to fail a gate.
+func autoRepin(stdout io.Writer) {
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		return
+	}
+	installed, err := svc.InstalledHooks()
+	if err != nil {
+		return
+	}
+	pins, err := svc.HookPins()
+	if err != nil {
+		return
+	}
+	for _, h := range autoRepinTargets(installed, pins, Version) {
+		if err := svc.RepinHook(h); err != nil {
+			continue // a shim that cannot be rewritten keeps its stale pin
+		}
+		was := pins[h]
+		if was == "" {
+			was = "unpinned"
+		}
+		_, _ = fmt.Fprintf(stdout, "warden: repinned %s %s -> %s\n", h, was, Version)
+	}
+}
+
 // hooksRepin rewrites every armed hook's shim so its pinned version matches the
 // binary that is actually running.
 //
@@ -82,7 +141,7 @@ func hooksRepin(stdout, stderr io.Writer) int {
 
 	targets := repinTargets(installed, pins, Version)
 	for _, h := range targets {
-		if err := svc.SetHook(h, true); err != nil {
+		if err := svc.RepinHook(h); err != nil {
 			return fail(stderr, err)
 		}
 		was := pins[h]

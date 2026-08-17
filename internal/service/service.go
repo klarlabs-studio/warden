@@ -289,6 +289,24 @@ func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
 	return s.configs.SetHooks(cfg.Hooks)
 }
 
+// RepinHook rewrites an installed hook's shim so it records the running
+// version. It does not touch .warden.yaml.
+//
+// SetHook would, because it also maintains the hooks selection -- and a repin
+// has no business changing which hooks are armed. That coupling had a sharper
+// consequence than the redundant write: SetHook installs the shim FIRST and
+// updates the config SECOND, so on a repository whose .warden.yaml cannot be
+// parsed the pin was already rewritten by the time the config write failed.
+// SetHook returned an error, the caller skipped its "repinned X -> Y" line, and
+// the pin had moved with nothing said about it.
+func (s *Service) RepinHook(hook domain.Hook) error {
+	gitDir, err := s.repo.GitDir()
+	if err != nil {
+		return err
+	}
+	return hooks.Install(gitDir, []domain.Hook{hook}, s.version)
+}
+
 // InstalledHooks reports which hooks currently have a managed shim.
 func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
 	gitDir, err := s.repo.GitDir()
