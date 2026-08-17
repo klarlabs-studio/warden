@@ -89,6 +89,11 @@ func (w *Worktree) Clone(materializeDeps bool) (*Worktree, error) {
 // forbids. materializeDeps controls how gitignored dependency dirs are exposed
 // (see exposeGitignoredDeps).
 func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree, error) {
+	// Clear the registrations left by runs that were killed before their
+	// deferred Remove could run. Cheap, and this is the only moment warden is
+	// guaranteed to be looking at this repo's worktree list.
+	r.pruneStaleWardenWorktrees()
+
 	dir, err := os.MkdirTemp("", "warden-wt-")
 	if err != nil {
 		return nil, fmt.Errorf("git: create worktree temp dir: %w", err)
@@ -106,6 +111,79 @@ func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree,
 	// unaffected.
 	wt.exposeGitignoredDeps(materializeDeps)
 	return wt, nil
+}
+
+// wardenWorktreePrefix is the temp-dir prefix every disposable worktree gets.
+// The sweep below keys on it so warden only ever removes its own leftovers.
+const wardenWorktreePrefix = "warden-wt-"
+
+// pruneStaleWardenWorktrees drops the admin entries of warden worktrees whose
+// directory is gone.
+//
+// Teardown is a deferred Remove, which does not run when the process is killed
+// -- a CI timeout, a cancelled hook, a developer's Ctrl-C. The directory then
+// leaks too, but it lives under os.MkdirTemp, which the OS reaps on its own
+// schedule; the registration under .git/worktrees has no such janitor and
+// survives indefinitely. Observed in one repo: nineteen orphans, every one
+// reported by `git worktree list` as prunable, together pinning nineteen
+// detached HEADs so `git gc` could not release the objects they reached.
+//
+// It is deliberately not `git worktree prune`. That prunes every entry whose
+// directory is missing, including worktrees warden did not create -- someone
+// else's, on an unmounted volume, temporarily absent rather than dead. Warden
+// runs inside other people's repositories and should confine itself to its own
+// litter, so this reads each entry's recorded path and skips anything without
+// warden's prefix.
+//
+// Best-effort throughout: a repo that cannot be read here is a repo whose
+// worktree list warden simply does not tidy, which is not worth failing a run
+// over.
+func (r *Repo) pruneStaleWardenWorktrees() {
+	// --git-common-dir, not --git-dir: inside a linked worktree the latter
+	// points at .git/worktrees/<name>, and the registrations live in the
+	// shared parent.
+	common, err := r.run("rev-parse", "--git-common-dir")
+	if err != nil {
+		return
+	}
+	common = strings.TrimSpace(common)
+	if common == "" {
+		return
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(r.Dir, common)
+	}
+
+	adminRoot := filepath.Join(common, "worktrees")
+	entries, err := os.ReadDir(adminRoot)
+	if err != nil {
+		return // no linked worktrees have ever existed here
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		admin := filepath.Join(adminRoot, e.Name())
+
+		// The gitdir file records the worktree's own .git path, so its parent
+		// is the worktree directory. Reading it beats deriving the path from
+		// the admin dir name, which git may have disambiguated with a suffix.
+		raw, err := os.ReadFile(filepath.Join(admin, "gitdir")) //nolint:gosec // path built from git's own admin dir
+		if err != nil {
+			continue
+		}
+		wtDir := filepath.Dir(strings.TrimSpace(string(raw)))
+		if !strings.HasPrefix(filepath.Base(wtDir), wardenWorktreePrefix) {
+			continue // not ours
+		}
+		if _, err := os.Stat(wtDir); err == nil {
+			continue // still on disk: a live run, possibly a concurrent one
+		}
+
+		_ = os.RemoveAll(admin)
+		_ = os.RemoveAll(wtDir + "-golangci-cache")
+	}
 }
 
 // depDirNames are gitignored dependency directories worth exposing to steps by
