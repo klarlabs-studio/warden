@@ -6,6 +6,64 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **An upgrade re-pins the hook shims itself.** Installing a new warden left
+  every armed shim recording the previous version, and the shim reported it on
+  every single run until someone ran `warden hooks repin` by hand:
+
+  ```
+  warden: hook pins 0.26.0, PATH has 0.27.0 - running 0.27.0
+  ```
+
+  The notice described a difference that changed nothing — a warden on PATH runs
+  whatever the pin records, so the number was merely stale. A permanent warning
+  with no action behind it is how a gate teaches people to read its output past
+  rather than at, which is the opposite of what a gate is for.
+
+  A run now re-pins its own shims, before gating, so a run that exits early
+  still does it.
+
+  **Only forward.** `warden hooks repin` still moves the pin in either direction,
+  because a person asked for it. This decides on its own, and pinning BACKWARD
+  would be a real change rather than bookkeeping: a checkout with no warden on
+  PATH downloads exactly the pinned version, so a silent backward pin would turn
+  one developer running an old binary into a repository that fetches an old
+  binary for everyone.
+
+### Fixed
+
+- **Re-pinning could move the pin and say nothing.** It went through `SetHook`,
+  which also maintains the hooks selection in `.warden.yaml` — installing the
+  shim first and writing the config second. On a repository whose config could
+  not be parsed, the pin had already been rewritten when the config write
+  failed; `SetHook` returned an error, the caller skipped its `repinned X -> Y`
+  line, and the pin moved silently.
+
+  `RepinHook` rewrites the shim and nothing else, which is all a re-pin ever
+  meant. It also stops re-pinning from touching a user's config at all, and
+  makes `warden hooks repin` work on a repository whose config is broken —
+  which is a moment when you would rather the gate still functioned.
+
+- **A killed run left its worktree registration behind forever.** Teardown is a
+  deferred `Remove`, and a deferred `Remove` does not run when the process is
+  killed — a CI timeout, a cancelled hook, a Ctrl-C. The directory leaks too,
+  but it lives under the OS temp dir and is reaped eventually; the registration
+  under `.git/worktrees` has no such janitor.
+
+  Found in a repository carrying nineteen of them, every one reported by
+  `git worktree list` as prunable, together pinning nineteen detached HEADs so
+  `git gc` could not release the objects they reached. Nothing was visibly
+  broken, which is why they had accumulated.
+
+  Creating a worktree now sweeps the dead ones first, so recovery is automatic
+  rather than a command someone has to know about. Deliberately not
+  `git worktree prune`: that drops every entry whose directory is missing,
+  including worktrees warden did not create — someone else's, on an unmounted
+  volume, absent rather than dead. Warden runs inside other people's
+  repositories and collects only its own litter. A worktree still on disk is
+  left alone whatever its name, so a concurrent run is never disturbed.
+
 ## [0.27.0] - 2026-08-13
 
 Provenance now survives `gh pr merge --squash --delete-branch`, which is the
