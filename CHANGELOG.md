@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-17
+
+A gate should not spend its output on notices nobody can act on, and should not
+leave litter in the repositories it runs in. Both of the below were found by
+using warden rather than by reading it.
+
 ### Added
 
 - **An upgrade re-pins the hook shims itself.** Installing a new warden left
