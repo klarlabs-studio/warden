@@ -29,7 +29,11 @@ jobs:
   # scanning). Pinned tool/action versions live in one place and every repo
   # picks up the bump.
   ci:
-    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
+    # Pinned to a commit, not @main. The shared bar defines what "passing"
+    # means here, so leaving it floating lets anyone who can push to another
+    # repository change this one's gate. Dependabot bumps it, which makes each
+    # change a reviewable diff rather than a silent one.
+    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@4b0f34c9c8efdfe6bb4aa9854e569f894f896118 # main, 2026-08-10
     permissions:
       contents: read
       security-events: write

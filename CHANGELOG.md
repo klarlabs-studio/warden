@@ -6,6 +6,42 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases sign `checksums.txt` into one `.bundle` instead of a `.sig` plus a
+  `.pem`.** cosign 3 deprecated `--output-signature`/`--output-certificate` and
+  refuses them outright without `--new-bundle-format`; releases only kept
+  working because the installer action was pinned to a version that still ships
+  cosign 2. The signing format was therefore one dependency bump away from
+  failing a release, at the step that runs after the GitHub Release already
+  exists. The bundle also carries the Rekor inclusion proof, so a verifier
+  fetches one asset rather than two and can check transparency-log membership
+  offline.
+
+  Verifying a release from this version on:
+
+  ```bash
+  cosign verify-blob --bundle checksums.txt.bundle \
+    --certificate-identity \
+      "https://github.com/klarlabs-studio/warden/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    checksums.txt
+  ```
+
+  v0.28.0 and earlier are unaffected and still verify with `--signature` and
+  `--certificate`.
+
+- **cosign and GoReleaser versions are named, not inherited.** The cosign
+  installer's default moved from v2 to v3 between its own releases, so which
+  cosign signed a release was a fact you had to infer from an action SHA. It is
+  now `cosign-release: v3.0.6` in the workflow, and GoReleaser is pinned to an
+  exact version rather than `~> v2`.
+
+- **The shared CI bar is pinned to a commit.** It was `@main`, which meant
+  anyone able to push to another repository could change this one's gate.
+  Dependabot now bumps the actions weekly, so pinning produces reviewable diffs
+  rather than rot.
+
 ## [0.28.0] - 2026-08-17
 
 A gate should not spend its output on notices nobody can act on, and should not
