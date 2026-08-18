@@ -61,15 +61,29 @@ fetch it too). That download is **verified before it is ever made executable**:
   a **user-only (`0700`)** directory. The Windows installer downloads to an
   unpredictable temp file rather than a fixed, hijackable path.
 - Releases **sign `checksums.txt` with cosign keyless** (Sigstore Fulcio +
-  Rekor), emitting `checksums.txt.sig` and `checksums.txt.pem`, so the digest
-  list is independently verifiable.
+  Rekor), emitting a single `checksums.txt.bundle` — signature, certificate and
+  Rekor inclusion proof in one asset — so the digest list is independently
+  verifiable:
+
+  ```bash
+  cosign verify-blob \
+    --bundle checksums.txt.bundle \
+    --certificate-identity \
+      "https://github.com/klarlabs-studio/warden/.github/workflows/release.yml@refs/tags/v0.29.0" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    checksums.txt
+  ```
+
+  Releases up to and including v0.28.0 carry `checksums.txt.sig` plus
+  `checksums.txt.pem` instead; verify those with `--signature` and
+  `--certificate`.
 
 **Residual gap (follow-up).** The fetch path verifies the *checksum* but does not
 yet verify the *cosign signature* on `checksums.txt` — `checksums.txt` is
 retrieved over the same TLS/host as the archive. This defends against archive
 corruption, single-asset/CDN tampering, and accidental drift, but not a
 determined TLS-breaking MITM who can forge both files. Closing it fully means
-having the hook and install scripts verify `checksums.txt.sig` against a pinned
-cosign identity (`cosign verify-blob`) before trusting the digests. Until then,
+having the hook and install scripts verify `checksums.txt.bundle` against a
+pinned cosign identity (`cosign verify-blob`) before trusting the digests. Until then,
 the strongest guarantees come from installing via a channel that pins the binary
 out-of-band (Homebrew cask, the per-platform npm packages) or `go install`.

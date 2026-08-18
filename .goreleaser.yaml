@@ -32,21 +32,27 @@ archives:
 checksum:
   name_template: checksums.txt
 
-# Sign checksums.txt (and emit the signing certificate) with cosign keyless
-# (Sigstore: Fulcio cert + Rekor transparency log). The digest list that
-# install.sh, install.ps1 and the self-fetching git hook verify downloads
-# against is thereby itself verifiable — closing the "unsigned checksums" gap.
-# Requires cosign on the release runner and `id-token: write` for the OIDC
-# keyless flow (see .github/workflows/release.yml).
+# Sign checksums.txt with cosign keyless (Sigstore: Fulcio cert + Rekor
+# transparency log). The digest list that install.sh, install.ps1 and the
+# self-fetching git hook verify downloads against is thereby itself verifiable
+# — closing the "unsigned checksums" gap. Requires cosign on the release runner
+# and `id-token: write` for the OIDC keyless flow (see release.yml).
+#
+# One `.bundle` rather than a `.sig` and a `.pem`. cosign 3 deprecated
+# --output-signature/--output-certificate and refuses them outright unless
+# --new-bundle-format is given; this release only kept working because the
+# installer action was pinned to a version that still ships cosign 2, which
+# means the format was one dependabot bump away from failing a release. The
+# bundle also carries the Rekor inclusion proof, so a verifier fetches one
+# asset instead of two and can check transparency-log membership offline.
 signs:
   - cmd: cosign
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--new-bundle-format"
+      - "--bundle=${signature}"
       - "${artifact}"
     artifacts: checksum
     output: true
