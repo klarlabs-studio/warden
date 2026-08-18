@@ -138,6 +138,28 @@ func (s *Service) SigningKey() (publicKey, fingerprint string) {
 	return s.signer.PublicKey(), s.signer.Fingerprint()
 }
 
+// SignPayload signs arbitrary bytes with the machine's provenance key,
+// returning the base64 signature and the key's fingerprint.
+//
+// It exists so `warden attest --sign` can produce a DSSE envelope without the
+// CLI reaching inside the service for the signer. The same key that signs
+// notes signs the envelope, which is what keeps one trust decision — the
+// trusted-signer roster — governing both.
+//
+// Empty signer is an error rather than an unsigned result: a caller that asked
+// for a signature and silently got none would ship an envelope nobody can
+// verify.
+func (s *Service) SignPayload(payload []byte) (signature, fingerprint string, err error) {
+	if s.signer == nil {
+		return "", "", fmt.Errorf("no signing key available; run `warden key show` to create one")
+	}
+	sig, err := s.signer.Sign(payload)
+	if err != nil {
+		return "", "", err
+	}
+	return sig, s.signer.Fingerprint(), nil
+}
+
 // CIStatus reports the CI check status for a branch's pull request (branch ""
 // = current). Used by `warden ci`.
 func (s *Service) CIStatus(ctx context.Context, branch string) (domain.CIStatus, error) {
