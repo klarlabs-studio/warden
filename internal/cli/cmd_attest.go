@@ -13,9 +13,15 @@ import (
 // cmdAttest handles `warden attest`, projecting a commit's refs/notes/warden
 // record into an in-toto Statement so warden provenance can feed the wider
 // supply-chain ecosystem (sigstore, GUAC, policy engines) instead of staying a
-// warden-only note shape. It is a read-only projection — no signing, no writes;
-// wrap the output in a DSSE envelope / cosign attest if you want it signed as a
-// statement. Exits non-zero when the commit carries no note (nothing to attest);
+// warden-only note shape. It is a read-only projection — no writes.
+//
+// --sign wraps the statement in a DSSE envelope signed with the same key that
+// signs notes, so the claim reaches a downstream consumer verifiable against
+// warden's public key rather than against whatever carried it. Without it the
+// output is a bare statement, which a carrier must re-sign — and a re-signed
+// statement attests to the carrier.
+//
+// Exits non-zero when the commit carries no note (nothing to attest);
 // the trust of the underlying note is reported in the predicate's `verification`
 // block, not the exit code (use `warden verify` to gate on trust).
 func cmdAttest(args []string, stdout, stderr io.Writer) int {
@@ -24,6 +30,7 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 	commit := fs.String("commit", "HEAD", "commit to attest")
 	keys := fs.String("key", "", "trusted signer key(s)/fingerprint(s) used to set predicate.verification.trusted; falls back to .warden.yaml trusted_keys")
 	predicate := fs.String("predicate", predicateWarden, "predicate to emit: "+predicateWarden+" (the full record) or "+predicateVSA+" (SLSA Verification Summary Attestation)")
+	sign := fs.Bool("sign", false, "emit a signed DSSE envelope instead of a bare statement, so the claim is verifiable with warden's public key alone")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -63,9 +70,22 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 		statement = buildVSA(res, remote)
 	}
 
+	out := statement
+	if *sign {
+		// Signed here rather than by whatever carries the statement onward. A
+		// build platform that re-signed it would produce an envelope attesting
+		// to itself, leaving a consumer able to conclude only "the builder says
+		// warden said this" — which is not what warden said.
+		envelope, err := signStatement(statement, svc)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		out = envelope
+	}
+
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(statement); err != nil {
+	if err := enc.Encode(out); err != nil {
 		return fail(stderr, err)
 	}
 	return 0
