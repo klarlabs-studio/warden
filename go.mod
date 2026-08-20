@@ -8,11 +8,11 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-isatty v0.0.24
-	go.klarlabs.de/axi v1.4.0
-	go.klarlabs.de/fortify v1.8.1
-	go.klarlabs.de/mcp v1.24.0
-	go.klarlabs.de/statekit v1.13.2
-	golang.org/x/crypto v0.54.0
+	go.klarlabs.de/axi v1.5.0
+	go.klarlabs.de/fortify v1.10.0
+	go.klarlabs.de/mcp v1.27.0
+	go.klarlabs.de/statekit v1.14.0
+	golang.org/x/crypto v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -47,7 +47,7 @@ require (
 	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260729162451-8efbd57d26e0 // indirect
 	google.golang.org/grpc v1.83.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
