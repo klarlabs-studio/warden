@@ -6,6 +6,11 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-22
+
+A gate that cannot report is a gate nobody can rely on. This release is about
+the case where the forge itself is the thing that stopped working.
+
 ### Added
 
 - **`status.enabled`: publish the gate verdict where CI cannot run.** A private
