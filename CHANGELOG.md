@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-08-22
+
+Evidence someone other than its author can use: the approval half of change
+management, and an audit that no longer depends on the machine that ran
+`warden init`.
+
 ### Added
 
 - **`warden evidence --approvals`: the other half of CC8.1.** warden observes
