@@ -463,6 +463,22 @@ func (r *Repo) CommitMeta(sha string) (author, date, subject string, err error) 
 	return parts[0], parts[1], parts[2], nil
 }
 
+// PushAnchor puts ONE commit's anchor ref on the remote, and reports whether
+// it worked.
+//
+// pushAnchors below is the bulk, best-effort, deliberately silent version: it
+// is a durability hint and nothing depends on it. Publishing a commit status
+// does depend on it — GitHub refuses a status for a SHA it has never seen with
+// "No commit found for SHA" — so that path needs a push it can check, for the
+// single commit it cares about, whether or not the notes push happened to run.
+func (r *Repo) PushAnchor(remote, sha string) error {
+	if err := r.AnchorAttested(sha); err != nil {
+		return err
+	}
+	_, err := r.run("push", "--no-verify", remote, AnchorRefPrefix+sha+":"+AnchorRefPrefix+sha)
+	return err
+}
+
 // pushAnchors publishes the anchor refs, so the remote keeps the attested
 // commits reachable too. Wholly best-effort and deliberately silent: anchors are
 // a durability hint, and a repository that refuses refs/warden/* still gets

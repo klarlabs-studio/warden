@@ -55,6 +55,8 @@ type fakeGit struct {
 	unmergedRemote    []string
 	unmergedRemoteErr error
 	notesPushed       bool
+	anchorsPushed     []string
+	anchorErr         error
 	anchored          []string
 	wroteNote         bool
 	writeNoteErr      error
@@ -116,6 +118,10 @@ func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 }
 func (g *fakeGit) AnchorAttested(sha string) error { g.anchored = append(g.anchored, sha); return nil }
 func (g *fakeGit) PushNotes(string) error          { g.notesPushed = true; return nil }
+func (g *fakeGit) PushAnchor(_, sha string) error {
+	g.anchorsPushed = append(g.anchorsPushed, sha)
+	return g.anchorErr
+}
 
 // fakeKernel scripts step outcomes and invokes the push closure on approval,
 // mirroring how the real axi-backed kernel resolves the write-external gate.
@@ -1310,5 +1316,61 @@ func TestRunner_PublishesNothingWhenTheGateFails(t *testing.T) {
 	}
 	if len(forge.statuses) != 0 {
 		t.Errorf("reported success for a gate that failed: %+v", forge.statuses)
+	}
+}
+
+// The forge refuses a status for a commit it has never seen ("No commit found
+// for SHA"), and when git is completing the push the branch has not reached it
+// yet. Observed on two repositories where the status silently 422'd while the
+// gate reported success.
+func TestRunner_MakesTheCommitReachableBeforePublishingItsStatus(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true}
+
+	cfg := prePushCfg()
+	cfg.Status = domain.StatusConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Contains(git.anchorsPushed, "sha1") {
+		t.Errorf("published a status without first making sha1 reachable: %v", git.anchorsPushed)
+	}
+	if len(forge.statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(forge.statuses))
+	}
+}
+
+// If the commit cannot be made reachable, publishing would fail confusingly at
+// the forge. Say why here instead, and do not call the forge at all.
+func TestRunner_SkipsThePublishWhenTheCommitCannotReachTheRemote(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	git.anchorErr = errors.New("remote refused refs/warden/*")
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true}
+
+	cfg := prePushCfg()
+	cfg.Status = domain.StatusConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatalf("an unreachable commit unwound the run: %v", err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if len(forge.statuses) != 0 {
+		t.Errorf("called the forge for a commit it cannot see: %+v", forge.statuses)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
+		return strings.Contains(w, "reachable")
+	}) {
+		t.Errorf("no warning explaining why the status is missing: %q", res.Warnings)
 	}
 }

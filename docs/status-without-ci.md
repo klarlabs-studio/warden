@@ -73,6 +73,24 @@ can post a status saying anything; nobody without the signing key can produce a
 note that `warden verify` accepts. Treat the status as what unblocks the merge
 button and the note as what you would audit.
 
+## Ordering
+
+The forge refuses a status for a commit it has never seen — `No commit found
+for SHA` — and when git is completing the push, the branch has not reached it
+at the moment the gate finishes. So warden first pushes the commit under its
+anchor ref (`refs/warden/attested/<sha>`), checks that this worked, and only
+then publishes. If the remote refuses that ref, warden says so and does not
+call the forge:
+
+```
+gate passed but its commit status was NOT published: the commit could not be
+made reachable on origin (<reason>).
+```
+
+This was found the honest way: two repositories reported a passing gate while
+the status silently 422'd, because the publish had been relying on a bulk
+anchor push that is best-effort and deliberately silent about failing.
+
 ## Failure is a warning, never a rollback
 
 The push has already happened by the time the status is posted. If the forge
