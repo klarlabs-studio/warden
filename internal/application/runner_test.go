@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -191,12 +192,24 @@ type fakeForge struct {
 	err          error
 	commentBody  string
 	commentCount int
+	statuses     []publishedStatus
+	statusErr    error
+}
+
+// publishedStatus is one PublishStatus call, recorded so a test can assert
+// what the gate told the forge.
+type publishedStatus struct {
+	sha, state, context, description string
 }
 
 func (f *fakeForge) Available() bool { return f.available }
 func (f *fakeForge) EnsurePR(context.Context, string, string) (domain.PRInfo, error) {
 	f.called = true
 	return f.pr, f.err
+}
+func (f *fakeForge) PublishStatus(_ context.Context, sha, state, statusContext, description string) error {
+	f.statuses = append(f.statuses, publishedStatus{sha, state, statusContext, description})
+	return f.statusErr
 }
 func (f *fakeForge) Comment(_ context.Context, _, body string) error {
 	f.commentCount++
@@ -1194,5 +1207,107 @@ func TestRunner_NoDriftLeavesTheRecordSilent(t *testing.T) {
 	}
 	if len(git.note.DependenciesDrifted) != 0 {
 		t.Errorf("a clean run recorded drift: %+v", git.note.DependenciesDrifted)
+	}
+}
+
+// The point of publishing a status is a repository whose CI cannot run: the
+// gate ran here, so it says so on the commit branch protection is watching.
+func TestRunner_PublishesTheGateStatusWhenEnabled(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true}
+
+	cfg := prePushCfg()
+	cfg.Status = domain.StatusConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if len(forge.statuses) != 1 {
+		t.Fatalf("published %d statuses, want 1: %+v", len(forge.statuses), forge.statuses)
+	}
+	got := forge.statuses[0]
+	if got.sha != "sha1" {
+		t.Errorf("status attached to %q, want the pushed commit", got.sha)
+	}
+	if got.state != "success" {
+		t.Errorf("state = %q, want success", got.state)
+	}
+	// Branch protection matches on the context, so the default has to be the
+	// name the warden-verify Action already publishes under.
+	if got.context != domain.DefaultStatusContext {
+		t.Errorf("context = %q, want %q", got.context, domain.DefaultStatusContext)
+	}
+	if got.description == "" {
+		t.Error("published an empty description")
+	}
+}
+
+// Off unless asked for: publishing writes to a surface other people read as
+// CI, and no one should acquire that behavior by upgrading warden.
+func TestRunner_PublishesNothingByDefault(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true}
+
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	r.Forge = forge
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.statuses) != 0 {
+		t.Errorf("published without being asked: %+v", forge.statuses)
+	}
+}
+
+// The push already happened. A forge that refuses the status must not turn a
+// successful gate into a failure — it becomes a warning, like the note push.
+func TestRunner_AFailedStatusIsAWarningNotAFailure(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	forge := &fakeForge{available: true, statusErr: errors.New("403 from the forge")}
+
+	cfg := prePushCfg()
+	cfg.Status = domain.StatusConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	res, err := r.Run(context.Background(), domain.PrePush)
+	if err != nil {
+		t.Fatalf("a status failure unwound the run: %v", err)
+	}
+	if res.Outcome != domain.OutcomePassed {
+		t.Fatalf("outcome = %s, want passed", res.Outcome)
+	}
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "status") }) {
+		t.Errorf("no warning about the unpublished status: %q", res.Warnings)
+	}
+}
+
+// A gate that did not pass has nothing to publish. Reporting success for a run
+// that never pushed would be the one failure mode that matters here.
+func TestRunner_PublishesNothingWhenTheGateFails(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{"test": domain.StepFail}}
+	forge := &fakeForge{available: true}
+
+	cfg := prePushCfg()
+	cfg.Status = domain.StatusConfig{Enabled: true}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Forge = forge
+
+	res, _ := r.Run(context.Background(), domain.PrePush)
+	if res.Outcome == domain.OutcomePassed {
+		t.Fatal("fixture did not fail the gate")
+	}
+	if len(forge.statuses) != 0 {
+		t.Errorf("reported success for a gate that failed: %+v", forge.statuses)
 	}
 }

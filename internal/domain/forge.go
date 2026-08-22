@@ -43,3 +43,39 @@ type CIStatus struct {
 	Failed  int
 	Pending int
 }
+
+// DefaultStatusContext is the commit-status context warden publishes under.
+//
+// It deliberately matches the job name of the warden-verify GitHub Action
+// ("Warden provenance"), because branch protection matches a required check by
+// name and does not care whether a status or a check run satisfied it. A repo
+// that already requires the Action therefore needs no protection change: when
+// Actions cannot run, the locally-published status satisfies the same rule.
+const DefaultStatusContext = "Warden provenance"
+
+// StatusConfig controls publishing the gate verdict to the forge as a commit
+// status.
+//
+// Off by default, and deliberately so: publishing writes to a shared, external
+// surface that other people read as CI, and a gate should not start doing that
+// because somebody upgraded warden.
+//
+// It exists for repositories whose Actions cannot run — a spending limit, a
+// self-hosted-only fleet, an air-gapped mirror. The gate has already produced a
+// signed verdict on this machine; this is only the part that tells GitHub. It
+// is not a second opinion, and it claims nothing the note does not already say.
+type StatusConfig struct {
+	// Enabled turns on publishing after a passing, pushed gate run.
+	Enabled bool `yaml:"enabled"`
+
+	// Context overrides the status context. Empty means DefaultStatusContext.
+	Context string `yaml:"context"`
+}
+
+// StatusContext is the context to publish under, defaulted.
+func (c StatusConfig) StatusContext() string {
+	if c.Context == "" {
+		return DefaultStatusContext
+	}
+	return c.Context
+}
