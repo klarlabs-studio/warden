@@ -59,6 +59,11 @@ type Git interface {
 	// AnchorAttested keeps an attested commit reachable so gc cannot prune the
 	// object out from under its own note (#212 §3).
 	AnchorAttested(sha string) error
+	// PushAnchor makes ONE commit reachable on the remote under its anchor ref
+	// and reports whether it worked, unlike the bulk anchor push that rides
+	// along with the notes. Publishing a commit status needs this: the forge
+	// refuses a status for a SHA it has never seen.
+	PushAnchor(remote, sha string) error
 	PushNotes(remote string) error
 }
 

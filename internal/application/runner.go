@@ -586,7 +586,16 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// as PR creation, and matters most where CI cannot run: without it the
 	// commit is gated but looks ungated to branch protection.
 	if cfg.Status.Enabled && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
-		if err := r.Forge.PublishStatus(ctx, finalSHA, "success",
+		// The forge refuses a status for a commit it has never seen, and when
+		// git is completing the push the branch has not reached it yet. Put the
+		// commit there under its anchor ref first — explicitly, and checked,
+		// rather than relying on the bulk anchor push that rides along with the
+		// notes and is silent about failing.
+		if err := r.Git.PushAnchor(r.Settings.Remote, finalSHA); err != nil {
+			res.Warnings = append(res.Warnings,
+				"gate passed but its commit status was NOT published: the commit could not be made reachable on "+
+					r.Settings.Remote+" ("+err.Error()+"). This commit will read as ungated to branch protection until it is.")
+		} else if err := r.Forge.PublishStatus(ctx, finalSHA, "success",
 			cfg.Status.StatusContext(), statusDescription(run)); err != nil {
 			res.Warnings = append(res.Warnings,
 				"gate passed but its commit status was NOT published: "+err.Error()+

@@ -67,6 +67,9 @@ func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 }
 func (a *Adapter) AnchorAttested(sha string) error { return a.repo.AnchorAttested(sha) }
 func (a *Adapter) PushNotes(remote string) error   { return a.repo.PushNotes(remote) }
+func (a *Adapter) PushAnchor(remote, sha string) error {
+	return a.repo.PushAnchor(remote, sha)
+}
 
 // worktreeAdapter adapts *Worktree to application.Worktree (Dir field → method).
 type worktreeAdapter struct{ wt *Worktree }
