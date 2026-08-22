@@ -6,6 +6,22 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An audit no longer needs the machine that ran `warden init`.** The adoption
+  point is written to `.git/warden/adoption` — local, untracked, per-clone
+  state — so a fresh clone got "warden was never initialized in this repo" and
+  no report at all. Tolerable for `warden doctor`; fatal for `warden evidence`,
+  where an artifact only one laptop can produce is not evidence, because the
+  person checking it cannot reproduce it. Six of eight repositories in one
+  fleet were in exactly that state.
+
+  When the file is absent, the adoption point is now derived from
+  `refs/notes/warden`, which is shared: the parent of the earliest noted commit
+  on the branch — the point at which the gate demonstrably began operating.
+  Same population, same digest, on any clone. A repository with no notes at all
+  says nothing has been gated rather than inventing a start date.
+
 ## [0.29.1] - 2026-08-22
 
 Rolling 0.29.0 across a fleet found the ordering bug below within the hour,

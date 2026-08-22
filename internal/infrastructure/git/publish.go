@@ -429,6 +429,56 @@ func (r *Repo) NotedCommits() ([]string, error) {
 	return commits, nil
 }
 
+// EarliestNotedAncestor returns the oldest commit reachable from ref that
+// carries a warden note, and its parent — the point at which the gate demonstrably
+// began operating on this branch.
+//
+// It exists because the recorded adoption point lives in .git/warden/adoption:
+// local, untracked, per-clone state. That is fine for `warden doctor` on the
+// machine that ran `warden init`, and useless for evidence, which has to be
+// reproducible by someone who just cloned the repository — an auditor, CI, a
+// colleague. refs/notes/warden IS shared, so the first noted commit is the same
+// answer everywhere, derived from the same data the notes themselves are.
+//
+// The parent is returned as the adoption point because CommitsSince is
+// exclusive of its base: adopting AT the first noted commit would leave that
+// commit out of its own evidence.
+func (r *Repo) EarliestNotedAncestor(ref string) (string, error) {
+	noted, err := r.NotedCommits()
+	if err != nil {
+		return "", err
+	}
+	if len(noted) == 0 {
+		return "", nil
+	}
+	inHistory := make(map[string]bool, len(noted))
+	for _, sha := range noted {
+		inHistory[sha] = true
+	}
+
+	// Walk the branch oldest-first and take the first one that is noted, so the
+	// answer is a commit on THIS branch rather than any noted commit anywhere
+	// in the repository.
+	out, err := r.run("rev-list", "--reverse", ref)
+	if err != nil {
+		return "", err
+	}
+	for _, sha := range splitLines(out) {
+		if !inHistory[sha] {
+			continue
+		}
+		// Its parent, so the first gated commit is inside the window. A root
+		// commit has none, in which case the empty tree stands in — rev-list
+		// A..B with an empty A is just B, which is what we want.
+		parent, perr := r.run("rev-parse", "--verify", "--quiet", sha+"^")
+		if perr != nil || parent == "" {
+			return sha, nil
+		}
+		return parent, nil
+	}
+	return "", nil
+}
+
 // CommitsInRange returns the SHAs reachable from head back to (but excluding)
 // base — the `base..head` set, newest first — for an arbitrary two-endpoint
 // range gate (`warden verify --range`). When skipMerges is set, merge commits
