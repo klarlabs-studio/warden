@@ -130,6 +130,11 @@ type Forge interface {
 	Comment(ctx context.Context, branch, body string) error
 	// Checks returns the CI status for branch's pull request.
 	Checks(ctx context.Context, branch string) (domain.CIStatus, error)
+	// PublishStatus reports the gate verdict on a commit as a forge status, so
+	// branch protection can see a gate that ran outside the forge's CI. It is
+	// opt-in (see domain.StatusConfig) and best-effort: a failure to publish
+	// never unwinds a push that already succeeded.
+	PublishStatus(ctx context.Context, sha, state, statusContext, description string) error
 }
 
 // ApprovalRequest is what the Runner shows an Approver when the run reaches its
