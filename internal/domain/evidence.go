@@ -48,6 +48,12 @@ type Evidence struct {
 
 	Controls   []Control
 	Assertions Assertions
+
+	// ApprovalByCommit is the forge's review record per commit, populated only
+	// when the report was asked to collect it (it costs a forge call per
+	// commit). Empty means "not collected", which the renderers must say rather
+	// than presenting as "no approvals found".
+	ApprovalByCommit map[string]Approval
 }
 
 // Assertions separates what the evidence supports from what it does not.
@@ -259,6 +265,39 @@ var standardAssertions = Assertions{
 	},
 }
 
+// WithApprovals returns a copy carrying the forge's review records, with the
+// change-management control and the assertions restated to match.
+//
+// The control text is not "upgraded" — it is made specific. Approval evidence
+// is only as good as the forge's records, and a self-approval or an admin merge
+// that bypassed review shows up in the numbers rather than being smoothed over.
+func (e Evidence) WithApprovals(byCommit map[string]Approval) Evidence {
+	e.ApprovalByCommit = byCommit
+
+	controls := make([]Control, len(e.Controls))
+	copy(controls, e.Controls)
+	for i := range controls {
+		if controls[i].ID != "CC8.1" && controls[i].ID != "A.8.32" {
+			continue
+		}
+		controls[i].Evidences += " Approval is included: for each change, the pull request it arrived through, its author, and who approved it."
+		controls[i].Limits = "Approval is evidenced only as strongly as the forge records it. An approval by the author is reported as a self-approval and does not count as separation of duties; a change merged with administrator privileges past a required review appears as unapproved. Authorization — that the change was wanted — is still a separate control with separate evidence."
+	}
+	e.Controls = controls
+
+	e.Assertions.Supported = append(append([]string{}, e.Assertions.Supported...),
+		"For each change, the pull request it arrived through and the identities that approved it, as recorded by the forge.")
+	unsupported := make([]string, 0, len(e.Assertions.Unsupported))
+	for _, u := range e.Assertions.Unsupported {
+		if strings.Contains(u, "second person") {
+			u = "That an approval was MEANINGFUL. The forge records who clicked approve, not whether they read the change; and an approval by the author is counted here as a self-approval, not as review."
+		}
+		unsupported = append(unsupported, u)
+	}
+	e.Assertions.Unsupported = unsupported
+	return e
+}
+
 // ControlsFor returns the control catalogs named by key. Unknown keys are
 // ignored by the domain; the delivery layer validates them so a typo is a
 // usage error rather than a silently thinner report.
@@ -334,4 +373,74 @@ var controlCatalogue = map[string][]Control{
 			Limits:    "One stage of the life cycle. Design review, threat modeling and dependency governance are evidenced elsewhere.",
 		},
 	},
+}
+
+// Approval is what the forge records about who signed off on a change.
+//
+// warden does not observe review; the forge does. Reading it here is what turns
+// CC8.1 from half-evidenced into evidenced — but only as strongly as the forge's
+// own records, which is why Independent is computed rather than assumed: an
+// approval by the author is a record of a review that did not happen.
+type Approval struct {
+	// Found is false when no pull request could be associated with the commit,
+	// which is not the same as "no approval" — a commit pushed straight to the
+	// branch has no PR to have been approved.
+	Found bool
+	// PR is the pull request number the commit arrived through.
+	PR int
+	// Author is the login that opened it.
+	Author string
+	// Approvers are the logins that submitted an APPROVED review.
+	Approvers []string
+}
+
+// Independent reports whether someone other than the author approved. Bots are
+// counted only if a human did too — an automated approval is not a second pair
+// of eyes, and a control that accepted one would be evidencing the opposite of
+// what it claims.
+func (a Approval) Independent() bool {
+	for _, who := range a.Approvers {
+		if who != a.Author && !isBot(who) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBot(login string) bool {
+	return strings.HasSuffix(login, "[bot]") || strings.HasSuffix(login, "-bot")
+}
+
+// ApprovalSummary counts separation of duties across the population.
+type ApprovalSummary struct {
+	// Collected is false when the report did not ask the forge, in which case
+	// the numbers below mean nothing and must not be rendered.
+	Collected int
+	// Independent changes carried an approval from a human other than the author.
+	Independent int
+	// SelfApprovedOnly changes had approvals, all of them the author's.
+	SelfApprovedOnly int
+	// Unapproved changes came through a pull request nobody approved.
+	Unapproved int
+	// NoPullRequest changes were not associated with a pull request at all.
+	NoPullRequest int
+}
+
+// Approvals summarizes the approval records attached to the population.
+func (e Evidence) Approvals() ApprovalSummary {
+	var s ApprovalSummary
+	for _, a := range e.ApprovalByCommit {
+		s.Collected++
+		switch {
+		case !a.Found:
+			s.NoPullRequest++
+		case a.Independent():
+			s.Independent++
+		case len(a.Approvers) > 0:
+			s.SelfApprovedOnly++
+		default:
+			s.Unapproved++
+		}
+	}
+	return s
 }

@@ -105,6 +105,38 @@ being read.
 | A.8.29 Security testing | That configured security testing ran as a precondition of publication | Depth or currency of those tests |
 | A.8.25 Secure development life cycle | That an enforced machine-checked stage exists, with evidence of operation | Design review, threat modeling, dependency governance |
 
+## Approval (`--approvals`)
+
+CC8.1 has two halves and warden only observes one. `--approvals` reads the other
+from the forge — the pull request each change arrived through, who opened it,
+and who approved it:
+
+```bash
+warden evidence --from 2026-01-01 --to 2026-03-31 --approvals
+```
+
+Opt-in, because it costs one forge call per commit.
+
+It reports four states, kept apart because they are different findings with
+different remedies:
+
+| State | Meaning |
+|---|---|
+| Approved by someone else | Separation of duties held |
+| Self-approved only | The author approved their own change — a record of a review that did not happen |
+| Nobody approved | Merged through a pull request with no approving review |
+| No pull request | Pushed to the branch directly; there was nothing to approve |
+
+A bot approval never counts on its own. An automated approval is not a second
+pair of eyes, and a control that accepted one would evidence the opposite of
+what it claims.
+
+**Expect an uncomfortable number the first time.** A single-maintainer
+repository shows zero independent approvals, because that is true. The report
+says so and points at the compensating-control narrative rather than leaving an
+auditor to discover it — which is the whole difference between evidence and a
+brochure.
+
 ## Feeding a GRC platform
 
 `--format json` emits a versioned document (`"schema": "warden.evidence/v1"`)

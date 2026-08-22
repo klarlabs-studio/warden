@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
+	forgepkg "go.klarlabs.de/warden/internal/infrastructure/forge"
 )
 
 // cmdEvidence renders a period-scoped, control-mapped evidence package.
@@ -33,6 +35,7 @@ func cmdEvidence(args []string, stdout, stderr io.Writer) int {
 	fromFlag := fs.String("from", "", "start of the period, YYYY-MM-DD (default: adoption)")
 	toFlag := fs.String("to", "", "end of the period, YYYY-MM-DD (default: now)")
 	frameworksFlag := fs.String("frameworks", "", "comma-separated: soc2, iso27001 (default: all)")
+	approvalsFlag := fs.Bool("approvals", false, "also read who approved each change from the forge (one API call per commit)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -90,6 +93,28 @@ func cmdEvidence(args []string, stdout, stderr io.Writer) int {
 		Now:        time.Now().UTC(),
 		Frameworks: frameworks,
 	})
+
+	// Opt-in: one forge call per commit is slow and rate-limited, and a report
+	// that silently took four minutes is a report nobody runs twice.
+	if *approvalsFlag {
+		forge := forgepkg.NewGH(mustCwd())
+		if !forge.Available() {
+			_, _ = fmt.Fprintln(stderr, "warden: --approvals needs the gh CLI on PATH")
+			return 2
+		}
+		ctx := context.Background()
+		byCommit := make(map[string]domain.Approval, len(ev.Population))
+		for i := range ev.Population {
+			sha := ev.Population[i].SHA
+			a, err := forge.ApprovalFor(ctx, sha)
+			if err != nil {
+				_, _ = fmt.Fprintf(stderr, "warden: reading approval for %s: %v\n", short(sha), err)
+				return 1
+			}
+			byCommit[sha] = a
+		}
+		ev = ev.WithApprovals(byCommit)
+	}
 
 	switch *formatFlag {
 	case "json":
@@ -190,6 +215,25 @@ func printEvidenceMarkdown(w io.Writer, e domain.Evidence) {
 		p("\n")
 	}
 
+	if a := e.Approvals(); a.Collected > 0 {
+		p("## Separation of duties\n\n")
+		p("Who approved each change, as recorded by the forge. An approval by the\n")
+		p("author is reported as a self-approval and does not count as review.\n\n")
+		p("| | Count |\n|---|---:|\n")
+		p("| Approved by someone other than the author | %d |\n", a.Independent)
+		p("| Self-approved only | %d |\n", a.SelfApprovedOnly)
+		p("| Merged through a pull request nobody approved | %d |\n", a.Unapproved)
+		p("| Not associated with a pull request | %d |\n", a.NoPullRequest)
+		p("| **Total** | **%d** |\n\n", a.Collected)
+		if a.Independent < a.Collected {
+			p("%d of %d changes in this period did not carry an independent approval.\n",
+				a.Collected-a.Independent, a.Collected)
+			p("Where that is expected — a single-maintainer repository, an automated\n")
+			p("dependency bump — say so in the compensating-control narrative rather\n")
+			p("than leaving an auditor to infer it.\n\n")
+		}
+	}
+
 	p("## Controls\n\n")
 	for _, c := range e.Controls {
 		p("### %s %s — %s\n\n", c.Framework, c.ID, c.Name)
@@ -250,6 +294,14 @@ func orDash(s string) string {
 // schedule needs to know when the shape changes without diffing it.
 const evidenceSchema = "warden.evidence/v1"
 
+type approvalJSON struct {
+	Collected        int `json:"collected"`
+	Independent      int `json:"independent"`
+	SelfApprovedOnly int `json:"self_approved_only"`
+	Unapproved       int `json:"unapproved"`
+	NoPullRequest    int `json:"no_pull_request"`
+}
+
 type evidenceJSON struct {
 	Schema     string           `json:"schema"`
 	Tool       string           `json:"tool"`
@@ -263,6 +315,7 @@ type evidenceJSON struct {
 	Summary    summaryJSON      `json:"summary"`
 	Population []populationJSON `json:"population"`
 	Exceptions []exceptionJSON  `json:"exceptions"`
+	Approvals  *approvalJSON    `json:"separation_of_duties,omitempty"`
 	Controls   []controlJSON    `json:"controls"`
 	Assertions assertionsJSON   `json:"assertions"`
 }
@@ -289,6 +342,9 @@ type populationJSON struct {
 	Steps       []string `json:"steps,omitempty"`
 	RunID       string   `json:"run_id,omitempty"`
 	CoveredBy   string   `json:"covered_by,omitempty"`
+	PR          int      `json:"pull_request,omitempty"`
+	PRAuthor    string   `json:"pull_request_author,omitempty"`
+	Approvers   []string `json:"approvers,omitempty"`
 	Explanation string   `json:"explanation,omitempty"`
 }
 
@@ -343,10 +399,14 @@ func printEvidenceJSON(stdout, stderr io.Writer, e domain.Evidence) int {
 		for _, s := range c.Steps {
 			steps = append(steps, string(s))
 		}
-		doc.Population = append(doc.Population, populationJSON{
+		row := populationJSON{
 			SHA: c.SHA, Date: c.Date, Author: c.Author, Subject: c.Subject,
 			State: stateOf(c), Steps: steps, RunID: c.RunID, CoveredBy: c.CoveredBy,
-		})
+		}
+		if a, ok := e.ApprovalByCommit[c.SHA]; ok && a.Found {
+			row.PR, row.PRAuthor, row.Approvers = a.PR, a.Author, a.Approvers
+		}
+		doc.Population = append(doc.Population, row)
 	}
 	for _, x := range e.Exceptions() {
 		doc.Exceptions = append(doc.Exceptions, exceptionJSON{
@@ -359,6 +419,14 @@ func printEvidenceJSON(stdout, stderr io.Writer, e domain.Evidence) int {
 			Framework: c.Framework, ID: c.ID, Name: c.Name,
 			Evidenced: c.Evidences, Limits: c.Limits,
 		})
+	}
+
+	if a := e.Approvals(); a.Collected > 0 {
+		doc.Approvals = &approvalJSON{
+			Collected: a.Collected, Independent: a.Independent,
+			SelfApprovedOnly: a.SelfApprovedOnly, Unapproved: a.Unapproved,
+			NoPullRequest: a.NoPullRequest,
+		}
 	}
 
 	enc := json.NewEncoder(stdout)
@@ -510,6 +578,17 @@ func printEvidenceOSCAL(stdout, stderr io.Writer, e domain.Evidence) int {
 		}
 		if c.CoveredBy != "" {
 			desc += " Published inside the signed push span of " + short(c.CoveredBy) + "."
+		}
+		if a, ok := e.ApprovalByCommit[c.SHA]; ok && a.Found {
+			switch {
+			case a.Independent():
+				desc += fmt.Sprintf(" Arrived through PR #%d (opened by %s), approved by %s.",
+					a.PR, a.Author, strings.Join(a.Approvers, ", "))
+			case len(a.Approvers) > 0:
+				desc += fmt.Sprintf(" Arrived through PR #%d, self-approved by %s — no independent review.", a.PR, a.Author)
+			default:
+				desc += fmt.Sprintf(" Arrived through PR #%d (opened by %s) with no approving review.", a.PR, a.Author)
+			}
 		}
 		res.Observations = append(res.Observations, oscalObservation{
 			UUID:        derivedUUID("observation", c.SHA),
