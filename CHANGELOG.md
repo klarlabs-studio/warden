@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-08-22
+
+Rolling 0.29.0 across a fleet found the ordering bug below within the hour,
+and the evidence command is the other half of the same question: a gate is
+only useful if someone else can read what it did.
+
 ### Added
 
 - **`warden evidence`: the audit, shaped for the person who signs the opinion.**
