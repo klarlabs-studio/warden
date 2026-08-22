@@ -6,6 +6,40 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`warden evidence`: the audit, shaped for the person who signs the opinion.**
+  `warden audit` answers "is this branch's provenance intact". An auditor asks
+  a different question — over this period, what changed, which changes went
+  through the control, and what are the exceptions — and answering it from
+  `audit` output meant a spreadsheet and a covering note every quarter.
+
+  Same records, three readers: `--format md` for the auditor, `json`
+  (versioned `warden.evidence/v1`) for a GRC platform to ingest on a schedule,
+  and `oscal` for tooling that speaks NIST assessment-results. Scope it with
+  `--from` / `--to`, and select control catalogues with `--frameworks`.
+
+  What makes it evidence rather than a report: a complete **population** rather
+  than a sample, reconcilable against `git log`; exceptions carrying the
+  *specific* reason warden could not vouch for each commit, distinguishing a
+  bypass from a never-pushed branch from a squash-merge binding gap; a stable
+  digest so a re-run can be told from an edit; and the verification command, so
+  the verdicts can be re-derived without trusting the document.
+
+  Every mapped control states what it does **not** evidence, next to what it
+  does — approval, check adequacy, deployment, key custody. Evidence is
+  rejected for claiming too much far more often than for proving too little.
+  See [docs/grc-evidence.md](docs/grc-evidence.md).
+
+### Fixed
+
+- **An unstamped binary reports the version it was built from.** `Version` fell
+  back to a literal in the source, so anything installed with `go install`
+  reported that number indefinitely. A nuisance in `warden --version`, and a
+  defect in `warden evidence`, where the producing tool's version is part of an
+  artifact somebody signs. It now reads the module version — or `dev+<commit>`
+  — from the embedded build info when ldflags did not set one.
+
 ## [0.29.0] - 2026-08-22
 
 A gate that cannot report is a gate nobody can rely on. This release is about
