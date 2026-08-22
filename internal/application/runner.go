@@ -582,6 +582,17 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if notePushWarning != "" {
 		res.Warnings = append(res.Warnings, notePushWarning)
 	}
+	// Publishing the verdict is best-effort and post-push for the same reason
+	// as PR creation, and matters most where CI cannot run: without it the
+	// commit is gated but looks ungated to branch protection.
+	if cfg.Status.Enabled && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
+		if err := r.Forge.PublishStatus(ctx, finalSHA, "success",
+			cfg.Status.StatusContext(), statusDescription(run)); err != nil {
+			res.Warnings = append(res.Warnings,
+				"gate passed but its commit status was NOT published: "+err.Error()+
+					". This commit will read as ungated to branch protection until it is.")
+		}
+	}
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
 	if willOpenPR {
@@ -598,6 +609,21 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		}
 	}
 	return res, nil
+}
+
+// statusDescription is the one line GitHub shows beside the check. It names
+// the steps, because "passed" without them invites the reader to assume a gate
+// ran checks it was never configured to run.
+func statusDescription(run *domain.Run) string {
+	steps := run.Policy().Steps
+	if len(steps) == 0 {
+		return "warden gate passed"
+	}
+	names := make([]string, 0, len(steps))
+	for _, s := range steps {
+		names = append(names, string(s))
+	}
+	return "warden gate passed (" + strings.Join(names, ", ") + ")"
 }
 
 // runValidation builds the run's kernel and folds each resolved step's outcome

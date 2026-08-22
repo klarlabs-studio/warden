@@ -6,6 +6,30 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`status.enabled`: publish the gate verdict where CI cannot run.** A private
+  repository past its Actions spending limit does not fail its jobs — it never
+  starts them. Every required check reports `failure` with zero steps executed,
+  and every pull request is blocked indefinitely. The gate still ran locally and
+  still wrote a signed note; it had no way to tell the forge.
+
+  With `status: {enabled: true}`, a passing, pushed run posts a commit status
+  through the `gh` CLI already used for pull requests — no Actions minutes, no
+  runner, no token held by warden. The context is `warden/gate` — a name warden
+  alone writes. Publishing under the Action's own job name was the first
+  attempt and does not work: GitHub keeps a status and a check run as separate
+  entries under a shared name and requires both to pass, so the green status
+  just sat beside the Action's red check run. Requiring `warden/gate` is
+  therefore an explicit protection change, which is the honest shape — a repo
+  is choosing to accept a locally-produced verdict.
+
+  Off by default: publishing writes to a surface other people read as CI, and
+  nobody should acquire that behaviour by upgrading. A failing gate publishes
+  nothing. A forge that refuses the status produces a warning, never a rollback
+  — the push has already happened by then. See
+  [docs/status-without-ci.md](docs/status-without-ci.md).
+
 ### Changed
 
 - **Releases sign `checksums.txt` into one `.bundle` instead of a `.sig` plus a

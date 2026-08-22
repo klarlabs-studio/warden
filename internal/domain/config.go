@@ -96,6 +96,10 @@ type Config struct {
 	// PR configures optional pull-request creation after a passing push.
 	PR PRConfig `yaml:"pr"`
 
+	// Status configures publishing the gate verdict to the forge as a commit
+	// status, for repositories whose CI cannot run. Off by default.
+	Status StatusConfig `yaml:"status"`
+
 	// Push configures how warden performs the push it owns — notably whether a
 	// rebased branch may be rewritten (see PushConfig). Nil takes the defaults.
 	Push *PushConfig `yaml:"push"`
