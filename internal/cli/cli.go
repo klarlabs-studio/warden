@@ -8,9 +8,6 @@ import (
 	"io"
 )
 
-// Version is the Warden version, overridable at build time via -ldflags.
-var Version = "0.9.0"
-
 // Run parses args (including argv[0]) and dispatches a subcommand, returning a
 // process exit code. stdout/stderr are injected for testability.
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -28,6 +25,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdImport(rest, stdout, stderr)
 	case "audit":
 		return cmdAudit(rest, stdout, stderr)
+	case "evidence":
+		return cmdEvidence(rest, stdout, stderr)
 	case "hooks":
 		return cmdHooks(rest, stdout, stderr)
 	case "run":
@@ -85,6 +84,9 @@ Usage:
   warden init [--hooks=pre-commit,pre-push]   initialize gate, install hooks
   warden import [--write]                     generate .warden.yaml from existing CI/Makefile/scripts
   warden audit [--branch b] [--format json|md] export a commit-provenance report
+  warden evidence [--from D] [--to D] [--format md|json|oscal] [--frameworks soc2,iso27001]
+                                              audit as GRC evidence: period-scoped population,
+                                              exceptions with reasons, control mapping and limits
   warden hooks enable|disable <hook>          change hook selection
   warden hooks repin                          re-pin armed hooks to the running version
   warden run <pre-commit|pre-push>            run the gate (invoked by hooks)
