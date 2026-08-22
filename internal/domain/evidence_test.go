@@ -215,3 +215,87 @@ func TestEvidence_OffersTheVerificationCommand(t *testing.T) {
 		t.Errorf("VerifyCommand does not start at adoption: %q", e.VerifyCommand())
 	}
 }
+
+// An approval by the author is a record of a review that did not happen, and a
+// control that counted it would evidence the opposite of what it claims.
+func TestApproval_SelfApprovalIsNotIndependent(t *testing.T) {
+	self := Approval{Found: true, PR: 1, Author: "alice", Approvers: []string{"alice"}}
+	if self.Independent() {
+		t.Error("counted a self-approval as separation of duties")
+	}
+	other := Approval{Found: true, PR: 2, Author: "alice", Approvers: []string{"alice", "bob"}}
+	if !other.Independent() {
+		t.Error("a second human approver was not counted")
+	}
+}
+
+// A bot approval is not a second pair of eyes.
+func TestApproval_BotsDoNotCountAlone(t *testing.T) {
+	botOnly := Approval{Found: true, PR: 3, Author: "alice", Approvers: []string{"dependabot[bot]", "renovate-bot"}}
+	if botOnly.Independent() {
+		t.Error("an automated approval was counted as review")
+	}
+	withHuman := Approval{Found: true, PR: 4, Author: "alice", Approvers: []string{"dependabot[bot]", "bob"}}
+	if !withHuman.Independent() {
+		t.Error("a human approver alongside a bot should still count")
+	}
+}
+
+// The four states have to stay distinct: "nobody approved" and "there was no
+// pull request to approve" are different findings with different remedies.
+func TestEvidence_ApprovalSummaryKeepsTheStatesApart(t *testing.T) {
+	e := NewEvidence(report(
+		gated("a", 10), gated("b", 10), gated("c", 10), gated("d", 10),
+	), opts(day(1), day(28)))
+
+	e = e.WithApprovals(map[string]Approval{
+		"a": {Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}},
+		"b": {Found: true, PR: 2, Author: "alice", Approvers: []string{"alice"}},
+		"c": {Found: true, PR: 3, Author: "alice"},
+		"d": {Found: false},
+	})
+
+	got := e.Approvals()
+	want := ApprovalSummary{Collected: 4, Independent: 1, SelfApprovedOnly: 1, Unapproved: 1, NoPullRequest: 1}
+	if got != want {
+		t.Errorf("summary = %+v, want %+v", got, want)
+	}
+}
+
+// Not collecting approvals must be distinguishable from collecting them and
+// finding none — the renderers key off Collected to decide whether to say
+// anything at all.
+func TestEvidence_ApprovalsAreZeroWhenNotCollected(t *testing.T) {
+	e := NewEvidence(report(gated("a", 10)), opts(day(1), day(28)))
+	if got := e.Approvals().Collected; got != 0 {
+		t.Errorf("Collected = %d before any forge call", got)
+	}
+}
+
+// With approvals present the control says what it now shows AND what it still
+// does not — a self-approval and an admin merge past review both stay visible.
+func TestEvidence_WithApprovalsRestatesTheControlHonestly(t *testing.T) {
+	base := NewEvidence(report(gated("a", 10)), EvidenceOptions{Frameworks: []string{"soc2"}})
+	withA := base.WithApprovals(map[string]Approval{"a": {Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}}})
+
+	var cc81 Control
+	for _, c := range withA.Controls {
+		if c.ID == "CC8.1" {
+			cc81 = c
+		}
+	}
+	if !strings.Contains(cc81.Evidences, "Approval is included") {
+		t.Errorf("CC8.1 does not mention approval: %q", cc81.Evidences)
+	}
+	for _, want := range []string{"self-approval", "administrator", "Authorization"} {
+		if !strings.Contains(cc81.Limits, want) {
+			t.Errorf("CC8.1 limits drop %q: %q", want, cc81.Limits)
+		}
+	}
+	// The base report must be untouched: WithApprovals returns a copy.
+	for _, c := range base.Controls {
+		if c.ID == "CC8.1" && strings.Contains(c.Evidences, "Approval is included") {
+			t.Error("WithApprovals mutated the original report")
+		}
+	}
+}
