@@ -7,7 +7,11 @@ hooks:
 commands:
   # Mirror CI stage 1: golangci-lint runs gofmt/goimports formatters + govet +
   # staticcheck + gocritic, so one command is the whole quality gate.
-  lint: "golangci-lint run ./..."
+  # --allow-parallel-runners because the lock golangci-lint takes is on the
+  # SHARED cache, so a lint in any other repository on this machine blocks this
+  # one for a minute and the gate exits 75. warden already isolates each run's
+  # GOLANGCI_LINT_CACHE, which is what that lock protects.
+  lint: "golangci-lint run --allow-parallel-runners ./..."
   # Mirror CI unit + e2e stages.
   test: "go test -race ./... && go test -tags e2e ./e2e/"
   # A config-defined custom step: any step name with a command here runs it —
