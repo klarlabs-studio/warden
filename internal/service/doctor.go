@@ -17,9 +17,6 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 	if err != nil {
 		return domain.AuditReport{}, err
 	}
-	if adoption == "" {
-		return domain.AuditReport{}, fmt.Errorf("warden was never initialized in this repo (no adoption point); run `warden init`")
-	}
 	if branch == "" {
 		if branch, err = s.repo.CurrentBranch(); err != nil {
 			return domain.AuditReport{}, err
@@ -27,7 +24,28 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 	}
 
 	// Best-effort sync; provenance is a side-channel that must not hard-fail.
+	// It happens before the adoption fallback below, which reads those notes.
 	_ = s.repo.FetchNotes(s.remote)
+
+	// The recorded adoption point is local, untracked, per-clone state written
+	// by `warden init`. A fresh clone therefore has none — and refusing there
+	// makes an audit something only one machine can produce, which is exactly
+	// what evidence cannot be. The notes ref is shared, so fall back to the
+	// point where the gate demonstrably began operating on this branch.
+	if adoption == "" {
+		ref := s.remote + "/" + branch
+		derived, derr := s.repo.EarliestNotedAncestor(ref)
+		if derr != nil || derived == "" {
+			derived, derr = s.repo.EarliestNotedAncestor(branch)
+		}
+		if derr == nil && derived != "" {
+			adoption = derived
+		}
+	}
+	if adoption == "" {
+		return domain.AuditReport{}, fmt.Errorf(
+			"no adoption point and no warden notes on %s — nothing here has been gated, so there is nothing to report; run `warden init` to start", branch)
+	}
 
 	ref := s.remote + "/" + branch
 	shas, err := s.repo.CommitsSince(ref, adoption)

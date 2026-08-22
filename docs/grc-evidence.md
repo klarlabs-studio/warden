@@ -159,6 +159,23 @@ remarks. Identifiers are derived from content rather than randomly generated,
 so consecutive periods can be diffed — which is most of what a
 continuous-monitoring program does with these.
 
+## It works on a fresh clone
+
+The adoption point `warden init` records lives in `.git/warden/adoption` —
+local, untracked, per-clone state. That is fine for `warden doctor` on the
+machine that ran init, and useless for evidence: an artifact only one laptop
+can produce is not evidence, because the person checking it cannot reproduce it.
+
+So when that file is absent, warden derives the adoption point from
+`refs/notes/warden`, which is shared: the parent of the earliest noted commit
+on the branch, i.e. the point at which the gate demonstrably began operating.
+An auditor with a fresh clone gets the same population, the same exceptions and
+the same digest as you do.
+
+A repository with no notes at all reports that nothing has been gated, rather
+than inventing a starting point that would make an ungated history look
+in-scope.
+
 ## A worked caveat
 
 Run it against a repository that adopted warden recently and the "outside the
