@@ -234,3 +234,136 @@ func TestResolveVersion(t *testing.T) {
 		t.Errorf("no build info = %q, want the literal", got)
 	}
 }
+
+// approvalEvidence is the sample population with forge review records attached:
+// one independently approved, one self-approved, one nobody approved.
+func approvalEvidence(t *testing.T) domain.Evidence {
+	t.Helper()
+	e := sampleEvidence(t)
+	return e.WithApprovals(map[string]domain.Approval{
+		"a1b2c3d4e5f60001": {Found: true, PR: 10, Author: "alice", Approvers: []string{"bob"}},
+		"a1b2c3d4e5f60002": {Found: true, PR: 11, Author: "alice", Approvers: []string{"alice"}},
+		"a1b2c3d4e5f60003": {Found: true, PR: 12, Author: "alice"},
+	})
+}
+
+// The four approval states must survive into the Markdown, and the shortfall
+// has to be stated rather than left for the reader to subtract.
+func TestEvidenceMarkdown_ReportsSeparationOfDuties(t *testing.T) {
+	var out bytes.Buffer
+	printEvidenceMarkdown(&out, approvalEvidence(t))
+	md := out.String()
+
+	for _, want := range []string{
+		"Separation of duties",
+		"Approved by someone other than the author",
+		"Self-approved only",
+		"did not carry an independent approval",
+		"compensating-control narrative",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown missing %q", want)
+		}
+	}
+}
+
+// Not collecting approvals and collecting them but finding none are different
+// facts; a report that never asked must not show a table of zeros.
+func TestEvidenceMarkdown_SaysNothingAboutApprovalsWhenNotCollected(t *testing.T) {
+	var out bytes.Buffer
+	printEvidenceMarkdown(&out, sampleEvidence(t))
+	if strings.Contains(out.String(), "Separation of duties") {
+		t.Error("rendered an approval section for a report that never asked the forge")
+	}
+}
+
+func TestEvidenceJSON_CarriesApprovalsPerCommitAndInSummary(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := printEvidenceJSON(&out, &errOut, approvalEvidence(t)); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	var doc evidenceJSON
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Approvals == nil {
+		t.Fatal("no separation_of_duties block")
+	}
+	if doc.Approvals.Independent != 1 || doc.Approvals.SelfApprovedOnly != 1 || doc.Approvals.Unapproved != 1 {
+		t.Errorf("summary = %+v", *doc.Approvals)
+	}
+	var withPR int
+	for _, c := range doc.Population {
+		if c.PR != 0 {
+			withPR++
+			if c.PRAuthor == "" {
+				t.Errorf("commit %s has a PR but no author", c.SHA)
+			}
+		}
+	}
+	if withPR != 3 {
+		t.Errorf("population rows carrying a PR = %d, want 3", withPR)
+	}
+}
+
+// A report that never asked must omit the block entirely rather than emit
+// zeros a platform would render as "no approvals found".
+func TestEvidenceJSON_OmitsApprovalsWhenNotCollected(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := printEvidenceJSON(&out, &errOut, sampleEvidence(t)); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var doc evidenceJSON
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Approvals != nil {
+		t.Errorf("emitted an approval summary unasked: %+v", *doc.Approvals)
+	}
+}
+
+// The OSCAL observation should distinguish an approved change from a
+// self-approved one in words, since that is what a reader of the assessment
+// sees.
+func TestEvidenceOSCAL_DescribesApprovalState(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := printEvidenceOSCAL(&out, &errOut, approvalEvidence(t)); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	body := out.String()
+	if !strings.Contains(body, "approved by bob") {
+		t.Error("an independent approval is not described")
+	}
+}
+
+func TestSplitFrameworks(t *testing.T) {
+	got := splitFrameworks(" SOC2 , iso27001 ,, ")
+	if len(got) != 2 || got[0] != "soc2" || got[1] != "iso27001" {
+		t.Errorf("splitFrameworks = %v", got)
+	}
+	if splitFrameworks("  ") != nil {
+		t.Error("blank should mean no selection")
+	}
+}
+
+func TestPeriodLabelCoversEveryBound(t *testing.T) {
+	e := sampleEvidence(t)
+	if got := periodLabel(e); !strings.Contains(got, "to") {
+		t.Errorf("both bounds = %q", got)
+	}
+	open := e
+	open.From, open.To = time.Time{}, time.Time{}
+	if got := periodLabel(open); got != "all history since adoption" {
+		t.Errorf("no bounds = %q", got)
+	}
+	fromOnly := e
+	fromOnly.To = time.Time{}
+	if got := periodLabel(fromOnly); !strings.HasPrefix(got, "from ") {
+		t.Errorf("from only = %q", got)
+	}
+	toOnly := e
+	toOnly.From = time.Time{}
+	if got := periodLabel(toOnly); !strings.HasPrefix(got, "up to ") {
+		t.Errorf("to only = %q", got)
+	}
+}
