@@ -1239,8 +1239,9 @@ func TestRunner_PublishesTheGateStatusWhenEnabled(t *testing.T) {
 	if got.state != "success" {
 		t.Errorf("state = %q, want success", got.state)
 	}
-	// Branch protection matches on the context, so the default has to be the
-	// name the warden-verify Action already publishes under.
+	// The context has to be one warden alone writes: a status published under
+	// the Action's job name sits beside the Action's own failing check run,
+	// and the branch stays blocked.
 	if got.context != domain.DefaultStatusContext {
 		t.Errorf("context = %q, want %q", got.context, domain.DefaultStatusContext)
 	}

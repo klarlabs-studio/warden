@@ -46,12 +46,17 @@ type CIStatus struct {
 
 // DefaultStatusContext is the commit-status context warden publishes under.
 //
-// It deliberately matches the job name of the warden-verify GitHub Action
-// ("Warden provenance"), because branch protection matches a required check by
-// name and does not care whether a status or a check run satisfied it. A repo
-// that already requires the Action therefore needs no protection change: when
-// Actions cannot run, the locally-published status satisfies the same rule.
-const DefaultStatusContext = "Warden provenance"
+// Deliberately NOT the warden-verify Action's job name ("Warden provenance"),
+// which was the first attempt and does not work. GitHub keeps a commit status
+// and a check run as separate entries even when they share a name, and a
+// required check is satisfied only when every entry under that name passes. So
+// publishing under the Action's name adds a green status beside the Action's
+// red check run and the branch stays blocked — measured, not assumed.
+//
+// A context warden alone writes is therefore the only one it can actually
+// satisfy. Requiring it is an explicit protection change, which is honest: a
+// repository is choosing to accept a locally-produced verdict.
+const DefaultStatusContext = "warden/gate"
 
 // StatusConfig controls publishing the gate verdict to the forge as a commit
 // status.

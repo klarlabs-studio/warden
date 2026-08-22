@@ -16,16 +16,19 @@ All notable changes to warden are documented here. The format follows
 
   With `status: {enabled: true}`, a passing, pushed run posts a commit status
   through the `gh` CLI already used for pull requests — no Actions minutes, no
-  runner, no token held by warden. The default context is `Warden provenance`,
-  matching the `warden-verify` action's job name, so a repository that already
-  requires that check needs no branch-protection change.
+  runner, no token held by warden. The context is `warden/gate` — a name warden
+  alone writes. Publishing under the Action's own job name was the first
+  attempt and does not work: GitHub keeps a status and a check run as separate
+  entries under a shared name and requires both to pass, so the green status
+  just sat beside the Action's red check run. Requiring `warden/gate` is
+  therefore an explicit protection change, which is the honest shape — a repo
+  is choosing to accept a locally-produced verdict.
 
   Off by default: publishing writes to a surface other people read as CI, and
   nobody should acquire that behaviour by upgrading. A failing gate publishes
   nothing. A forge that refuses the status produces a warning, never a rollback
   — the push has already happened by then. See
   [docs/status-without-ci.md](docs/status-without-ci.md).
-
 
 ### Changed
 

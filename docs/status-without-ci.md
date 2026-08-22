@@ -23,16 +23,33 @@ A commit status is not an Actions job. It costs no minutes, runs no runner, and
 is posted through the `gh` CLI already used for pull requests — so warden holds
 no token of its own.
 
-## It satisfies the check you already require
+## Requiring it is a deliberate change
 
-The default context is **`Warden provenance`**, which is deliberately the job
-name used by the `warden-verify` action in
-[provenance.yml](ci-provenance-gate.md). Branch protection matches a required
-check by name and does not care whether a status or a check run satisfied it,
-so a repository that already requires that job needs no protection change: when
-Actions can run, the Action satisfies it; when they cannot, the local gate does.
+The default context is **`warden/gate`**, and it has to be a name warden alone
+writes.
 
-Override it if your check is named something else:
+The first attempt published under `Warden provenance` — the `warden-verify`
+action's job name — on the theory that branch protection matches a required
+check by name and does not care what satisfied it. That is wrong, and the
+measurement is worth keeping: GitHub holds a commit status and a check run as
+**separate entries** even when they share a name, and a required check passes
+only when *every* entry under it passes. The green status simply appeared
+beside the Action's red check run, and the pull request stayed blocked.
+
+So make it its own check and require it:
+
+```
+Settings → Branches → main → Require status checks to pass
+  warden/gate
+```
+
+While Actions cannot run, that is the required check. The jobs that cannot
+start keep reporting failure, so remove them from the required list for as long
+as the outage lasts — leaving them required is what blocks every pull request
+regardless of the code. Note down what you removed; putting it back is the
+last step of the cleanup below.
+
+Override the context if you want a different name:
 
 ```yaml
 status:
