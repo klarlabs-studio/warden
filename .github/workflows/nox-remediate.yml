@@ -1,6 +1,28 @@
-# Thin caller for the shared klarlabs-studio nox remediation.
-# Drop this in as .github/workflows/nox-remediate.yml. All logic lives in the
-# reusable workflow — bump the pinned nox version there, once, org-wide.
+# Dependency and action-pin remediation. This replaces Dependabot, which was
+# removed with this file's last edit.
+#
+# WHY PINS STILL GET BUMPED. Every action here is pinned to a commit SHA, which
+# stops a tag being moved under us and — left alone — would also stop security
+# fixes arriving. Something has to bump them, and turn each bump into a
+# reviewable diff; that was Dependabot's job and is now `nox fix --actions`,
+# which bumps outdated pins and SHA-pins any mutable tag ref it finds.
+#
+# WHAT CHANGED IN COVERAGE, deliberately. Dependabot opened a weekly PR for
+# every Go minor/patch release. nox upgrades a Go module only when it is
+# OSV-vulnerable and a fixed version exists. Routine version churn no longer
+# arrives as a PR — which is the point: warden's Dependabot PRs were not being
+# merged (#217 closed unread, #218 and #219 open for days), because a required
+# provenance gate cannot pass a commit the forge authored. A weekly PR nobody
+# lands is not dependency hygiene, it is a queue that teaches you to ignore a
+# red check. Security fixes still arrive, from the scanner that already gates
+# every push.
+#
+# The trade is real: a dependency can now sit several minor versions behind
+# until either a CVE lands or somebody bumps it by hand. `nox scan` reports the
+# installed graph, so the drift is visible rather than silent.
+#
+# All logic lives in the reusable workflow — bump the pinned nox version there,
+# once, org-wide.
 name: Nox Remediate
 
 on:
