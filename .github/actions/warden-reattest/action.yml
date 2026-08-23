@@ -79,6 +79,13 @@ runs:
       shell: bash
       env:
         WARDEN_VERSION: ${{ inputs.warden-version }}
+        # Resolving "latest" hits the GitHub API. Unauthenticated, that is
+        # 60/hr shared across every runner on the same egress IP, so a busy
+        # hour turned this REQUIRED gate red with `curl: (22) ... 403` —
+        # an infrastructure failure indistinguishable, at a glance, from a
+        # provenance violation. github.token raises it to 1,000/hr per repo
+        # and needs no permission the action does not already have.
+        GITHUB_TOKEN: ${{ github.token }}
       run: ${{ github.action_path }}/../install-warden.sh
 
     - name: Fetch warden provenance
