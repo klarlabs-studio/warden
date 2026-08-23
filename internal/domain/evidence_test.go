@@ -299,3 +299,102 @@ func TestEvidence_WithApprovalsRestatesTheControlHonestly(t *testing.T) {
 		}
 	}
 }
+
+// An undetermined lookup is its own state and must not be absorbed by any of
+// the other four. Folding it into NoPullRequest is exactly the defect that put
+// ten invented "bypassed review" findings into a signed document.
+func TestEvidence_UndeterminedIsNotNoPullRequest(t *testing.T) {
+	e := NewEvidence(report(
+		gated("a", 10), gated("b", 10), gated("c", 10),
+	), opts(day(1), day(28)))
+
+	e = e.WithApprovals(map[string]Approval{
+		"a": {Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}},
+		"b": {Found: false},
+		"c": {Undetermined: true, Reason: "gh: Bad credentials (HTTP 401)"},
+	})
+
+	got := e.Approvals()
+	want := ApprovalSummary{Collected: 3, Independent: 1, NoPullRequest: 1, Undetermined: 1}
+	if got != want {
+		t.Errorf("summary = %+v, want %+v", got, want)
+	}
+	if got.Determined() != 2 {
+		t.Errorf("Determined() = %d, want 2 — rates must be stated over what the forge answered", got.Determined())
+	}
+}
+
+// Undetermined outranks a known pull request: a PR whose reviews could not be
+// read must not be counted as a pull request nobody approved.
+func TestEvidence_UndeterminedOutranksAKnownPullRequest(t *testing.T) {
+	e := NewEvidence(report(gated("a", 10)), opts(day(1), day(28)))
+	e = e.WithApprovals(map[string]Approval{
+		"a": {Found: true, PR: 7, Author: "alice", Undetermined: true},
+	})
+
+	got := e.Approvals()
+	if got.Undetermined != 1 || got.Unapproved != 0 {
+		t.Errorf("summary = %+v, want the record counted as undetermined, not unapproved", got)
+	}
+}
+
+// An auditor reading an upgraded CC8.1 has no way to know the numbers under it
+// cover only part of the population unless the control text says so, with the
+// count, in the same breath.
+func TestEvidence_ControlTextSaysWhenApprovalEvidenceIsIncomplete(t *testing.T) {
+	base := NewEvidence(report(gated("a", 10), gated("b", 10)), EvidenceOptions{Frameworks: []string{"soc2"}})
+	partial := base.WithApprovals(map[string]Approval{
+		"a": {Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}},
+		"b": {Undetermined: true, Reason: "rate limited"},
+	})
+
+	var cc81 Control
+	for _, c := range partial.Controls {
+		if c.ID == "CC8.1" {
+			cc81 = c
+		}
+	}
+	if !strings.Contains(cc81.Evidences, "INCOMPLETE") {
+		t.Errorf("CC8.1 presents partial approval evidence as complete: %q", cc81.Evidences)
+	}
+	if !strings.Contains(cc81.Evidences, "1 of 2") {
+		t.Errorf("CC8.1 does not say HOW incomplete: %q", cc81.Evidences)
+	}
+	if !strings.Contains(cc81.Limits, "could not read") {
+		t.Errorf("CC8.1 limits do not carry the gap: %q", cc81.Limits)
+	}
+
+	var sawGap bool
+	for _, u := range partial.Assertions.Unsupported {
+		if strings.Contains(u, "undetermined, not unapproved") {
+			sawGap = true
+		}
+	}
+	if !sawGap {
+		t.Error("the unsupported list does not disclaim the undetermined changes")
+	}
+	for _, s := range partial.Assertions.Supported {
+		if s == "For each change, the pull request it arrived through and the identities that approved it, as recorded by the forge." {
+			t.Error("claimed approval evidence for EACH change while some were undetermined")
+		}
+	}
+}
+
+// The complete case must not be watered down by the incomplete one: a run that
+// read every commit still makes the full claim.
+func TestEvidence_ControlTextStaysWholeWhenNothingIsUndetermined(t *testing.T) {
+	base := NewEvidence(report(gated("a", 10)), EvidenceOptions{Frameworks: []string{"soc2"}})
+	full := base.WithApprovals(map[string]Approval{
+		"a": {Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}},
+	})
+	for _, c := range full.Controls {
+		if c.ID == "CC8.1" && strings.Contains(c.Evidences, "INCOMPLETE") {
+			t.Errorf("a complete run disclaimed itself: %q", c.Evidences)
+		}
+	}
+	for _, u := range full.Assertions.Unsupported {
+		if strings.Contains(u, "undetermined") {
+			t.Errorf("a complete run carries an incompleteness disclaimer: %q", u)
+		}
+	}
+}

@@ -173,17 +173,30 @@ func vsaPolicy(remoteURL, sha string) vsaDescriptor {
 // normalizeRemote renders a git remote as a URL. scp-style SSH remotes
 // (`git@github.com:org/repo.git`) are not URLs, so they are rewritten to the
 // ssh:// form rather than emitted as-is inside one.
+//
+// The result carries no userinfo. A CI checkout's origin is routinely
+// `https://x-access-token:<token>@github.com/…`, and a bare
+// `https://<token>@github.com/…` is equally a GitHub form — so the credential
+// is as often the username as the password, and both halves go. Without this
+// the token reached `ResourceURI` and the policy URI verbatim, and `--sign`
+// then signed it into an envelope built to be handed to somebody else.
+//
+// Dropping the user costs nothing here: these URIs identify the repository,
+// they are not clone commands. `ssh://githost/org/repo.git` names the same
+// repository as `ssh://git@githost/org/repo.git`. `warden evidence` makes the
+// same call for the same reason; the two artifacts must not disagree about
+// what is safe to publish.
 func normalizeRemote(remote string) string {
 	remote = strings.TrimSpace(remote)
 	if strings.Contains(remote, "://") {
-		return remote
+		return sanitizeRemote(remote)
 	}
 	// scp-style: [user@]host:path
 	if at := strings.Index(remote, "@"); at >= 0 {
 		if colon := strings.Index(remote[at:], ":"); colon >= 0 {
 			host := remote[at+1 : at+colon]
 			path := remote[at+colon+1:]
-			return "ssh://" + remote[:at+1] + host + "/" + path
+			return sanitizeRemote("ssh://" + remote[:at+1] + host + "/" + path)
 		}
 	}
 	return remote

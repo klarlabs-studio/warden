@@ -2,7 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"os"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -365,5 +369,310 @@ func TestPeriodLabelCoversEveryBound(t *testing.T) {
 	toOnly.From = time.Time{}
 	if got := periodLabel(toOnly); !strings.HasPrefix(got, "up to ") {
 		t.Errorf("to only = %q", got)
+	}
+}
+
+// ---------- the forge that cannot answer ----------
+
+// fakeForge stands in for gh. The defect under test is entirely about what
+// warden does when the forge misbehaves, so the forge has to be injectable —
+// a test that arranged a real broken credential would never have been written,
+// which is why this shipped.
+type fakeForge struct {
+	available bool
+	reachable error
+	answer    func(sha string) (domain.Approval, error)
+	asked     []string
+}
+
+func (f *fakeForge) Available() bool                   { return f.available }
+func (f *fakeForge) Reachable(_ context.Context) error { return f.reachable }
+func (f *fakeForge) ApprovalFor(_ context.Context, sha string) (domain.Approval, error) {
+	f.asked = append(f.asked, sha)
+	return f.answer(sha)
+}
+
+func neverAsked(t *testing.T) func(string) (domain.Approval, error) {
+	return func(sha string) (domain.Approval, error) {
+		t.Errorf("read approval for %s after the preflight failed", sha)
+		return domain.Approval{}, nil
+	}
+}
+
+// THE PRIMARY REGRESSION. gh present but unable to authenticate answered
+// "no pull request" for every commit, and warden published that as a finding:
+// ten changes that all went through reviewed pull requests were reported as
+// having bypassed pull requests entirely, exit 0, nothing on stderr.
+//
+// The preflight must stop the run before a single commit is read, and no
+// document may be produced.
+func TestCollectApprovals_RefusesWhenTheForgeCannotBeRead(t *testing.T) {
+	f := &fakeForge{
+		available: true,
+		reachable: errors.New("gh: Bad credentials (HTTP 401)"),
+		answer:    neverAsked(t),
+	}
+	var errOut bytes.Buffer
+	ev, code := collectApprovals(context.Background(), f, sampleEvidence(t), &errOut)
+
+	if code == 0 {
+		t.Fatal("produced an evidence document from a forge that cannot answer")
+	}
+	if len(f.asked) != 0 {
+		t.Errorf("asked the forge %d times after the preflight failed", len(f.asked))
+	}
+	if got := errOut.String(); !strings.Contains(got, "Bad credentials") {
+		t.Errorf("stderr = %q, want the actual cause named", got)
+	}
+	// And nothing may be rendered from it: no approval section at all, rather
+	// than a section full of zeros somebody would read as a clean result.
+	if ev.Approvals().Collected != 0 {
+		t.Errorf("attached approvals anyway: %+v", ev.Approvals())
+	}
+	var md bytes.Buffer
+	printEvidenceMarkdown(&md, ev)
+	if strings.Contains(md.String(), "Not associated with a pull request") {
+		t.Error("rendered separation-of-duties findings from a forge that never answered")
+	}
+}
+
+func TestCollectApprovals_RefusesWithoutTheCLI(t *testing.T) {
+	f := &fakeForge{available: false, answer: neverAsked(t)}
+	var errOut bytes.Buffer
+	if _, code := collectApprovals(context.Background(), f, sampleEvidence(t), &errOut); code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+	// The PATH case keeps its own message: "install gh" and "fix your token"
+	// are different problems with different fixes.
+	if !strings.Contains(errOut.String(), "gh CLI on PATH") {
+		t.Errorf("stderr = %q, want the PATH message", errOut.String())
+	}
+}
+
+// The preflight cannot cover a credential that expires on commit 400 of 900.
+// Those commits must land in their own bucket, not in "no pull request".
+func TestCollectApprovals_MidRunFailureIsUndeterminedNotAFinding(t *testing.T) {
+	f := &fakeForge{
+		available: true,
+		answer: func(sha string) (domain.Approval, error) {
+			if strings.HasSuffix(sha, "0002") {
+				return domain.Approval{Undetermined: true, Reason: "gh: API rate limit exceeded"}, nil
+			}
+			return domain.Approval{Found: true, PR: 1, Author: "alice", Approvers: []string{"bob"}}, nil
+		},
+	}
+	var errOut bytes.Buffer
+	ev, code := collectApprovals(context.Background(), f, sampleEvidence(t), &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want the other commits to still be reported", code)
+	}
+
+	a := ev.Approvals()
+	if a.Undetermined != 1 {
+		t.Errorf("undetermined = %d, want 1", a.Undetermined)
+	}
+	if a.NoPullRequest != 0 {
+		t.Errorf("no_pull_request = %d — a rate limit was recorded as a bypassed pull request", a.NoPullRequest)
+	}
+	if !strings.Contains(errOut.String(), "rate limit") {
+		t.Errorf("stderr = %q, want the operator told why", errOut.String())
+	}
+}
+
+// The error return is reachable now (it was dead code: every path returned a
+// nil error), and an error must degrade to "warden did not observe this"
+// rather than aborting a 900-commit report or being counted as a finding.
+func TestCollectApprovals_AnErrorFromTheForgeIsUndetermined(t *testing.T) {
+	f := &fakeForge{
+		available: true,
+		answer: func(string) (domain.Approval, error) {
+			return domain.Approval{}, errors.New("context deadline exceeded")
+		},
+	}
+	ev, code := collectApprovals(context.Background(), f, sampleEvidence(t), io.Discard)
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	a := ev.Approvals()
+	if a.Undetermined != a.Collected {
+		t.Errorf("summary = %+v, want every erroring lookup undetermined", a)
+	}
+	if a.NoPullRequest != 0 {
+		t.Errorf("no_pull_request = %d, want 0", a.NoPullRequest)
+	}
+}
+
+// undeterminedEvidence: one change read cleanly, one the forge never answered for.
+func undeterminedEvidence(t *testing.T) domain.Evidence {
+	t.Helper()
+	return sampleEvidence(t).WithApprovals(map[string]domain.Approval{
+		"a1b2c3d4e5f60001": {Found: true, PR: 10, Author: "alice", Approvers: []string{"bob"}},
+		"a1b2c3d4e5f60002": {Found: false},
+		"a1b2c3d4e5f60003": {Undetermined: true, Reason: "gh: API rate limit exceeded"},
+	})
+}
+
+// The undetermined count needs its own row, and the document has to say the
+// table is partial — an auditor must not read a partial answer as a complete
+// one.
+func TestEvidenceMarkdown_UndeterminedGetsItsOwnRowAndDisclaimer(t *testing.T) {
+	var out bytes.Buffer
+	printEvidenceMarkdown(&out, undeterminedEvidence(t))
+	md := out.String()
+
+	if !strings.Contains(md, "| Could not be determined — the forge did not answer | 1 |") {
+		t.Errorf("no undetermined row in the separation-of-duties table:\n%s", md)
+	}
+	if !strings.Contains(md, "| Not associated with a pull request | 1 |") {
+		t.Error("the genuine no-PR finding was lost or absorbed")
+	}
+	if !strings.Contains(md, "This table is incomplete.") {
+		t.Error("a partial answer is presented as a complete one")
+	}
+	// The shortfall sentence must be stated over what the forge answered, not
+	// over the whole population — otherwise an outage reads as a control failure.
+	if !strings.Contains(md, "1 of the 2 changes warden could read") {
+		t.Errorf("the shortfall is computed over the wrong denominator:\n%s", md)
+	}
+	if !strings.Contains(md, "INCOMPLETE") {
+		t.Error("the control text does not degrade")
+	}
+}
+
+// A complete run must not carry the disclaimer, or it stops meaning anything.
+func TestEvidenceMarkdown_CompleteApprovalRunCarriesNoIncompletenessClaim(t *testing.T) {
+	var out bytes.Buffer
+	printEvidenceMarkdown(&out, approvalEvidence(t))
+	md := out.String()
+	if strings.Contains(md, "This table is incomplete.") {
+		t.Error("a complete run disclaimed itself")
+	}
+	if !strings.Contains(md, "| Could not be determined — the forge did not answer | 0 |") {
+		t.Error("the undetermined row should still be present, stating zero")
+	}
+}
+
+func TestEvidenceJSON_KeepsUndeterminedOutOfTheFindings(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := printEvidenceJSON(&out, &errOut, undeterminedEvidence(t)); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	var doc evidenceJSON
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Approvals == nil {
+		t.Fatal("no separation_of_duties block")
+	}
+	if doc.Approvals.Undetermined != 1 {
+		t.Errorf("undetermined = %d, want 1", doc.Approvals.Undetermined)
+	}
+	if doc.Approvals.NoPullRequest != 1 {
+		t.Errorf("no_pull_request = %d, want the one genuine finding", doc.Approvals.NoPullRequest)
+	}
+	if doc.Approvals.Determined != 2 {
+		t.Errorf("determined = %d, want 2", doc.Approvals.Determined)
+	}
+	var flagged int
+	for _, c := range doc.Population {
+		if c.ApprovalUnknown {
+			flagged++
+		}
+	}
+	if flagged != 1 {
+		t.Errorf("population rows marked undetermined = %d, want 1 — an absent pull_request field reads as 'there was none'", flagged)
+	}
+}
+
+func TestEvidenceOSCAL_SaysWhenApprovalCouldNotBeRead(t *testing.T) {
+	e := sampleEvidence(t).WithApprovals(map[string]domain.Approval{
+		// The gated commit is the only one rendered as an observation.
+		"a1b2c3d4e5f60001": {Undetermined: true, Reason: "gh: API rate limit exceeded"},
+	})
+	var out, errOut bytes.Buffer
+	if code := printEvidenceOSCAL(&out, &errOut, e); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	body := out.String()
+	if !strings.Contains(body, "could not read the forge's approval record") {
+		t.Errorf("the observation does not disclose that approval is unknown:\n%s", body)
+	}
+	if strings.Contains(body, "no approving review") {
+		t.Error("an unreadable record was described as a change nobody approved")
+	}
+}
+
+// ---------- repository identity ----------
+
+// The evidence document leaves the organization. A local filesystem path is
+// not a repository identity — two clones produce different labels, an auditor
+// cannot resolve one, and it discloses the producer's home directory.
+func TestRepoLabel_NamesTheRemoteNotTheWorkingDirectory(t *testing.T) {
+	got := repoLabel("https://github.com/klarlabs-studio/warden.git")
+	if got != "https://github.com/klarlabs-studio/warden.git" {
+		t.Errorf("repoLabel = %q, want the remote", got)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, wd) {
+		t.Errorf("repoLabel leaked the working directory: %q", got)
+	}
+}
+
+// A local-only repository still has to produce a valid document — but never by
+// falling back to the absolute path.
+func TestRepoLabel_LocalOnlyRepoSaysSoRatherThanNamingAPath(t *testing.T) {
+	got := repoLabel("")
+	if got == "" {
+		t.Fatal("empty label")
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, wd) || strings.HasPrefix(got, "/") {
+		t.Errorf("repoLabel = %q, want an identifier rather than a filesystem path", got)
+	}
+	if !strings.Contains(got, "no origin remote") {
+		t.Errorf("repoLabel = %q, want it to say why there is no name", got)
+	}
+}
+
+// A CI checkout's origin often carries a token. This string is rendered into
+// the document header and into the OSCAL title a GRC platform ingests.
+//
+// The hosts here are deliberately dotless, the same convention TestNormalizeRemote
+// uses for the same reason: a `user:secret@host` literal is what a credential
+// scanner exists to find, and warden's own security-scan step reads this file.
+// The syntax under test is unaffected — the parser never looks at the host — and
+// rewording beats baselining a finding that would then read as an unexplained
+// hash to whoever prunes the baseline later.
+func TestRepoLabel_StripsCredentialsFromTheRemote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://x-access-token:redacted@githost/o/r.git", "https://githost/o/r.git"},
+		{"https://user@githost/o/r.git", "https://githost/o/r.git"},
+		{"git@githost:o/r.git", "git@githost:o/r.git"},
+		{"ssh://git@githost/o/r.git", "ssh://githost/o/r.git"},
+		{"https://githost/o/r.git", "https://githost/o/r.git"},
+		{"  https://githost/o/r.git  ", "https://githost/o/r.git"},
+	}
+	for _, c := range cases {
+		if got := repoLabel(c.in); got != c.want {
+			t.Errorf("repoLabel(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The digest is deliberately clone-stable: it covers the commits and their
+// verdicts, not the label. Changing how the repository is named must not
+// change what the digest fingerprints.
+func TestEvidence_DigestIgnoresTheRepositoryLabel(t *testing.T) {
+	a := sampleEvidence(t)
+	b := a
+	b.Repository = "https://github.com/klarlabs-studio/warden.git"
+	if a.Digest() != b.Digest() {
+		t.Error("the repository label leaked into the evidence digest")
 	}
 }

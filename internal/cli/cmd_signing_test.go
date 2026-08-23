@@ -76,21 +76,49 @@ func TestPrintVerify_SignatureBranches(t *testing.T) {
 		},
 		{
 			name:   "pinned untrusted signer",
-			res:    service.VerifyResult{Signed: true, SignatureValid: true, Trusted: false, Signer: "abc123"},
+			res:    service.VerifyResult{Record: &recStub, Signed: true, SignatureValid: true, Trusted: false, Signer: "abc123"},
 			pinned: true,
 			want:   "untrusted key abc123",
 		},
 		{
 			name:   "pinned invalid signature",
-			res:    service.VerifyResult{Signed: true, SignatureValid: false},
+			res:    service.VerifyResult{Record: &recStub, Signed: true, SignatureValid: false},
 			pinned: true,
 			want:   "signature does not verify",
 		},
 		{
+			// Record is what makes this an UNSIGNED NOTE rather than NO note.
+			// Without it this case asserted the unsigned-note message about a
+			// result that describes an absent one, which is how the defect below
+			// survived: the fixture was built from the same wrong model as the
+			// code, so it agreed with it.
 			name:   "pinned but unsigned",
-			res:    service.VerifyResult{Signed: false},
+			res:    service.VerifyResult{Record: &recStub, Signed: false},
 			pinned: true,
 			want:   "unsigned but a trusted key was required",
+		},
+		{
+			// No note at all. `Signed` is false here too, so with a pinned roster
+			// this was reported as "note is unsigned", sending the reader to look
+			// for a note that does not exist.
+			name:   "pinned, no note at all",
+			res:    service.VerifyResult{},
+			pinned: true,
+			want:   "no warden note",
+		},
+		{
+			// …and the same mistake unpinned, where nothing would have caught it.
+			name: "unpinned, no note at all",
+			res:  service.VerifyResult{},
+			want: "no warden note",
+		},
+		{
+			// The mirror image: a note IS there, it just does not attest this
+			// commit. Reporting "no intact warden note" about it is the same
+			// wrong diagnosis pointing the other way.
+			name: "note exists but does not attest",
+			res:  service.VerifyResult{Record: &recStub, Signed: true, SignatureValid: true},
+			want: "does not attest this commit",
 		},
 	}
 	for _, tc := range cases {

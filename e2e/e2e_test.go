@@ -18,6 +18,7 @@
 package e2e
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -445,5 +446,131 @@ rules: []
 	}
 	if remoteSHA := strings.TrimSpace(gitIn(t, remote, "rev-parse", "main")); remoteSHA != after {
 		t.Errorf("remote main = %s, want the validated commit %s", remoteSHA, after)
+	}
+}
+
+// wardenWithGH runs warden with a fake `gh` first on PATH, keeping stdout and
+// stderr apart. Both matter here: the assertion is about what reaches the
+// DOCUMENT, and CombinedOutput would let a diagnosis on stderr pass for one.
+func (h *harness) wardenWithGH(ghScript string, args ...string) (stdout, stderr string, code int) {
+	h.t.Helper()
+	binDir := h.t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghScript), 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	cmd := exec.Command(wardenBin, args...)
+	cmd.Dir = h.dir
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err := cmd.Run()
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		h.t.Fatalf("warden %v: %v", args, err)
+	}
+	return outBuf.String(), errBuf.String(), code
+}
+
+// evidenceRepo builds a repo with warden adopted and one commit after the
+// adoption point, so `warden evidence` has a population to report on.
+func evidenceRepo(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.write("a.txt", "hello\n")
+	h.git("add", "a.txt")
+	h.git("commit", "--no-verify", "-m", "init")
+	h.git("branch", "-M", "main")
+
+	h.write(".warden.yaml", cfgLintTestPass)
+	h.warden("init")
+
+	h.write("a.txt", "changed\n")
+	h.git("commit", "--no-verify", "-am", "a change")
+	return h
+}
+
+// A forge warden cannot read must never be recorded as a forge with nothing to
+// report.
+//
+// This is the shipped defect, and it is the whole reason the undetermined state
+// exists. `gh` present but unauthenticated made every commit come back with no
+// pull request, and warden published that: exit 0, a complete-looking evidence
+// document, and an auditor reading that every change bypassed review. The
+// counts were the exact inverse of the truth.
+//
+// The assertion that matters is stdout being EMPTY. A refusal that still
+// printed a partial document would leave somebody a file to paste into a
+// spreadsheet, which is how the wrong number gets used.
+func TestE2E_EvidenceRefusesToGuessWhenTheForgeCannotBeRead(t *testing.T) {
+	h := evidenceRepo(t)
+
+	// gh installed, but holding a credential the forge rejects.
+	const badCreds = "#!/bin/sh\necho 'gh: Bad credentials (HTTP 401)' >&2\nexit 1\n"
+	stdout, stderr, code := h.wardenWithGH(badCreds, "evidence", "--approvals", "--format", "md")
+
+	if code != 2 {
+		t.Errorf("exit = %d, want 2 — an unreadable forge must refuse, not report", code)
+	}
+	if stdout != "" {
+		t.Errorf("a refused run must write no document, got %d bytes:\n%s", len(stdout), stdout)
+	}
+	if !strings.Contains(stderr, "Bad credentials") {
+		t.Errorf("the refusal must name the forge's own cause, got: %s", stderr)
+	}
+	// The precise wording may change; the claim must not reappear.
+	if strings.Contains(stdout, "Not associated with a pull request") {
+		t.Errorf("an unreadable forge was reported as a finding:\n%s", stdout)
+	}
+}
+
+// The preflight cannot cover a forge that answers, then stops answering partway
+// through a long run. That commit is UNDETERMINED — excluded from the approval
+// population and disclaimed — never folded into "nobody approved this".
+func TestE2E_EvidenceReportsAnUnreadableCommitAsUndetermined(t *testing.T) {
+	h := evidenceRepo(t)
+
+	// The repository probe succeeds; every per-commit lookup is rate-limited.
+	// The header line is not decoration: gh's --include output is a status line,
+	// HEADERS, a blank line, then the body — so a fake with no headers has no
+	// blank line to end them and its body is unreadable. Real gh always sends
+	// some; a fake that does not is testing a shape the forge never produces.
+	const rateLimited = `#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    */commits/*)
+      printf 'HTTP/2.0 429 Too Many Requests\r\ncontent-type: application/json\r\n\r\n'
+      echo 'gh: API rate limit exceeded (HTTP 429)' >&2
+      exit 1 ;;
+  esac
+done
+printf 'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n'
+echo 'owner/repo'
+`
+	stdout, stderr, code := h.wardenWithGH(rateLimited, "evidence", "--approvals", "--format", "md")
+
+	// A reachable forge that faltered mid-run still produces a document — the
+	// gate evidence is intact, only the approval half is short.
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 — a reachable forge should still report\nstderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Could not be determined") {
+		t.Errorf("undetermined must get its own row:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "This table is incomplete") {
+		t.Errorf("a short approval population must disclaim itself:\n%s", stdout)
+	}
+	// The finding it must NOT have invented.
+	for _, claim := range []string{
+		"| Not associated with a pull request | 1 |",
+		"| Merged through a pull request nobody approved | 1 |",
+	} {
+		if strings.Contains(stdout, claim) {
+			t.Errorf("a forge that did not answer was counted as %q:\n%s", claim, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "429") {
+		t.Errorf("the operator should be told why, got: %s", stderr)
 	}
 }

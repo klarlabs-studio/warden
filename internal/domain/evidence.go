@@ -271,8 +271,24 @@ var standardAssertions = Assertions{
 // The control text is not "upgraded" — it is made specific. Approval evidence
 // is only as good as the forge's records, and a self-approval or an admin merge
 // that bypassed review shows up in the numbers rather than being smoothed over.
+// A partial answer is the dangerous case: an auditor reading an upgraded CC8.1
+// has no way to know the numbers under it cover only part of the population
+// unless the control text says so, in the same paragraph, with the count.
 func (e Evidence) WithApprovals(byCommit map[string]Approval) Evidence {
 	e.ApprovalByCommit = byCommit
+
+	total := len(byCommit)
+	var undetermined int
+	for _, a := range byCommit {
+		if a.Undetermined {
+			undetermined++
+		}
+	}
+	incomplete := ""
+	if undetermined > 0 {
+		incomplete = fmt.Sprintf(" THIS APPROVAL EVIDENCE IS INCOMPLETE: the forge could not be read for %d of %d changes in the population. Those changes are reported as undetermined — warden makes no claim about them either way, and they must not be read as unapproved or as having bypassed a pull request.",
+			undetermined, total)
+	}
 
 	controls := make([]Control, len(e.Controls))
 	copy(controls, e.Controls)
@@ -280,19 +296,32 @@ func (e Evidence) WithApprovals(byCommit map[string]Approval) Evidence {
 		if controls[i].ID != "CC8.1" && controls[i].ID != "A.8.32" {
 			continue
 		}
-		controls[i].Evidences += " Approval is included: for each change, the pull request it arrived through, its author, and who approved it."
+		controls[i].Evidences += " Approval is included: for each change, the pull request it arrived through, its author, and who approved it." + incomplete
 		controls[i].Limits = "Approval is evidenced only as strongly as the forge records it. An approval by the author is reported as a self-approval and does not count as separation of duties; a change merged with administrator privileges past a required review appears as unapproved. Authorization — that the change was wanted — is still a separate control with separate evidence."
+		if undetermined > 0 {
+			controls[i].Limits += fmt.Sprintf(" It also does not evidence approval for %d of %d changes, whose forge record warden could not read; this control is unevidenced for those changes.",
+				undetermined, total)
+		}
 	}
 	e.Controls = controls
 
-	e.Assertions.Supported = append(append([]string{}, e.Assertions.Supported...),
-		"For each change, the pull request it arrived through and the identities that approved it, as recorded by the forge.")
+	supported := "For each change, the pull request it arrived through and the identities that approved it, as recorded by the forge."
+	if undetermined > 0 {
+		supported = fmt.Sprintf("For %d of %d changes, the pull request it arrived through and the identities that approved it, as recorded by the forge. The forge could not be read for the other %d, which carry no approval claim at all.",
+			total-undetermined, total, undetermined)
+	}
+	e.Assertions.Supported = append(append([]string{}, e.Assertions.Supported...), supported)
 	unsupported := make([]string, 0, len(e.Assertions.Unsupported))
 	for _, u := range e.Assertions.Unsupported {
 		if strings.Contains(u, "second person") {
 			u = "That an approval was MEANINGFUL. The forge records who clicked approve, not whether they read the change; and an approval by the author is counted here as a self-approval, not as review."
 		}
 		unsupported = append(unsupported, u)
+	}
+	if undetermined > 0 {
+		unsupported = append(unsupported, fmt.Sprintf(
+			"Anything at all about the %d changes whose forge record could not be read. They are undetermined, not unapproved: the approval population in this report is %d, not %d.",
+			undetermined, total-undetermined, total))
 	}
 	e.Assertions.Unsupported = unsupported
 	return e
@@ -386,6 +415,19 @@ type Approval struct {
 	// which is not the same as "no approval" — a commit pushed straight to the
 	// branch has no PR to have been approved.
 	Found bool
+	// Undetermined is true when warden could not get an answer from the forge
+	// for this commit: an expired credential, a rate limit, a transient 5xx.
+	//
+	// It exists because the three other states are all POSITIVE CLAIMS, and a
+	// forge that cannot answer must not be recorded as one that answered
+	// "nothing". Undetermined outranks the rest: a record may carry a pull
+	// request whose reviews could not be read, and warden may not report that
+	// as "nobody approved it".
+	Undetermined bool
+	// Reason is the forge's own account of why, for the operator. It is
+	// diagnostic only and is deliberately never rendered into the evidence
+	// document: what an auditor needs is the count, not gh's error text.
+	Reason string
 	// PR is the pull request number the commit arrived through.
 	PR int
 	// Author is the login that opened it.
@@ -424,7 +466,16 @@ type ApprovalSummary struct {
 	Unapproved int
 	// NoPullRequest changes were not associated with a pull request at all.
 	NoPullRequest int
+	// Undetermined changes are the ones the forge could not be read for. They
+	// are not a finding — they are the absence of one — and must be rendered
+	// separately from NoPullRequest, which is a finding.
+	Undetermined int
 }
+
+// Determined is the number of changes the forge actually answered for. Every
+// rate stated about approvals has to be over this, not over Collected, or a
+// forge outage reads as a control failure.
+func (s ApprovalSummary) Determined() int { return s.Collected - s.Undetermined }
 
 // Approvals summarizes the approval records attached to the population.
 func (e Evidence) Approvals() ApprovalSummary {
@@ -432,6 +483,10 @@ func (e Evidence) Approvals() ApprovalSummary {
 	for _, a := range e.ApprovalByCommit {
 		s.Collected++
 		switch {
+		// First, because an unanswered lookup is not evidence of anything —
+		// including of there being no pull request.
+		case a.Undetermined:
+			s.Undetermined++
 		case !a.Found:
 			s.NoPullRequest++
 		case a.Independent():

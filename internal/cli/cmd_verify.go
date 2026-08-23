@@ -180,6 +180,20 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 			"attestation, not a record of a CI run\n", short(res.SHA))
 		return
 	}
+	// THERE IS NO NOTE. This has to be settled before any branch that describes
+	// a note's properties, because `Signed` is false for two different worlds:
+	// a note carrying no signature, and no note at all. With a pinned roster the
+	// second was reaching `pinned && !res.Signed` and being reported as the
+	// first — telling the reader to go looking for an unsigned note that does
+	// not exist.
+	//
+	// Record is the exact discriminator: VerifyWithPolicy returns an ERROR when
+	// the note cannot be read, so a nil Record means absent, never unreadable.
+	if res.Record == nil {
+		_, _ = fmt.Fprintf(w, "unverified %s — no warden note (pushed with --no-verify, "+
+			"or made outside warden); run the checks\n", short(res.SHA))
+		return
+	}
 	// Give a specific reason when a pinned key is what failed.
 	if pinned && res.Signed && res.SignatureValid && !res.Trusted {
 		_, _ = fmt.Fprintf(w, "unverified %s — signed by untrusted key %s; run the checks\n", short(res.SHA), res.Signer)
@@ -193,7 +207,15 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 		_, _ = fmt.Fprintf(w, "unverified %s — note is unsigned but a trusted key was required; run the checks\n", short(res.SHA))
 		return
 	}
-	_, _ = fmt.Fprintf(w, "unverified %s — no intact warden note; run the checks\n", short(res.SHA))
+	// A note exists, and the signature is not what failed. What is left is that
+	// it does not ATTEST this commit: an empty evidence chain, or a record bound
+	// to a different commit because history was rewritten under it. Saying "no
+	// intact warden note" about a note sitting right there is the same wrong
+	// diagnosis in the opposite direction — `warden doctor` calls this case
+	// UNBOUND, and `warden why` will print the record.
+	_, _ = fmt.Fprintf(w, "unverified %s — a warden note exists but does not attest this commit "+
+		"(empty evidence chain, or bound to another commit after a rewrite); run `warden why %s`\n",
+		short(res.SHA), short(res.SHA))
 }
 
 // gateDepth names, for the human summary, how strict this gate was — so a green
