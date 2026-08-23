@@ -156,7 +156,20 @@ _wd_timeout() {
   fi
   "$@"  # no timeout tool available — best effort
 }
-if ! _wd_ver_out=$(_wd_timeout 15 "$bin" --version 2>/dev/null); then
+_wd_ver_out=$(_wd_timeout 15 "$bin" --version 2>/dev/null)
+_wd_ver_rc=$?
+# 124 is the timeout convention (and what the perl fallback raises): the call
+# did not finish, which is NOT the same as the binary being broken. A loaded
+# machine can blow a 15s budget with a perfectly good binary, and telling that
+# developer to strip a quarantine attribute sends them to fix something that
+# was never wrong. Both still fail closed — an unverified binary does not run
+# the gate — but they must not be given the same cause.
+if [ $_wd_ver_rc -eq 124 ]; then
+  echo "warden: '$bin' did not answer --version within 15s, so it could not be checked." >&2
+  echo "warden: a heavily loaded machine is the usual reason; retrying is normally enough." >&2
+  echo "warden: to commit once without the gate: git commit --no-verify" >&2
+  exit 1
+elif [ $_wd_ver_rc -ne 0 ]; then
   echo "warden: '$bin' is installed but not runnable (Gatekeeper-quarantined, corrupt, or blocked)." >&2
   echo "warden: fix it (macOS: xattr -dr com.apple.quarantine \"$bin\"; or reinstall), then retry." >&2
   echo "warden: to commit once without the gate: git commit --no-verify" >&2

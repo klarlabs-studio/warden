@@ -75,6 +75,7 @@ func TestShim_ReportsPinSkewForPathBinary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, "warden"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	unboundPreflight(t, binDir)
 
 	out, err := runShim(t, body, binDir)
 	if err != nil {
@@ -98,6 +99,7 @@ func TestShim_SilentWhenPathMatchesPin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, "warden"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	unboundPreflight(t, binDir)
 
 	out, err := runShim(t, body, binDir)
 	if err != nil {
@@ -105,6 +107,61 @@ func TestShim_SilentWhenPathMatchesPin(t *testing.T) {
 	}
 	if strings.Contains(out, "hook pins") {
 		t.Errorf("matching versions should print nothing, got %q", out)
+	}
+}
+
+// unboundPreflight puts a pass-through `timeout` first on PATH, so the shim's
+// 15s preflight budget does not become an assertion these tests never meant to
+// make.
+//
+// That budget is a real product decision for a git hook and must not be tuned
+// to a test's convenience. But a test that executes the shim end to end is
+// asserting on wall clock it does not control: both skew tests failed at 15s+
+// inside a full gate run — go test -race, a lint and a scanner competing for
+// the same machine — while passing standalone in 0.3s (#228). The failure said
+// nothing about the shim's behavior, which is what they are here to check.
+//
+// `_wd_timeout` prefers `timeout` and returns as soon as it finds one, so a
+// shim of that name in binDir wins. It drops the duration and execs, which is
+// the same code path the shim takes on a machine with no timeout tool at all.
+func unboundPreflight(t *testing.T, binDir string) {
+	t.Helper()
+	const passthrough = "#!/bin/sh\nshift\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "timeout"), []byte(passthrough), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A preflight that timed out has not learned that the binary is broken — only
+// that it did not answer. Saying "Gatekeeper-quarantined, corrupt, or blocked"
+// there sends a developer whose machine was merely busy to fix a binary that
+// was never wrong, which is the wrong-diagnosis defect this project treats as
+// its central failure mode.
+func TestShim_TimeoutIsNotReportedAsABrokenBinary(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	binDir := t.TempDir()
+	fake := "#!/bin/sh\ncase \"$1\" in --version) echo 'warden 0.18.16' ;; *) exit 0 ;; esac\n"
+	if err := os.WriteFile(filepath.Join(binDir, "warden"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A `timeout` that always reports the timeout convention, so the preflight
+	// takes its 124 branch without the test waiting 15 real seconds.
+	if err := os.WriteFile(filepath.Join(binDir, "timeout"),
+		[]byte("#!/bin/sh\nexit 124\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runShim(t, shim(domain.PreCommit, "0.18.16"), binDir)
+	if err == nil {
+		t.Fatal("a preflight that could not check the binary must still fail closed")
+	}
+	if !strings.Contains(out, "did not answer --version within 15s") {
+		t.Errorf("timeout must name the timeout.\ngot: %q", out)
+	}
+	if strings.Contains(out, "quarantined") || strings.Contains(out, "corrupt") {
+		t.Errorf("a timeout must not be diagnosed as a broken binary.\ngot: %q", out)
 	}
 }
 

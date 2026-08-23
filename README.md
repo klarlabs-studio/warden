@@ -318,6 +318,47 @@ Because it's part of the signed, hash-chained record, a validated commit ships a
 tamper-evident, signed fingerprint of exactly which dependency sets it had —
 shown by `warden why`.
 
+### Publishing the verdict when CI can't run
+
+The required check above assumes something on the forge can run `warden verify`.
+Sometimes nothing can. A private repository past its Actions spending limit does
+not *fail* its jobs — it never starts them: every required check reports
+`failure` with zero steps executed, and every pull request is blocked
+indefinitely regardless of the code. The gate still ran on the developer's
+machine and still wrote a signed note. It just had no way to say so.
+
+Setting `status.enabled` lets warden report its own verdict instead:
+
+```yaml
+# .warden.yaml
+status:
+  enabled: true          # default false
+  # context: warden/gate # the default — override to publish under another name
+```
+
+A run that passed **and** pushed then posts a **commit status** through the `gh`
+CLI warden already uses for pull requests. A commit status is not an Actions job:
+no minutes, no runner, and no token held by warden.
+
+The context is `warden/gate`, a name warden alone writes — so requiring it is an
+explicit branch-protection change, which is the honest shape: the repo is
+choosing to accept a locally-produced verdict. Publishing under the Action's own
+job name was the first attempt and does not work — GitHub keeps a commit status
+and a check run as *separate* entries under a shared name and requires both to
+pass, so the green status merely sat beside the Action's red check run.
+
+Off by default, because publishing writes to a surface other people read as CI
+and nobody should acquire that behaviour by upgrading. **A failing gate publishes
+nothing** — there is no state in which warden reports success for a commit it
+did not clear. A forge that refuses the status produces a warning, never a
+rollback; by then the push has already happened.
+
+And the status is **a pointer, not the evidence**. Anyone with push access can
+post a status saying anything; nobody without the signing key can produce a note
+`warden verify` accepts. Treat the status as what unblocks the merge button and
+the note as what you would audit. See
+[publishing the gate verdict where CI cannot run](docs/status-without-ci.md).
+
 ### Measuring adoption across a fleet
 
 A gate that is routinely bypassed protects nothing **and** removes the signal
@@ -367,6 +408,93 @@ Four distinctions do the work here:
 Exits non-zero when any commit was genuinely bypassed, so it composes as a CI or
 cron check. A reattestable gap does not fail it — `warden reattest --all` rebinds
 those.
+
+### Evidence for the person who signs the opinion
+
+`warden audit` and `warden doctor` answer a developer's question: is this
+branch's provenance intact. An auditor asks a different one — over this period,
+what changed, which changes went through the control, and what are the
+exceptions. `warden evidence` answers *that*, from the same records; deliberately
+the same, because two commands that could disagree about what happened would make
+both useless.
+
+```bash
+# the artifact you hand an auditor
+warden evidence --from 2026-01-01 --to 2026-03-31 > q1-change-gate.md
+
+warden evidence --from 2026-01-01 --format json    # for a GRC platform to ingest
+warden evidence --from 2026-01-01 --format oscal   # NIST assessment-results
+warden evidence --frameworks soc2                  # narrow the control mapping
+```
+
+Three formats because the artifact has three readers: `md` for the human who
+signs the opinion, `json` (versioned `warden.evidence/v1`) for a platform to
+ingest on a schedule, `oscal` for tooling that speaks the NIST interchange
+format. Four things make it evidence rather than a report:
+
+- **A population, not a sample.** Every commit in the window appears, in exactly
+  one of four classifications — gated and verified, covered by a gated push,
+  exception, outside the control — and the total reconciles against `git log`.
+  The usual failure of home-grown evidence is a list of the changes that went
+  well.
+- **Exceptions carrying the *specific* reason** warden could not vouch for that
+  commit: `no warden note` (a genuine bypass), `never pushed` (the pre-push gate
+  was never reachable), `unattributable` (gated by a warden too old to record a
+  push span), a note that does not attest the commit, and the
+  `squash-merge binding gap`. From the outside those look identical; they have
+  different remedies. A row that offers a remediation is a to-do, a row that does
+  not is a finding.
+- **A stable digest** over the population and its verdicts, not the timestamps
+  around them — so a re-run reproduces it and an edit does not.
+- **The command that re-derives the verdicts**, printed in the report. The
+  document asserts them; the signed notes in the repository are the proof, and
+  `warden verify --range <adoption>..main` checks them without trusting the
+  document or whoever produced it.
+
+Every mapped control states what it does **not** evidence next to what it does —
+approval, check adequacy, deployment, key custody, anything before adoption.
+That is not modesty. Evidence is rejected for claiming too much far more often
+than for proving too little.
+
+The report also works on a **fresh clone**: the adoption point `warden init`
+records lives in `.git/warden/adoption`, which is per-clone, so when that file is
+absent warden derives it from `refs/notes/warden` instead — the parent of the
+earliest noted commit, i.e. the point at which the gate demonstrably began
+operating. Same population, same digest, on any checkout, because an artifact
+only one laptop can produce is not evidence. See
+[using warden as audit evidence](docs/grc-evidence.md) for the control mapping,
+the JSON document and the worked caveats.
+
+#### `--approvals`: the other half of CC8.1
+
+warden observes the gate, not the review, so change-management evidence stops at
+"these checks ran". `--approvals` reads the other half from the forge — the pull
+request each change arrived through, who opened it, and who approved it:
+
+```bash
+warden evidence --from 2026-01-01 --to 2026-03-31 --approvals
+```
+
+It reports four states, kept deliberately apart: approved by someone other than
+the author, self-approved only, merged through a pull request nobody approved,
+and not associated with a pull request at all. **A self-approval is reported as a
+self-approval** — a record of a review that did not happen — and does not count
+as review. A bot approval never counts on its own; an automated approval is not a
+second pair of eyes, and a control that accepted one would evidence the opposite
+of what it claims.
+
+Opt-in, because it costs one forge call per commit. An unreachable or
+unauthenticated forge **refuses the run** before any of it is written, rather
+than reporting every change as having arrived with no pull request: "nobody
+approved this" is a finding, and warden will not manufacture one out of its own
+inability to ask. A lookup that fails for one commit is reported as
+*undetermined* for that commit and excluded from the approval population, which
+the control text then says out loud.
+
+Expect an uncomfortable number the first time. A single-maintainer repository
+shows zero independent approvals, because that is true; the report says so and
+points at the compensating-control narrative rather than leaving an auditor to
+discover it.
 
 ### Exporting to the supply-chain ecosystem
 
@@ -472,6 +600,7 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
+status: { enabled: false }   # default — true publishes the gate verdict as a commit status under `warden/gate`, for repos whose CI cannot run (see below)
 agent_trace: { path: "" }   # notarize an Agent Trace record; empty disables it
 signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
 signing: { signer: local, required: false }   # signer: local|ssh; required: true refuses to write an unsigned note — true refuses to write an unsigned note instead of warning
@@ -534,20 +663,22 @@ first cache line appears as `test (cached — inputs unchanged)`.
 |---|---|
 | `warden init [--hooks=pre-commit,pre-push]` | initialize, install hooks, record adoption point |
 | `warden hooks enable\|disable <hook>` | change hook selection |
+| `warden hooks repin` | re-pin the armed hook shims to the running version (a run does this itself) |
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
 | `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
-| `warden doctor [--branch b]` | audit which commits since adoption carry a validation note |
+| `warden doctor [--branch b] [--ci]` | audit which commits since adoption carry a validation note (`--ci`: exit 3 on drift, so CI can tell drift from a doctor that could not run) |
 | `warden fleet status [--root d] [PATH...]` | gate coverage and **bypass rate** across many repos |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
+| `warden evidence [--from D] [--to D] [--format md\|json\|oscal] [--frameworks soc2,iso27001] [--approvals]` | the same records as audit evidence: period-scoped population, exceptions with reasons, control mapping with its limits; `--approvals` adds the forge's review record |
 | `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
-| `warden attest [--commit c] [--predicate warden\|vsa]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop); `vsa` emits a SLSA Verification Summary Attestation |
+| `warden attest [--commit c] [--predicate warden\|vsa] [--sign]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop); `vsa` emits a SLSA Verification Summary Attestation, `--sign` a signed DSSE envelope |
 | `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |
-| `warden reattest --all [--branch b] [--push]` | sweep a branch: re-attest every recoverable squash-merge gap since adoption |
-| `warden key show` | print this machine's provenance signing key + fingerprint |
+| `warden reattest --all [--branch b] [--push] [--dry-run]` | sweep a branch: re-attest every recoverable squash-merge gap since adoption (`--dry-run` writes nothing) |
+| `warden key show\|list` | print this machine's provenance signing key + fingerprint, or the repo's trusted-signer roster |
 | `warden trust add\|list\|remove [path]` | allow the agent surfaces to run **this** repo's commands (per-repo `run_trigger` opt-in) |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
