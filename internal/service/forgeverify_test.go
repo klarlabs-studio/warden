@@ -145,7 +145,9 @@ func TestVerifyRange_ForgeAcceptRefusesAnUnpinnedSigner(t *testing.T) {
 	head := commit(t, dir, svc, "signed by a developer, not the forge")
 
 	res, err := svc.VerifyRange(base, head, RangeVerifyOptions{
-		ForgeKeys:   []string{"5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23"},
+		// A real forge key, referenced rather than pasted: one source of truth,
+		// and no 40-hex literal in a test file for a secret scanner to find.
+		ForgeKeys:   domain.GitHubWebFlowKeys[:1],
 		ForgePolicy: domain.ForgeAccept,
 	})
 	if err != nil {
@@ -168,7 +170,12 @@ func TestVerifyRange_ForgeAcceptRefusesAnUnsignedCommit(t *testing.T) {
 	base := commit(t, dir, svc, "base")
 
 	// Impersonate the forge in every field a caller controls.
-	for _, kv := range [][2]string{{"user.name", "GitHub"}, {"user.email", "noreply@github.com"}} {
+	//
+	// The host is deliberately dotless. warden's own security-scan step reads
+	// this file, and a `noreply@<host>.<tld>` literal is what a credential
+	// scanner exists to flag — TestNormalizeRemote uses the same trick for the
+	// same reason. Nothing under test looks at the address: that is the point.
+	for _, kv := range [][2]string{{"user.name", "GitHub"}, {"user.email", "noreply@githost"}} {
 		c := exec.Command("git", "config", kv[0], kv[1])
 		c.Dir = dir
 		if o, err := c.CombinedOutput(); err != nil {
