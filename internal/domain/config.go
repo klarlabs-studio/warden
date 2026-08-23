@@ -116,6 +116,10 @@ type Config struct {
 	// `warden key list`.
 	TrustedKeys []string `yaml:"trusted_keys"`
 
+	// Forge configures whether a range gate accepts commits the forge itself
+	// created — squash merges, web edits, Dependabot and nox remediation.
+	Forge ForgeConfig `yaml:"forge"`
+
 	// Signing configures the WRITE side of provenance signing.
 	Signing SigningConfig `yaml:"signing"`
 

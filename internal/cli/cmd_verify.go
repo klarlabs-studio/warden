@@ -246,6 +246,8 @@ func reasonHint(r domain.VerifyReason) string {
 		return "note is unsigned or its signature does not verify"
 	case domain.ReasonUntrusted:
 		return "signed by a key outside the trusted set"
+	case domain.ReasonForgeAuthored:
+		return "authored by the forge (squash merge, web edit, or a bot), signed by its key — no developer machine was in this commit's path, so no local gate could have run; allow these with forge.accept_authored in .warden.yaml"
 	default:
 		return "ok"
 	}
@@ -257,6 +259,18 @@ func countCovered(res service.RangeVerifyResult) int {
 	n := 0
 	for i := range res.Commits {
 		if res.Commits[i].CoveredBy != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// countForgeAccepted tallies commits that passed because the forge signed them,
+// not because warden gated them.
+func countForgeAccepted(res service.RangeVerifyResult) int {
+	n := 0
+	for i := range res.Commits {
+		if res.Commits[i].ForgeSigner != "" {
 			n++
 		}
 	}
@@ -277,6 +291,12 @@ func printRange(w io.Writer, res service.RangeVerifyResult) {
 		// green should not hide which claim is being made.
 		if n := countCovered(res); n > 0 {
 			_, _ = fmt.Fprintf(w, "  (%d covered by a gated push's signed span, not individually attested)\n", n)
+		}
+		// A forge-accepted commit was never gated by anything. Reporting it
+		// beside the total would let a green range imply checks that did not
+		// run, which is the one thing this gate exists not to do.
+		if n := countForgeAccepted(res); n > 0 {
+			_, _ = fmt.Fprintf(w, "  (%d accepted as forge-authored — the forge signed them; warden ran NO checks on them)\n", n)
 		}
 		return
 	}

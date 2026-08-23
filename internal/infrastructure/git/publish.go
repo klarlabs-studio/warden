@@ -536,3 +536,50 @@ func (r *Repo) PushAnchor(remote, sha string) error {
 func (r *Repo) pushAnchors(remote string) {
 	_, _ = r.run("push", "--no-verify", remote, AnchorRefPrefix+"*:"+AnchorRefPrefix+"*")
 }
+
+// CommitSignature reports the OpenPGP/SSH signature on a commit object itself —
+// not on warden's note. It exists so a caller can tell a commit the FORGE
+// created (GitHub signs squash merges, web edits and bot commits with its own
+// web-flow key) from one a developer made without the gate.
+//
+// Three values, and the third is the one that matters. `git` reports
+// verification status in %G?: `G` good, `U` good-but-untrusted-owner, `B` bad,
+// `E` cannot be checked, `N` none. `E` is the common case in CI, where the
+// signer's public key is simply not in the runner's keyring — and it is NOT a
+// verification. Returning `good` only for G/U keeps the caller from mistaking
+// "there is a signature claiming to be GitHub's" for "GitHub signed this": the
+// key id in a signature packet is attacker-supplied text until a key verifies
+// it.
+//
+// The asymmetry between the two identifiers is the whole security story, and it
+// is git's, not warden's. Measured: for a commit whose signing key is absent
+// from the keyring, git reports %G?=E, %GF EMPTY — it cannot name a key that
+// validated nothing — and %GK STILL POPULATED, because the key id is a field
+// inside the signature packet, put there by whoever produced it.
+//
+// So a caller matching on identity must use the fingerprint and never the
+// 64-bit key id. The blanking below is belt-and-braces over git already
+// returning "", kept because it makes the guarantee local to this function
+// rather than a property of git's format strings that a later edit could
+// silently rely on.
+func (r *Repo) CommitSignature(sha string) (keyID, fingerprint string, good bool, err error) {
+	out, err := r.run("show", "-s", "--format=%G?%x00%GK%x00%GF", sha)
+	if err != nil {
+		return "", "", false, err
+	}
+	parts := strings.Split(out, "\x00")
+	if len(parts) != 3 {
+		return "", "", false, fmt.Errorf("git: unexpected signature fields for %s: %q", sha, out)
+	}
+	status := strings.TrimSpace(parts[0])
+	keyID = strings.TrimSpace(parts[1])
+	fingerprint = strings.TrimSpace(parts[2])
+	// G: good. U: good signature, key's owner-trust is unset — which says
+	// something about the local keyring's opinion of the owner, not about the
+	// cryptography, and warden pins an exact fingerprint anyway.
+	good = status == "G" || status == "U"
+	if !good {
+		fingerprint = "" // never hand back an unvalidated identity
+	}
+	return keyID, fingerprint, good, nil
+}

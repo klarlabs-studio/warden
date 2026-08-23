@@ -6,6 +6,43 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`forge.accept_authored`: a gate that can tell "a human bypassed me" from
+  "no human was ever here".** warden's gate is a client-side pre-push hook, so
+  a commit the FORGE creates — a squash merge, a web edit, a Dependabot or nox
+  remediation commit — was never on a machine where warden could run. Under a
+  required gate those commits can never pass, so a repository either stops
+  merging bot pull requests or reaches for the admin override; this repository
+  had two dependency PRs blocked for days, and `docs/ci-provenance-gate.md`
+  had predicted exactly that.
+
+  Two halves, and the first ships regardless of configuration. A forge-authored
+  commit is now REPORTED as one instead of as `no warden note (pushed with
+  --no-verify, or made outside warden)` — two developer-bypass causes, both
+  wrong, aimed at whoever opened the pull request. Naming the cause is not
+  permission: the default still fails.
+
+  The second half, opt-in, lets such a commit pass. What makes that safe is the
+  signal it keys on. The committer field says `GitHub <noreply@github.com>` and
+  is free text any attacker sets with one flag; a gate reading it would enforce
+  nothing. GitHub *signs* the commits it creates, so warden instead requires a
+  signature **git could verify** against a pinned FULL fingerprint. Measured:
+  for a commit whose key is absent from the keyring git reports `%G?=E` and an
+  empty `%GF`, while `%GK` — the 64-bit key id — stays populated, because it
+  travels inside the signature packet. So the key id is exactly as trustworthy
+  as the thing being checked, and is never matched on.
+
+  Default off, and read from the range's BASE ref like the trusted-signer
+  roster, for the same reason: a pull request that could enable this in its own
+  head would be deciding whether it has to be gated at all. Accepted commits
+  are counted and reported separately — *"N accepted as forge-authored — the
+  forge signed them; warden ran NO checks on them"* — because a weaker claim
+  that reads as a stronger one is the failure this project exists to prevent.
+
+  GitHub-specific by design. A self-hosted GitLab or Gitea may not sign what it
+  creates, and there is nothing safe to key on when it does not.
+
 ### Fixed
 
 - **`warden verify` named two causes that were both the opposite of the truth.**
