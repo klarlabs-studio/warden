@@ -127,9 +127,9 @@ func TestNormalizeRemote(t *testing.T) {
 	// it is the whole point. A dotless host keeps the syntax under test intact
 	// while not looking like an address.
 	cases := map[string]string{
-		"git@githost:org/repo.git":          "ssh://git@githost/org/repo.git",
+		"git@githost:org/repo.git":          "ssh://githost/org/repo.git",
 		"https://githost/org/repo.git":      "https://githost/org/repo.git",
-		"ssh://git@githost/org/repo.git":    "ssh://git@githost/org/repo.git",
+		"ssh://git@githost/org/repo.git":    "ssh://githost/org/repo.git",
 		"  https://githost/org/repo.git   ": "https://githost/org/repo.git",
 	}
 	for in, want := range cases {
@@ -137,6 +137,62 @@ func TestNormalizeRemote(t *testing.T) {
 			t.Errorf("normalizeRemote(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// A VSA is built to be handed to someone else, and --sign signs it. A CI
+// checkout's origin routinely carries a credential, in either half of the
+// userinfo, so neither half may survive into the statement. The URIs identify
+// the repository; they are not clone commands, and lose nothing by it.
+func TestNormalizeRemote_CarriesNoCredential(t *testing.T) {
+	cases := map[string]string{
+		"https://ci-user:redacted@githost/org/repo.git": "https://githost/org/repo.git",
+		"https://ci-token@githost/org/repo.git":         "https://githost/org/repo.git",
+		"ssh://ci-user:redacted@githost/org/repo.git":   "ssh://githost/org/repo.git",
+	}
+	for in, want := range cases {
+		got := normalizeRemote(in)
+		if got != want {
+			t.Errorf("normalizeRemote(%q) = %q, want %q", in, got, want)
+		}
+		if strings.Contains(got, "@") {
+			t.Errorf("normalizeRemote(%q) = %q, which still carries userinfo", in, got)
+		}
+	}
+}
+
+// The credential must not survive into the signed statement either — the unit
+// above proves the helper, this proves the field a consumer actually reads.
+func TestBuildVSA_ResourceURICarriesNoCredential(t *testing.T) {
+	vsa := buildVSA(gatedResult(), "https://ci-user:redacted@githost/org/repo.git")
+	for _, uri := range []string{vsa.Predicate.ResourceURI, vsa.Predicate.Policy.URI} {
+		if strings.Contains(uri, "redacted") || strings.Contains(uri, "ci-user") {
+			t.Errorf("uri = %q, which leaks the remote's credential", uri)
+		}
+		// These URIs are the `git+<url>@<sha>` form, so a trailing `@` is the
+		// commit separator and legitimate. Userinfo is the `@` inside the
+		// AUTHORITY — between the scheme and the first path separator — which is
+		// the only one that could carry a secret.
+		if at := strings.Index(authorityOf(uri), "@"); at >= 0 {
+			t.Errorf("uri = %q carries userinfo in its authority", uri)
+		}
+		if !strings.Contains(uri, "githost/org/repo.git") {
+			t.Errorf("uri = %q, want it to still name the repository", uri)
+		}
+	}
+}
+
+// authorityOf returns the host portion of a URI: what sits between "://" and
+// the next "/". Empty when the URI has no scheme.
+func authorityOf(uri string) string {
+	scheme := strings.Index(uri, "://")
+	if scheme < 0 {
+		return ""
+	}
+	rest := uri[scheme+3:]
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		return rest[:slash]
+	}
+	return rest
 }
 
 // The VSA is the interop view; the warden predicate stays the default because
