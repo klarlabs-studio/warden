@@ -33,6 +33,16 @@ const (
 	// corrupt case as "missing" sends the reader to `--no-verify` and hook
 	// configuration, neither of which is involved. (#195)
 	ReasonUnreadable VerifyReason = "unreadable"
+	// ReasonForgeAuthored: no note, AND the commit object carries a verified
+	// signature from a pinned forge key — the forge created this commit, so no
+	// developer machine was ever in its path and no local gate could have run.
+	//
+	// A FAILING reason by default, and named separately because ReasonMissing
+	// tells the reader "pushed with --no-verify, or made outside warden": two
+	// developer-bypass causes, both wrong here, and an accusation aimed at
+	// whoever opened the Dependabot PR. What a gate does about this commit is a
+	// policy question (ForgePolicy); what it CALLS the commit is not.
+	ReasonForgeAuthored VerifyReason = "forge-authored"
 )
 
 // CommitVerdict is one commit's provenance outcome in a range gate. Reason is
@@ -46,6 +56,13 @@ type CommitVerdict struct {
 	// reading the gate can tell the two apart instead of seeing an
 	// undifferentiated green.
 	CoveredBy string `json:"covered_by,omitempty"`
+	// ForgeSigner names the pinned forge key whose verified signature let this
+	// commit pass without a note, when ForgeAccept is in force. Recorded for the
+	// same reason as CoveredBy: HOW a commit passed is part of the verdict. A
+	// green range containing forge-accepted commits asserts strictly less than
+	// one where every commit was gated, and an auditor must be able to see the
+	// difference rather than reading an undifferentiated pass.
+	ForgeSigner string `json:"forge_signer,omitempty"`
 }
 
 // OK reports whether the commit passed the gate.
