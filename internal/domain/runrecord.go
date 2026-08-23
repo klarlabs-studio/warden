@@ -219,6 +219,21 @@ const (
 	// moved the content to a new SHA and the note stayed with the old one. It is
 	// not evidence that anyone altered anything.
 	DefectUnbound = "note is bound to a different commit"
+	// DefectUnbindable: the record names NO commit at all — CommitSHA is empty.
+	//
+	// Written by a warden from before records were commit-bound (the invariant
+	// landed 2026-07-05, in 0.10.0). Such a note is honest about what it was: a
+	// record that a run happened. It simply predates the field that would let
+	// anyone tie that run to a particular commit, and no amount of re-attesting
+	// can add one retroactively.
+	//
+	// Kept apart from DefectUnbound because the two need opposite responses and
+	// the wrong one wastes real time. A note bound elsewhere is what a rebase
+	// leaves behind and MAY be recoverable from a tree-identical commit; a note
+	// bound to nothing never can be. Reporting the second as "history was
+	// rewritten" names a cause that did not occur and sends the reader to
+	// `reattest`, which will correctly do nothing and explain nothing.
+	DefectUnbindable = "note names no commit (predates commit binding)"
 )
 
 // AttestDefect names why the record fails to attest sha, or "" when it attests.
@@ -235,6 +250,11 @@ func (r RunRecord) AttestDefect(sha string) string {
 		return DefectNoEvidence
 	case !r.VerifyChain():
 		return DefectChainBroken
+	case r.CommitSHA == "":
+		// Checked BEFORE the mismatch case: BindsTo is false for both, and
+		// folding them together is what produced "note describes another
+		// commit" about a note that describes none.
+		return DefectUnbindable
 	case !r.BindsTo(sha):
 		return DefectUnbound
 	default:
