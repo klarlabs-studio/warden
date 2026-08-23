@@ -6,6 +6,16 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-23
+
+A gate that could not tell a bypass from a commit no human ever touched, and
+four claims it made that its evidence did not support.
+
+Every fix here is one defect wearing different clothes: warden asserting more
+than it observed. The worst of them had reached a signed compliance artifact,
+where an expired token turned ten reviewed changes into ten reported review
+bypasses — at exit 0, with a stable digest and a control mapping attached.
+
 ### Added
 
 - **`forge.accept_authored`: a gate that can tell "a human bypassed me" from
@@ -69,7 +79,6 @@ All notable changes to warden are documented here. The format follows
   note-property messages about the absent-note state and agreed with the code.
   Fixtures corrected and both directions covered.
 
-### Fixed
 
 - **`warden evidence --approvals` no longer reports a forge it could not read
   as a forge with no pull requests.** A non-zero `gh` exit was folded into "no
