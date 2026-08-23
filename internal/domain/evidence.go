@@ -189,6 +189,12 @@ func exceptionReason(c *CommitStatus) string {
 		return "never pushed — the pre-push gate was never reachable for this commit"
 	case c.PreSpanProvenance:
 		return "unattributable — gated by a warden too old to record a push span, so a gated intermediate commit and a bypass are indistinguishable"
+	case c.HasNote && c.NoteDefect == DefectUnbindable:
+		// Named separately because it is the one exception class that is
+		// PERMANENT. An auditor reading a list of remediable items should not
+		// find these among them and wonder why nobody has acted.
+		return "a run was recorded, but by a warden that predates commit binding (0.10, 2026-07-05), " +
+			"so nothing ties it to this commit; not recoverable"
 	case c.HasNote && c.NoteDefect != "":
 		return "note present but does not attest the commit: " + c.NoteDefect
 	case c.ReattestableFrom != "":
@@ -209,6 +215,31 @@ func exceptionRemedy(c *CommitStatus) string {
 	default:
 		return ""
 	}
+}
+
+// PreBindingExceptions counts exceptions that can never be remediated because
+// their note was written before warden bound records to commits.
+//
+// WHY THESE ARE NOT RECLASSIFIED as "outside the control", which was the
+// obvious alternative. The control WAS operating — a gate ran and recorded it —
+// so calling these changes ungoverned would understate what happened, and
+// moving them out of the exception list would shrink that list by editing its
+// definition rather than by fixing anything. An exception count that falls
+// because the bar moved is exactly the reading an auditor is entitled to be
+// suspicious of.
+//
+// They stay exceptions, and the report says instead what is true about them:
+// warden cannot vouch for these commits, it never will be able to, and the
+// reason is a change in warden rather than anything anyone did to the code.
+func (e Evidence) PreBindingExceptions() int {
+	n := 0
+	for i := range e.Population {
+		c := &e.Population[i]
+		if c.HasNote && c.NoteDefect == DefectUnbindable {
+			n++
+		}
+	}
+	return n
 }
 
 // Digest fingerprints the population so a report can be shown to be the one

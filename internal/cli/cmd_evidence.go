@@ -313,6 +313,18 @@ func printEvidenceMarkdown(w io.Writer, e domain.Evidence) {
 				short(x.SHA), x.Subject, x.Date, x.Author, x.Reason, orDash(x.Remediation))
 		}
 		p("\n")
+		// Some exceptions cannot be closed, and saying which ones is the
+		// difference between a backlog and a permanent limitation. Without this
+		// a reader assumes every row is someone's outstanding task.
+		if n := e.PreBindingExceptions(); n > 0 {
+			p("%d of these predate commit binding (warden 0.10, 2026-07-05): a run was\n", n)
+			p("recorded, but that warden did not write the commit id into the record, so\n")
+			p("nothing ties the run to the change. They are permanent — no re-attestation\n")
+			p("can add a binding after the fact — and they are listed as exceptions rather\n")
+			p("than moved outside the control, because the control WAS operating. An\n")
+			p("exception count that fell because the bar moved would be the wrong kind of\n")
+			p("improvement.\n\n")
+		}
 	}
 
 	if a := e.Approvals(); a.Collected > 0 {

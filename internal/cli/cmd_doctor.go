@@ -154,6 +154,8 @@ func noteDefectLabel(defect string) string {
 		return "TAMPERED (evidence chain broken)"
 	case domain.DefectUnbound:
 		return "UNBOUND (note describes another commit — history was rewritten)"
+	case domain.DefectUnbindable:
+		return "PRE-BINDING (note names no commit; written before warden 0.10 bound records to commits — not recoverable)"
 	case domain.DefectNoEvidence:
 		return "NO EVIDENCE (note records no steps)"
 	default:

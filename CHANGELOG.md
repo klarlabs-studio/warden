@@ -6,6 +6,36 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A note that names no commit is no longer reported as one naming a different
+  one.** `warden doctor` said `UNBOUND (note describes another commit — history
+  was rewritten)` about seven commits on this repository's own trunk. Their
+  notes describe no commit at all: `commit_sha` is empty, and every one was
+  written by warden 0.8.3–0.9.0 between 4 and 6 July 2026 — before records were
+  bound to commits at all (0.10.0). Nothing had been rebased.
+
+  `BindsTo` is false in two different worlds and `AttestDefect` returned the
+  same defect for both, so the label asserted a cause that never occurred and
+  pointed the reader at `reattest`, which can do nothing for a note with no
+  binding to repair. The new `DefectUnbindable` says what is true and that it is
+  permanent.
+
+  Fourth instance of this shape, and the verdict is unchanged: both still fail,
+  and `verify` still refuses them. Naming a cause is not softening it.
+
+- **`warden evidence` says which exceptions can never be closed.** An exception
+  list reads as a backlog. Where some of it is not — a pre-binding note cannot
+  be repaired by any action — the report now says so, and says how many.
+
+  Deliberately NOT reclassified as "outside the control", which was the obvious
+  alternative: the control WAS operating, a gate ran and recorded it, and moving
+  those commits would shrink the exception count by editing the definition
+  rather than by fixing anything. An exception count that falls because the bar
+  moved is exactly what an auditor is entitled to be suspicious of. The
+  reasoning is recorded on `PreBindingExceptions` so the decision is not
+  rediscovered as an oversight.
+
 ## [0.30.0] - 2026-08-23
 
 A gate that could not tell a bypass from a commit no human ever touched, and
