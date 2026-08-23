@@ -283,3 +283,83 @@ func TestVerifyRange_ForgeAcceptRefusesASignatureItCannotVerify(t *testing.T) {
 		t.Errorf("ForgeSigner = %q, want empty — nothing vouched for this commit", got)
 	}
 }
+
+// commitFile writes a file, stages it, and commits — used to put a
+// .warden.yaml at a BASE commit, which is where the gate reads policy from.
+func commitFile(t *testing.T, dir, name, content, msg string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	add := exec.Command("git", "add", name)
+	add.Dir = dir
+	if o, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, o)
+	}
+	c := exec.Command("git", "commit", "--no-verify", "-m", msg)
+	c.Dir = dir
+	if o, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, o)
+	}
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// The wiring, which the option-level tests above do not cover: they pass
+// ForgeKeys and ForgePolicy in directly, so all of them would still pass if
+// .warden.yaml were never read at all.
+//
+// It is read from the BASE ref, not the head. That is the property worth a test
+// of its own — `accept_authored` is the setting that lets an un-noted commit
+// through, so a pull request able to turn it on in its own head would be
+// deciding whether it has to be gated.
+func TestVerifyRange_ForgePolicyComesFromTheBaseRefConfig(t *testing.T) {
+	dir, svc := newRepoSvc(t)
+	commit(t, dir, svc, "root")
+	fpr := gpgSigner(t, dir)
+
+	cfg := "hooks: {pre_commit: false, pre_push: false}\nforge:\n  accept_authored: true\n  keys: [\"" + fpr + "\"]\n"
+	base := commitFile(t, dir, ".warden.yaml", cfg, "base: enable forge acceptance")
+	head := commit(t, dir, svc, "a commit the forge made")
+
+	// UseRoster is what makes the service read config from the base ref; no
+	// ForgeKeys or ForgePolicy are supplied here on purpose.
+	res, err := svc.VerifyRange(base, head, RangeVerifyOptions{UseRoster: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK() {
+		t.Fatalf("base-ref config should have enabled forge acceptance: %+v", res.Commits)
+	}
+	if got := res.Commits[0].ForgeSigner; !strings.EqualFold(got, fpr) {
+		t.Errorf("ForgeSigner = %q, want the configured key %s", got, fpr)
+	}
+}
+
+// And the other direction: a head that enables acceptance for itself must not
+// get it. Without this, the base-ref rule above is unenforced — the code could
+// read whichever config it found and still pass the test above.
+func TestVerifyRange_AHeadCannotEnableForgeAcceptanceForItself(t *testing.T) {
+	dir, svc := newRepoSvc(t)
+	commit(t, dir, svc, "root")
+	fpr := gpgSigner(t, dir)
+
+	// BASE has no forge config at all.
+	base := commitFile(t, dir, ".warden.yaml",
+		"hooks: {pre_commit: false, pre_push: false}\n", "base: no forge policy")
+	// The HEAD turns it on — the move this rule exists to refuse.
+	head := commitFile(t, dir, ".warden.yaml",
+		"hooks: {pre_commit: false, pre_push: false}\nforge:\n  accept_authored: true\n  keys: [\""+fpr+"\"]\n",
+		"head: enable forge acceptance for myself")
+
+	res, err := svc.VerifyRange(base, head, RangeVerifyOptions{UseRoster: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK() {
+		t.Fatal("a head that enabled forge acceptance for itself was allowed to gate itself")
+	}
+}

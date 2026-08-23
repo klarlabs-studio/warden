@@ -45,6 +45,28 @@ security_scan:
 risk:
   diff_lines_high: 400
   files_touched_high: 15
+# Accept commits the FORGE created (0.30.0+).
+#
+# `gate` is a REQUIRED check on main, and warden's gate is a client-side
+# pre-push hook — so a squash merge, a web edit, or a Dependabot / nox
+# remediation commit was never on a machine where warden could run, and can
+# never pass. That cost this repository real time: #217 was closed unread,
+# #218 and #219 sat blocked for days, and docs/ci-provenance-gate.md had
+# predicted exactly that ("you end up reaching for the admin override, and a
+# check you routinely override isn't really enforcing").
+#
+# What makes this safe is the signal, not the setting. It requires a signature
+# git can VERIFY against a pinned full fingerprint — GitHub's published
+# web-flow keys, the default when `keys` is unset. The committer field says
+# "GitHub <noreply@github.com>" and is free text anyone sets with one flag; it
+# is never consulted. A developer's --no-verify push carries their key or none,
+# so it cannot reach this path.
+#
+# The gate reports these apart from the total, and should: "N accepted as
+# forge-authored — the forge signed them; warden ran NO checks on them."
+forge:
+  accept_authored: true
+
 # Trusted provenance signers (ADR-0002 Phase 3). The warden-gate action (see
 # .github/workflows/provenance.yml) and a bare `warden verify --range` require a
 # note signed by one of these. Add yours with `warden key show`; list with
