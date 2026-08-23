@@ -142,6 +142,17 @@ type approvalForge interface {
 // The preflight cannot cover everything — a credential can expire, or a rate
 // limit can bite, on commit 400 of 900 — so per-commit uncertainty is carried
 // through as its own state rather than being collapsed into a finding.
+// Both refusals below exit 2, not 75/78, and the distinction is worth stating
+// because 78 looks like the better fit: an absent gh IS a missing toolchain and
+// an expired credential IS the machine rather than the change.
+//
+// 75 and 78 exist so a wrapper around the GATE can tell "warden rejected your
+// code" from "warden never got to judge it" — the whole point is that a verdict
+// on the change was expected and did not arrive. `warden evidence` judges no
+// change and returns no verdict; it is a reporting command, and borrowing the
+// gate's vocabulary here would tell a caller a verdict was withheld when none
+// was ever due. 2 says what actually happened: warden could not do the thing it
+// was asked to do.
 func collectApprovals(ctx context.Context, f approvalForge, ev domain.Evidence, stderr io.Writer) (withApprovals domain.Evidence, exitCode int) {
 	if !f.Available() {
 		_, _ = fmt.Fprintln(stderr, "warden: --approvals needs the gh CLI on PATH")
