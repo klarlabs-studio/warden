@@ -8,6 +8,32 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **`warden verify` named two causes that were both the opposite of the truth.**
+  A commit with NO note reported `note is unsigned but a trusted key was
+  required`, and a commit WITH a note that does not attest it reported `no
+  intact warden note`. Each message described the other one's situation.
+
+  `res.Signed` is false in two different worlds — a note carrying no signature,
+  and no note at all — so with a roster configured the absent case was caught by
+  `pinned && !res.Signed` and the honest branch below it became unreachable.
+  Anything that fell past the signature checks then got "no intact warden note",
+  including notes sitting right there that simply bind elsewhere.
+
+  Both now read from `Record`, which is nil only when the note is absent —
+  `VerifyWithPolicy` returns an ERROR when a note cannot be READ, so absent and
+  unreadable stay distinct. An unbound note is now named as one, and points at
+  `warden why`, which prints it. `warden doctor` already classified this case
+  correctly as UNBOUND; the two surfaces no longer disagree about one fact.
+
+  Third instance of this shape in this file's history — 0.24.1 fixed a note-read
+  error collapsing into the absent case. The tests are why it survived: three of
+  the six `printVerify` fixtures described notes that exist (signed, invalid
+  signature, unsigned) while constructing no `Record` at all, so they asserted
+  note-property messages about the absent-note state and agreed with the code.
+  Fixtures corrected and both directions covered.
+
+### Fixed
+
 - **`warden evidence --approvals` no longer reports a forge it could not read
   as a forge with no pull requests.** A non-zero `gh` exit was folded into "no
   pull request", conflating *the forge has no PR for this commit* with *warden
