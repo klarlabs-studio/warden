@@ -28,6 +28,14 @@ func (a *Adapter) DiffStats(base string) (domain.DiffStats, error) {
 // StagedPaths, but it returns full DiffStats).
 func (a *Adapter) StagedDiffStats() (domain.DiffStats, error) { return a.repo.StagedPaths() }
 
+// DefaultBranchRef exposes the remote's default head as a diff base.
+func (a *Adapter) DefaultBranchRef(remote string) (string, error) {
+	return a.repo.DefaultBranchRef(remote)
+}
+
+// EmptyTree exposes the empty-tree object as the last-resort diff base.
+func (a *Adapter) EmptyTree() (string, error) { return a.repo.EmptyTree() }
+
 // GitDir exposes the repository's .git directory to the application layer.
 func (a *Adapter) GitDir() (string, error) { return a.repo.GitDir() }
 

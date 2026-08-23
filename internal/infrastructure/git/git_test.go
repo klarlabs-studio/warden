@@ -93,26 +93,44 @@ func TestDiffStatsStaged(t *testing.T) {
 		t.Fatalf("git add: %v: %s", err, out)
 	}
 
-	stats, err := repo.DiffStats("")
-	if err != nil {
-		t.Fatalf("DiffStats: %v", err)
-	}
-	if stats.FilesTouched != 1 {
-		t.Errorf("FilesTouched = %d, want 1", stats.FilesTouched)
-	}
-	if stats.LinesChanged != 3 {
-		t.Errorf("LinesChanged = %d, want 3", stats.LinesChanged)
-	}
-	if len(stats.Paths) != 1 || stats.Paths[0] != "a.txt" {
-		t.Errorf("Paths = %v, want [a.txt]", stats.Paths)
+	// DiffStats("") used to answer with the index. That overload is what let a
+	// caller signal "I could not resolve a base" and be handed the staged
+	// changes instead — empty at pre-push, so the gate measured nothing. It is
+	// an error now, and the index has one accessor: StagedPaths.
+	if _, err := repo.DiffStats(""); err == nil {
+		t.Error("DiffStats(\"\") = nil error; an empty base must not silently mean the index")
 	}
 
 	staged, err := repo.StagedPaths()
 	if err != nil {
 		t.Fatalf("StagedPaths: %v", err)
 	}
+	if staged.FilesTouched != 1 {
+		t.Errorf("FilesTouched = %d, want 1", staged.FilesTouched)
+	}
+	// StagedPaths fills Paths and FilesTouched only — it runs --name-only, not
+	// --numstat — so LinesChanged is 0 here by design.
+	//
+	// Worth knowing rather than asserting away: pre-commit risk comes from
+	// StagedDiffStats, and RiskThresholds.Classify tests LinesChanged as well
+	// as FilesTouched. That half of the heuristic therefore never fires at
+	// pre-commit. Left alone here because changing it changes pre-commit risk
+	// classification, which is a decision and not this bug.
+	if staged.LinesChanged != 0 {
+		t.Errorf("LinesChanged = %d, want 0 (StagedPaths does not count lines)", staged.LinesChanged)
+	}
 	if len(staged.Paths) != 1 || staged.Paths[0] != "a.txt" {
 		t.Errorf("StagedPaths = %v, want [a.txt]", staged.Paths)
+	}
+
+	// The empty tree is the base that makes a range mean "everything", which is
+	// what a branch with no integration point to compare against needs.
+	empty, err := repo.EmptyTree()
+	if err != nil {
+		t.Fatalf("EmptyTree: %v", err)
+	}
+	if empty == "" {
+		t.Error("EmptyTree = empty string, want an object id")
 	}
 }
 
