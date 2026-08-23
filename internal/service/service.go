@@ -202,6 +202,25 @@ func (s *Service) TrustedKeysAt(ref string) ([]string, error) {
 	return cfg.TrustedKeys, nil
 }
 
+// ForgeConfigAt reads the forge policy from ref, for exactly the reason
+// TrustedKeysAt does: a range gate must never take its trust decisions from the
+// head it is inspecting.
+//
+// This one matters more than the roster, not less. `forge.accept_authored` is
+// the setting that lets an un-noted commit pass, so reading it from the head
+// would let a pull request turn the gate off in its own first commit and then
+// walk through it. Read from the base — the side already trusted — it can only
+// be enabled by a change that itself passed the gate.
+func (s *Service) ForgeConfigAt(ref string) (domain.ForgeConfig, error) {
+	cfg, err := config.ResolveAtRef(func(rel string) ([]byte, bool, error) {
+		return s.repo.FileAtRef(ref, rel)
+	})
+	if err != nil {
+		return domain.ForgeConfig{}, err
+	}
+	return cfg.Forge, nil
+}
+
 // Explain resolves the effective policy for a hypothetical invocation, using
 // real diff stats when the invocation matches the current worktree and a
 // zero-diff otherwise (so `policy explain --branch other` still works).

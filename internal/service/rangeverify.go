@@ -24,6 +24,13 @@ type RangeVerifyOptions struct {
 	// it, rather than each adapter re-deriving it.
 	UseRoster  bool
 	SkipMerges bool
+	// ForgePolicy decides what happens to a commit the forge authored — one with
+	// no note and a verified signature from ForgeKeys. Zero value rejects.
+	ForgePolicy domain.ForgePolicy
+	// ForgeKeys pins the fingerprints that identify the forge. Empty means the
+	// classification cannot run at all, so a nil-config caller keeps exactly the
+	// behavior it had before this existed.
+	ForgeKeys []string
 }
 
 // RangeVerifyResult is the per-commit outcome of a `base..head` gate.
@@ -96,6 +103,18 @@ func (s *Service) VerifyRange(base, head string, opts RangeVerifyOptions) (Range
 		}
 	}
 
+	// Same trusted side, same reason: a head that could enable forge acceptance
+	// for itself would be choosing whether it has to be gated.
+	if opts.UseRoster && len(opts.ForgeKeys) == 0 {
+		if fc, ferr := s.ForgeConfigAt(baseSHA); ferr == nil {
+			opts.ForgePolicy = fc.Policy()
+			opts.ForgeKeys = fc.ForgeKeys()
+		}
+		// A base config that will not parse leaves the zero policy in place,
+		// which rejects. Failing open here would mean a broken .warden.yaml
+		// silently widened the gate.
+	}
+
 	shas, err := s.repo.CommitsInRange(baseSHA, headSHA, opts.SkipMerges)
 	if err != nil {
 		return RangeVerifyResult{}, fmt.Errorf("walk %s..%s: %w", base, head, err)
@@ -128,7 +147,15 @@ func (s *Service) VerifyRange(base, head string, opts RangeVerifyOptions) (Range
 func (s *Service) applySpanCoverage(res *RangeVerifyResult, shas []string, opts RangeVerifyOptions) {
 	gaps := map[string]int{} // sha → index into res.Commits
 	for i, c := range res.Commits {
-		if c.Reason == domain.ReasonMissing {
+		// Both no-note reasons are gaps a span can close. ReasonForgeAuthored is
+		// a REFINEMENT of ReasonMissing — same absent note, better-identified
+		// cause — so leaving it out would have made a commit fail merely for
+		// being correctly diagnosed: a web edit inside an otherwise gated push
+		// passed as ReasonMissing before this classification existed, and must
+		// keep passing. A span is also the stronger claim of the two: a trusted
+		// signer ran the policy over that range, which is more than "the forge
+		// signed this object".
+		if c.Reason == domain.ReasonMissing || c.Reason == domain.ReasonForgeAuthored {
 			gaps[c.SHA] = i
 		}
 	}
@@ -176,6 +203,12 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitV
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonUnreadable}
 	}
 	if rec == nil {
+		// No note. Before calling that a bypass, ask whether a developer was
+		// ever in this commit's path: the forge signs the commits IT creates,
+		// and warden's hook cannot run on a machine that never held them.
+		if v, isForge := s.forgeVerdict(sha, opts); isForge {
+			return v
+		}
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonMissing}
 	}
 	if !rec.Attests(sha) {
@@ -191,4 +224,33 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitV
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonUntrusted}
 	}
 	return domain.CommitVerdict{SHA: sha}
+}
+
+// forgeVerdict classifies an un-noted commit as forge-authored, and applies the
+// policy. The second return says whether the classification applied at all, so
+// the caller can fall through to ReasonMissing untouched.
+//
+// The check is deliberately narrow. It requires a signature git could actually
+// VERIFY against a key in the local keyring, whose fingerprint is one the
+// repository pinned. Any weaker test — the committer being "GitHub
+// <noreply@github.com>", or a key id read out of the signature packet — is a
+// field the pusher controls, and a gate keyed on it enforces nothing at all.
+//
+// Fails closed at every step: no pinned keys, no signature, a signature git
+// cannot check because the runner lacks the public key, or a fingerprint that
+// does not match, all leave the commit exactly as un-noted as it was.
+func (s *Service) forgeVerdict(sha string, opts RangeVerifyOptions) (domain.CommitVerdict, bool) {
+	if len(opts.ForgeKeys) == 0 {
+		return domain.CommitVerdict{}, false
+	}
+	_, fingerprint, good, err := s.repo.CommitSignature(sha)
+	if err != nil || !good || !domain.ForgeKeyMatches(fingerprint, opts.ForgeKeys) {
+		return domain.CommitVerdict{}, false
+	}
+	if opts.ForgePolicy == domain.ForgeAccept {
+		return domain.CommitVerdict{SHA: sha, ForgeSigner: fingerprint}, true
+	}
+	// Rejected, but named. The verdict still fails; it no longer accuses a
+	// developer of a --no-verify push they did not make.
+	return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonForgeAuthored}, true
 }
