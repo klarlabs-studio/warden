@@ -5,8 +5,11 @@
 package forge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -35,6 +38,68 @@ func (g *GH) run(ctx context.Context, args ...string) (string, error) {
 	cmd.Dir = g.dir
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// runSplit is run with the two streams kept apart. `gh api --include` writes
+// the response headers to stdout and its own diagnosis ("gh: Bad credentials
+// (HTTP 401)") to stderr; a caller that has to tell "the forge answered 404"
+// from "warden could not ask" needs both, and CombinedOutput interleaves them
+// unpredictably.
+func (g *GH) runSplit(ctx context.Context, args ...string) (stdout, stderr string, err error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = g.dir
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), strings.TrimSpace(errBuf.String()), err
+}
+
+// Reachable reports whether the forge can actually be queried for THIS
+// repository: gh installed, authenticated, and holding a credential that can
+// read the repo the working directory points at.
+//
+// Available() is a weaker check on purpose — it answers "is the CLI here",
+// which is all a best-effort PR comment needs. Anything that reads the forge
+// as EVIDENCE needs this one, because a gh that cannot answer looks exactly
+// like a forge with nothing to report: every commit comes back with no pull
+// request, and warden would publish that as a finding it never observed.
+// It probes with --include, the same way the per-commit lookups do, so a gh
+// that cannot produce a readable status line fails HERE — where it stops the
+// run with gh's own message — instead of turning every commit in the report
+// into an undetermined row.
+func (g *GH) Reachable(ctx context.Context) error {
+	out, errOut, err := g.runSplit(ctx, "api", "--include", "repos/{owner}/{repo}", "--jq", ".full_name")
+	status, body := splitHTTPResponse(out)
+	if err != nil || status != 200 {
+		// gh's own message names the cause — bad credentials, no GitHub remote,
+		// repository not found — far better than anything warden could infer.
+		if c := firstLine(errOut); c != "" {
+			return errors.New(c)
+		}
+		if status != 0 {
+			return fmt.Errorf("the forge answered HTTP %d for this repository", status)
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New("gh returned no readable HTTP response")
+	}
+	if strings.TrimSpace(body) == "" {
+		return errors.New("gh answered but named no repository")
+	}
+	return nil
+}
+
+// firstLine is the leading non-empty line of s, which is where gh puts the
+// human-readable cause.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // EnsurePR returns the open PR for branch, opening one onto base if none
