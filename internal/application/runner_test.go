@@ -63,7 +63,17 @@ type fakeGit struct {
 	note              domain.RunRecord
 	ffErr             error
 	mergeBaseErr      error
-	wt                *fakeWorktree
+	// diffBases records every base DiffStats was asked for, in order. The
+	// fallback bug was invisible precisely because nothing asserted on this:
+	// the old double ignored its argument and answered the same stats for any
+	// base, including the "" that made the real one measure the index.
+	diffBases        []string
+	mergeBaseRefs    []string
+	mergeBaseErrFor  map[string]error
+	defaultBranchRef string
+	defaultBranchErr error
+	emptyTree        string
+	wt               *fakeWorktree
 }
 
 func (g *fakeGit) Root() string                   { return g.root }
@@ -73,10 +83,45 @@ func (g *fakeGit) HeadSHA() (string, error)       { return g.head, nil }
 // GitDir returns gitDir, empty by default. An empty git dir is a supported
 // state — it disables build-cache reuse, which is an optimization a run must
 // behave identically without.
-func (g *fakeGit) GitDir() (string, error)          { return g.gitDir, nil }
-func (g *fakeGit) MergeBase(string) (string, error) { return "base", g.mergeBaseErr }
-func (g *fakeGit) DiffStats(string) (domain.DiffStats, error) {
-	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2}, nil
+func (g *fakeGit) GitDir() (string, error) { return g.gitDir, nil }
+
+// MergeBase is ref-aware so a test can model the shape of a real first push:
+// the branch's OWN remote ref does not resolve, while the integration ref does.
+// mergeBaseErr keeps its blanket meaning (nothing resolves).
+func (g *fakeGit) MergeBase(ref string) (string, error) {
+	g.mergeBaseRefs = append(g.mergeBaseRefs, ref)
+	if g.mergeBaseErr != nil {
+		return "", g.mergeBaseErr
+	}
+	if err, ok := g.mergeBaseErrFor[ref]; ok {
+		return "", err
+	}
+	return "base", nil
+}
+
+// DiffStats mirrors the real contract: an empty base is an error, not a mode
+// that quietly measures the index. The double used to accept "" and answer as
+// though it were a real range, which is why no test caught a fallback that
+// passed "" on every first push.
+func (g *fakeGit) DiffStats(base string) (domain.DiffStats, error) {
+	g.diffBases = append(g.diffBases, base)
+	if base == "" {
+		return domain.DiffStats{}, errors.New("diff stats: empty base")
+	}
+	return domain.DiffStats{FilesTouched: 1, LinesChanged: 2, Paths: []string{"web/app.ts"}}, nil
+}
+
+// DefaultBranchRef is the remote's default head; "" with an error models a repo
+// that has none (a fresh clone with no origin/HEAD).
+func (g *fakeGit) DefaultBranchRef(string) (string, error) {
+	return g.defaultBranchRef, g.defaultBranchErr
+}
+
+func (g *fakeGit) EmptyTree() (string, error) {
+	if g.emptyTree == "" {
+		return "4b825dc642cb6eb9a060e54bf8d69288fbee4904", nil
+	}
+	return g.emptyTree, nil
 }
 func (g *fakeGit) StagedDiffStats() (domain.DiffStats, error)  { return domain.DiffStats{}, nil }
 func (g *fakeGit) SeedWorktreeFromHead(bool) (Worktree, error) { return g.wt, nil }
@@ -476,16 +521,91 @@ func TestRunner_ErrorPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("merge-base error falls back to empty base", func(t *testing.T) {
+	t.Run("no resolvable base at all falls back to the empty tree", func(t *testing.T) {
+		// A repo whose first branch is also its first push: nothing to compare
+		// against, so the honest base is the empty tree, which makes the range
+		// mean "everything on HEAD". It must not fail the run.
 		g, k := base()
-		g.mergeBaseErr = context.Canceled // no upstream; must not fail the run
+		g.mergeBaseErr = context.Canceled
+		g.defaultBranchErr = context.Canceled
 		r := newRunner(t, g, k, fakeApprover{approve: true}, prePushCfg())
 		res, err := r.Run(context.Background(), domain.PrePush)
 		if err != nil {
-			t.Fatalf("merge-base error should be tolerated, got %v", err)
+			t.Fatalf("an unresolvable base should be tolerated, got %v", err)
 		}
 		if res.Outcome != domain.OutcomePassed {
 			t.Errorf("outcome = %s, want passed", res.Outcome)
+		}
+		for _, b := range g.diffBases {
+			if b == "" {
+				t.Fatal("DiffStats called with an empty base: that measures the index, not a range")
+			}
+		}
+	})
+
+	t.Run("a first push diffs against the integration point, not the index", func(t *testing.T) {
+		// THE REGRESSION. With no upstream, diffForRisk used to pass "" to
+		// DiffStats, which selected `git diff --cached` — the staged index,
+		// empty at pre-push because everything is already committed. The run
+		// then saw FilesTouched: 0 and Paths: nil, so no path rule could match
+		// and risk read low at any size. In a PR workflow a branch is usually
+		// pushed once, so the first push is the only push.
+		g, k := base()
+		g.branch = "feature/x"
+		// The branch's own remote ref does not exist yet; origin/main does.
+		g.mergeBaseErrFor = map[string]error{"origin/feature/x": context.Canceled}
+		g.defaultBranchRef = "origin/main"
+
+		r := newRunner(t, g, k, fakeApprover{approve: true}, prePushCfg())
+		if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+
+		if len(g.diffBases) != 1 || g.diffBases[0] == "" {
+			t.Fatalf("DiffStats bases = %q, want exactly one non-empty base", g.diffBases)
+		}
+		// Having failed on its own ref, it must have asked about the
+		// integration point rather than giving up.
+		var askedIntegration bool
+		for _, ref := range g.mergeBaseRefs {
+			if ref == "origin/main" {
+				askedIntegration = true
+			}
+		}
+		if !askedIntegration {
+			t.Errorf("merge-base refs = %q, want origin/main among them", g.mergeBaseRefs)
+		}
+	})
+
+	t.Run("a configured PR base wins over the remote default head", func(t *testing.T) {
+		// When the repo says where PRs from here go, that is the integration
+		// point — it is more specific than origin/HEAD, and rebase.go already
+		// orders the same two the same way.
+		g, k := base()
+		g.branch = "feature/y"
+		g.mergeBaseErrFor = map[string]error{"origin/feature/y": context.Canceled}
+		g.defaultBranchRef = "origin/main"
+
+		cfg := prePushCfg()
+		cfg.PR.Base = "develop"
+		r := newRunner(t, g, k, fakeApprover{approve: true}, cfg)
+		if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+
+		for _, ref := range g.mergeBaseRefs {
+			if ref == "origin/main" {
+				t.Errorf("asked origin/main though pr.base is develop: %q", g.mergeBaseRefs)
+			}
+		}
+		var askedPRBase bool
+		for _, ref := range g.mergeBaseRefs {
+			if ref == "origin/develop" {
+				askedPRBase = true
+			}
+		}
+		if !askedPRBase {
+			t.Errorf("merge-base refs = %q, want origin/develop among them", g.mergeBaseRefs)
 		}
 	})
 }

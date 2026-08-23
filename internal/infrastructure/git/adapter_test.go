@@ -42,8 +42,14 @@ func TestAdapter(t *testing.T) {
 	if stats, err := a.StagedDiffStats(); err != nil || stats.FilesTouched != 1 {
 		t.Errorf("StagedDiffStats() = (%+v, %v), want 1 file", stats, err)
 	}
-	if stats, err := a.DiffStats(""); err != nil || stats.FilesTouched != 1 {
-		t.Errorf("DiffStats(\"\") = (%+v, %v), want 1 file", stats, err)
+	// An empty base is an error, not "the index" — StagedDiffStats above is
+	// the index, and conflating the two is what silently emptied the path set
+	// on every first push.
+	if _, err := a.DiffStats(""); err == nil {
+		t.Error("DiffStats(\"\") = nil error, want a refusal")
+	}
+	if empty, err := a.EmptyTree(); err != nil || empty == "" {
+		t.Errorf("EmptyTree() = (%q, %v), want an object id", empty, err)
 	}
 }
 

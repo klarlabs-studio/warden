@@ -27,8 +27,17 @@ type Git interface {
 	// used as the diff base for risk. Empty ref falls back to HEAD's parent.
 	MergeBase(ref string) (string, error)
 	// DiffStats summarizes base..HEAD; StagedDiffStats summarizes the index.
+	// An empty base is an ERROR, not a mode — the index is StagedDiffStats.
+	// See Repo.DiffStats for what that overload cost.
 	DiffStats(base string) (domain.DiffStats, error)
 	StagedDiffStats() (domain.DiffStats, error)
+	// DefaultBranchRef is the remote's default head ("origin/main"): the
+	// integration point, and the only sensible diff base for a branch that has
+	// no upstream of its own yet.
+	DefaultBranchRef(remote string) (string, error)
+	// EmptyTree is the base that makes base..HEAD mean "everything on this
+	// branch", for the repo that has no default head to compare against either.
+	EmptyTree() (string, error)
 
 	// SeedWorktreeFrom* build the disposable worktree. materializeDeps hardlink-
 	// copies gitignored dependency dirs (node_modules) into it as real files

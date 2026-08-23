@@ -143,7 +143,7 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 		return RunResult{}, fmt.Errorf("current branch: %w", err)
 	}
 
-	diff, err := r.diffForRisk(hook, branch)
+	diff, err := r.diffForRisk(hook, branch, cfg.PR.Base)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -178,17 +178,69 @@ func (r *Runner) buildCacheDir() string {
 
 // diffForRisk computes the diff stats that drive risk and path matching: the
 // staged index for pre-commit, else HEAD against its merge-base with origin.
-func (r *Runner) diffForRisk(hook domain.Hook, branch string) (domain.DiffStats, error) {
+//
+// The no-upstream fallback used to be `base = ""`, described as "diffing
+// against the empty base so a first push still gets sensible stats". It did the
+// opposite. An empty base selected `git diff --cached --numstat` — the staged
+// INDEX — and at pre-push the index is empty, because everything is already
+// committed. So the FIRST push of a branch, the one case that fallback existed
+// to serve, reported FilesTouched: 0, LinesChanged: 0, Paths: nil.
+//
+// Two things fail on that, both in silence. No path rule can match an empty
+// path set, so every `add:` step is skipped and the push passes looking exactly
+// like one that ran them. And Classify reads the same zeroes, so a first push
+// is RiskLow however large it is, and an approval gated on high risk never
+// fires. In a PR workflow a branch is usually pushed once, so this is the
+// common case rather than an edge.
+//
+// The fallback now resolves a real base, in the order rebase.go already uses
+// for the same question (resolveIntegrationBase): where a PR from here would
+// go, then the remote's default head. Both name the INTEGRATION point, which is
+// what a branch with no upstream should be measured against. The empty tree is
+// the last resort — the first branch of a repo with no remote head at all,
+// where "everything on HEAD" is the honest answer.
+func (r *Runner) diffForRisk(hook domain.Hook, branch, prBase string) (domain.DiffStats, error) {
 	if hook == domain.PreCommit {
 		return r.Git.StagedDiffStats()
 	}
 	base, err := r.Git.MergeBase(r.Settings.Remote + "/" + branch)
 	if err != nil {
-		// No upstream yet: fall back to diffing against the empty base so a
-		// first push still gets sensible stats.
-		base = ""
+		base, err = r.firstPushBase(prBase)
+		if err != nil {
+			return domain.DiffStats{}, err
+		}
 	}
 	return r.Git.DiffStats(base)
+}
+
+// firstPushBase resolves what to diff against when a branch has no upstream.
+//
+// It never returns "" with a nil error. An unresolvable base has to fail
+// loudly, because the alternative — the one this replaces — is an empty path
+// set that quietly disables every path rule in the policy.
+func (r *Runner) firstPushBase(prBase string) (string, error) {
+	remote := r.Settings.Remote
+	if remote == "" {
+		remote = "origin"
+	}
+
+	// 1. The repo said where PRs from here go; that is the integration point.
+	if prBase = strings.TrimSpace(prBase); prBase != "" {
+		if base, err := r.Git.MergeBase(remote + "/" + prBase); err == nil && base != "" {
+			return base, nil
+		}
+	}
+	// 2. The remote's default head, e.g. origin/HEAD -> origin/main.
+	if ref, err := r.Git.DefaultBranchRef(remote); err == nil {
+		if ref = strings.TrimSpace(ref); ref != "" {
+			if base, err := r.Git.MergeBase(ref); err == nil && base != "" {
+				return base, nil
+			}
+		}
+	}
+	// 3. No integration point exists — the first branch of a fresh repo. The
+	//    empty tree makes base..HEAD mean everything on it.
+	return r.Git.EmptyTree()
 }
 
 // runPreCommit runs the fast local subset in a worktree seeded from HEAD plus

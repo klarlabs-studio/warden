@@ -183,20 +183,44 @@ func (r *Repo) MergeBase(ref string) (string, error) {
 }
 
 // DiffStats computes files touched, lines changed, and touched paths for the
-// range base..HEAD, or the staged changes when base is empty. It parses
-// --numstat so additions and deletions are summed exactly as git counts them.
+// range base..HEAD. It parses --numstat so additions and deletions are summed
+// exactly as git counts them.
+//
+// An empty base is an ERROR, not a mode. It used to select
+// `git diff --cached --numstat` — the staged index — which made "" mean two
+// incompatible things at a single call site: the caller that could not resolve
+// a base passed "" to say so, and got the index measured instead. At pre-push
+// the index is empty, because everything is already committed. So the run saw
+// zero files touched, no path rule could match, and risk read as low at any
+// size — silently, behind a passing gate.
+//
+// Nothing legitimately wants the index through here: StagedPaths is that, and
+// is what StagedDiffStats calls. So the mode is removed rather than repaired,
+// and a caller without a base must now say which base it means.
 func (r *Repo) DiffStats(base string) (domain.DiffStats, error) {
-	var out string
-	var err error
 	if base == "" {
-		out, err = r.run("diff", "--cached", "--numstat")
-	} else {
-		out, err = r.run("diff", "--numstat", base+"..HEAD")
+		return domain.DiffStats{}, errors.New("diff stats: empty base; pass a ref, or use StagedPaths for the index")
 	}
+	out, err := r.run("diff", "--numstat", base+"..HEAD")
 	if err != nil {
 		return domain.DiffStats{}, err
 	}
 	return parseNumstat(out), nil
+}
+
+// DefaultBranchRef is the remote's default head, e.g. "origin/main". It names
+// the point a branch integrates INTO, which is the only sensible diff base for
+// a branch that has no upstream of its own yet.
+func (r *Repo) DefaultBranchRef(remote string) (string, error) {
+	return r.run("rev-parse", "--abbrev-ref", remote+"/HEAD")
+}
+
+// EmptyTree is this repository's empty-tree object — the base that makes
+// `base..HEAD` mean "everything on this branch". Computed rather than
+// hard-coded, because the well-known 4b825dc… is the SHA-1 value and a
+// sha256-format repository has a different one.
+func (r *Repo) EmptyTree() (string, error) {
+	return r.run("hash-object", "-t", "tree", os.DevNull)
 }
 
 // StagedPaths returns the paths with staged changes. It reports the same
