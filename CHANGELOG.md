@@ -6,6 +6,70 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`warden evidence --approvals` no longer reports a forge it could not read
+  as a forge with no pull requests.** A non-zero `gh` exit was folded into "no
+  pull request", conflating *the forge has no PR for this commit* with *warden
+  could not look*, and `Available()` only checked that `gh` was on `PATH`. With
+  a valid `gh` but no working credential, the same ten commits that report
+  "merged through a pull request nobody approved" instead reported "not
+  associated with a pull request" — exit 0, nothing on stderr, and a signed
+  evidence document asserting that ten changes bypassed review entirely. Every
+  one of them had gone through a pull request.
+
+  Three changes. A preflight (`Reachable`) proves the repository is actually
+  readable before anything is written; when it fails the run exits 2 naming
+  gh's own cause and produces no document, because an evidence artifact that is
+  silently wrong is worse than none. Per-commit outcomes are now read from the
+  HTTP status rather than the exit code, so a genuine 404 stays the real
+  finding it is. And what the preflight cannot cover — a rate limit partway
+  through a long run — becomes an explicit **undetermined** state that outranks
+  the other four, gets its own row, and is excluded from the approval
+  population, so the report says "these counts describe 7 changes, not 10"
+  rather than quietly answering for three it never read.
+
+  This is the defect this project is named for: warden asserting more than its
+  evidence supports. It is worth recording that it reached a compliance
+  surface.
+
+- **The evidence document identifies the repository, not the machine that
+  produced it.** The header, the JSON `repository` field and the OSCAL title
+  all carried `os.Getwd()` — an absolute local path, which two clones of one
+  repository disagree about, an auditor cannot resolve, and which puts the
+  producer's home directory in a document that leaves the organization. It now
+  uses the `origin` remote, the same identity `warden attest` already used, and
+  a repository with no remote says so instead of naming a path. The evidence
+  digest never covered this field and still does not, so it stays reproducible
+  across clones.
+
+- **A hook preflight that timed out no longer reports the binary as corrupt.**
+  The shim time-boxes a `warden --version` call so a binary that cannot start
+  fails fast instead of wedging every commit. But it treated *any* non-zero
+  result as proof the binary was broken, and told the developer to strip a
+  Gatekeeper quarantine or reinstall — so a machine merely busy enough to blow
+  the 15s budget sent someone to fix something that was never wrong. It now
+  distinguishes the timeout convention (124) from a genuine failure to run and
+  names what actually happened. Both still fail closed; they no longer share a
+  cause.
+
+  Found because it was also failing warden's own test suite (#228): the two
+  shim tests execute the shim end to end, so under a full gate run — race
+  suite, lint and scanner competing for one machine — they were asserting on
+  wall clock they did not control, taking 60s where they take 0.3s alone. The
+  15s budget is a real product decision for a git hook and was not widened to
+  suit them; the tests now bypass the timeout wrapper instead.
+
+- **A signed VSA no longer carries the remote's credential.** `normalizeRemote`
+  passed any URL-form remote through untouched, so a CI checkout's
+  `https://x-access-token:<token>@…` origin — or the equally valid bare
+  `https://<token>@…` form — reached `resourceUri` and the policy URI verbatim,
+  and `--sign` then signed it into an envelope built to be handed to somebody
+  else. All userinfo is now stripped: the credential is as often the username
+  as the password, and these URIs identify a repository rather than being clone
+  commands, so they lose nothing by it. `warden evidence` makes the same call;
+  the two artifacts must not disagree about what is safe to publish.
+
 ## [0.29.2] - 2026-08-22
 
 Evidence someone other than its author can use: the approval half of change
@@ -28,22 +92,6 @@ management, and an audit that no longer depends on the machine that ran
   leaving an auditor to find out.
 
   Opt-in — one forge call per commit.
-
-### Fixed
-
-- **An audit no longer needs the machine that ran `warden init`.** The adoption
-  point is written to `.git/warden/adoption` — local, untracked, per-clone
-  state — so a fresh clone got "warden was never initialized in this repo" and
-  no report at all. Tolerable for `warden doctor`; fatal for `warden evidence`,
-  where an artifact only one laptop can produce is not evidence, because the
-  person checking it cannot reproduce it. Six of eight repositories in one
-  fleet were in exactly that state.
-
-  When the file is absent, the adoption point is now derived from
-  `refs/notes/warden`, which is shared: the parent of the earliest noted commit
-  on the branch — the point at which the gate demonstrably began operating.
-  Same population, same digest, on any clone. A repository with no notes at all
-  says nothing has been gated rather than inventing a start date.
 
 ### Fixed
 
@@ -129,6 +177,25 @@ the case where the forge itself is the thing that stopped working.
   nothing. A forge that refuses the status produces a warning, never a rollback
   — the push has already happened by then. See
   [docs/status-without-ci.md](docs/status-without-ci.md).
+
+- **`warden attest --sign`: the claim survives being carried.** `warden attest`
+  emitted a bare statement, and in practice whatever carried that statement
+  onward did the signing — so a build platform attaching warden's verdict to a
+  container image produced an envelope signed by the build platform, leaving a
+  consumer able to conclude only "the builder says warden said this". Which is
+  not what warden said.
+
+  `--sign` emits a DSSE envelope signed with the same key that signs notes, so
+  one trust decision — the `trusted_keys` roster in `.warden.yaml` — governs
+  both. The envelope names the signing fingerprint as its `keyid`, so a verifier
+  holding a roster selects the right key rather than trying each in turn, and
+  DSSE's PAE binds the payload type and each field's length into what is signed
+  rather than the payload alone — without it, identical bytes could be
+  re-presented under a different media type and still verify. Signing with no
+  key available is an error rather than an unsigned envelope: a caller who asked
+  for a signature and silently got none would ship something nobody can verify.
+
+  (#215. Shipped in 0.29.0; these notes omitted it until 2026-08-23.)
 
 ### Changed
 
@@ -1431,68 +1498,6 @@ rotated Homebrew tap credential end to end after 0.19.0 shipped with a 401 and
 
 ## [0.19.0] — 2026-07-25
 
-### Changed
-
-- **A successful pre-push now exits 0.** Warden performs the push itself and
-  used to fail the hook on purpose, so every successful push ended on
-  `error: failed to push some refs` and a non-zero status — automation read
-  success as failure, and warden had to print a disclaimer telling people to
-  ignore the next line, training them to ignore `error:` from a gate. When
-  nothing rewrote the branch and no force is needed, the push git already has
-  queued *is* warden's push, so warden now stands aside and lets git report the
-  real outcome. It still pushes itself (and still exits non-zero, with the
-  disclaimer) when a step rewrote the branch — git would otherwise publish the
-  unvalidated pre-fix commit — or when a force is needed, or when a PR is to be
-  opened. **If you script `warden run pre-push` or the hook's exit status, this
-  is a contract change.** Closes #89.
-- **`rebase` targets the branch's integration base, not its own remote ref.**
-  It rebased onto `@{upstream}`, which is right until the branch is rewritten:
-  after a local rebase onto an updated `main` — the standard way to satisfy
-  "head branch is not up to date with the base branch" — `origin/<branch>` still
-  holds the commit just replaced, so `origin/<branch>..HEAD` contains *main's*
-  commits and the step replayed main onto the superseded tip, failing on main's
-  own conflicts and refusing a push that was never wrong. It now resolves
-  `pr.base` → the remote's default head → an `@{upstream}` pointing elsewhere,
-  and never the branch's own ref. Note this also means the step *runs* on a real
-  pre-push for the first time: warden seeds a detached worktree, where
-  `@{upstream}` never resolved, so it had been reporting "no upstream, skipped"
-  throughout. Closes #102.
-
-### Fixed
-
-- **Security: a range gate read its trust roster from the head it was checking.**
-  `warden verify --range` resolved `trusted_keys` from the working tree — the PR
-  head under gate — so a change could add its own key to `.warden.yaml` and
-  self-certify. The roster is now resolved from the range's **base** ref (the
-  trusted side) and a malformed base roster fails closed. Separately,
-  `reattest` carried provenance from any self-verifying note, letting an
-  untrusted note pushed for a tree-identical commit be laundered into a
-  locally-trusted re-attestation; the source must now also be signed by a
-  trusted key.
-- **Security: two known CVEs in indirect dependencies.** `google.golang.org/grpc`
-  → v1.82.1 (GHSA-hrxh-6v49-42gf, high) and `golang.org/x/text` → v0.39.0
-  (GO-2026-5970, flagged reachable).
-- **`warden reattest --push` publishes even when it writes nothing.** The push
-  was gated on *this* invocation having written a note, so the obvious two-step
-  workflow — sweep, inspect, then publish — left every note local while the
-  command reported success. Found by using it: 19 notes stayed local and the
-  remote notes ref sat 20 commits behind. `--push` now means "make the remote
-  match". The single-commit form had the same trap on its already-noted path.
-- **A gated push no longer deletes a colleague's commits.** With
-  `push.force: lease`, warden force-pushed whenever the remote tip was not an
-  ancestor of the local branch — a test that cannot tell "I rebased my own
-  commits" from "someone else pushed to this shared branch". The second case
-  silently destroyed their work, and `--force-with-lease` did not catch it: the
-  lease only asserts the remote has not moved since your last fetch, so once you
-  have fetched their commit the lease is satisfied and the push deletes it.
-  Reproduced against a real remote — a colleague's commit and its file vanished
-  from the branch with no warning. Warden now compares patch-ids (`git cherry`)
-  before forcing and refuses when the remote carries work with no equivalent in
-  your history, naming the commits at risk and pointing at `git pull --rebase`.
-  A branch rebased onto an updated base still publishes exactly as before: the
-  remote holds only your own pre-rewrite commits, which are patch-equivalent, so
-  nothing is at risk. An unreadable comparison refuses rather than guesses.
-
 ### Added
 
 - **A provenance note covers the span its push published, not just the tip.** A
@@ -1583,6 +1588,32 @@ rotated Homebrew tap credential end to end after 0.19.0 shipped with a 401 and
 
 ### Changed
 
+- **A successful pre-push now exits 0.** Warden performs the push itself and
+  used to fail the hook on purpose, so every successful push ended on
+  `error: failed to push some refs` and a non-zero status — automation read
+  success as failure, and warden had to print a disclaimer telling people to
+  ignore the next line, training them to ignore `error:` from a gate. When
+  nothing rewrote the branch and no force is needed, the push git already has
+  queued *is* warden's push, so warden now stands aside and lets git report the
+  real outcome. It still pushes itself (and still exits non-zero, with the
+  disclaimer) when a step rewrote the branch — git would otherwise publish the
+  unvalidated pre-fix commit — or when a force is needed, or when a PR is to be
+  opened. **If you script `warden run pre-push` or the hook's exit status, this
+  is a contract change.** Closes #89.
+- **`rebase` targets the branch's integration base, not its own remote ref.**
+  It rebased onto `@{upstream}`, which is right until the branch is rewritten:
+  after a local rebase onto an updated `main` — the standard way to satisfy
+  "head branch is not up to date with the base branch" — `origin/<branch>` still
+  holds the commit just replaced, so `origin/<branch>..HEAD` contains *main's*
+  commits and the step replayed main onto the superseded tip, failing on main's
+  own conflicts and refusing a push that was never wrong. It now resolves
+  `pr.base` → the remote's default head → an `@{upstream}` pointing elsewhere,
+  and never the branch's own ref. Note this also means the step *runs* on a real
+  pre-push for the first time: warden seeds a detached worktree, where
+  `@{upstream}` never resolved, so it had been reporting "no upstream, skipped"
+  throughout. Closes #102.
+
+
 - The base scan is cached per base commit under the repo's git dir, so a repo
   with a standing backlog does not pay for re-scanning an unchanged base on every
   push. Any command whose report warden cannot read (`make audit`, `npm audit`, a
@@ -1592,6 +1623,40 @@ rotated Homebrew tap credential end to end after 0.19.0 shipped with a 401 and
   failing, never toward passing.
 
 ### Fixed
+
+- **Security: a range gate read its trust roster from the head it was checking.**
+  `warden verify --range` resolved `trusted_keys` from the working tree — the PR
+  head under gate — so a change could add its own key to `.warden.yaml` and
+  self-certify. The roster is now resolved from the range's **base** ref (the
+  trusted side) and a malformed base roster fails closed. Separately,
+  `reattest` carried provenance from any self-verifying note, letting an
+  untrusted note pushed for a tree-identical commit be laundered into a
+  locally-trusted re-attestation; the source must now also be signed by a
+  trusted key.
+- **Security: two known CVEs in indirect dependencies.** `google.golang.org/grpc`
+  → v1.82.1 (GHSA-hrxh-6v49-42gf, high) and `golang.org/x/text` → v0.39.0
+  (GO-2026-5970, flagged reachable).
+- **`warden reattest --push` publishes even when it writes nothing.** The push
+  was gated on *this* invocation having written a note, so the obvious two-step
+  workflow — sweep, inspect, then publish — left every note local while the
+  command reported success. Found by using it: 19 notes stayed local and the
+  remote notes ref sat 20 commits behind. `--push` now means "make the remote
+  match". The single-commit form had the same trap on its already-noted path.
+- **A gated push no longer deletes a colleague's commits.** With
+  `push.force: lease`, warden force-pushed whenever the remote tip was not an
+  ancestor of the local branch — a test that cannot tell "I rebased my own
+  commits" from "someone else pushed to this shared branch". The second case
+  silently destroyed their work, and `--force-with-lease` did not catch it: the
+  lease only asserts the remote has not moved since your last fetch, so once you
+  have fetched their commit the lease is satisfied and the push deletes it.
+  Reproduced against a real remote — a colleague's commit and its file vanished
+  from the branch with no warning. Warden now compares patch-ids (`git cherry`)
+  before forcing and refuses when the remote carries work with no equivalent in
+  your history, naming the commits at risk and pointing at `git pull --rebase`.
+  A branch rebased onto an updated base still publishes exactly as before: the
+  remote holds only your own pre-rewrite commits, which are patch-equivalent, so
+  nothing is at risk. An unreadable comparison refuses rather than guesses.
+
 
 - **A step that never ran is no longer reported as a step that failed.** The
   step-level message was fixed in v0.17.0, but the run's own verdict still read
@@ -1817,6 +1882,14 @@ into the gap beyond release plumbing.
 
 ## [0.12.0] — 2026-07-05
 
+### Added
+
+- **Internal: per-step worktree isolation (ADR-0001 Phase 3, part 1).** Steps in a
+  parallel batch now each run in their own ephemeral worktree cloned from the
+  canonical one, so a step's writes can't race a sibling; the clones are torn down
+  after the batch (side-effects discarded). No scheduling change yet — this is the
+  foundation for letting finding-producing agents parallelize.
+
 ### Changed
 
 - **Coding-agent steps (`review`, `document`, `intent`) run in parallel again —
@@ -1828,15 +1901,6 @@ into the gap beyond release plumbing.
   auto-fix budget or declare it under `writes:`. This also correctly scopes the
   pre-commit auto-fix capture to those barrier steps. Completes ADR-0001 Phase 3.
 
-### Added
-
-- **Internal: per-step worktree isolation (ADR-0001 Phase 3, part 1).** Steps in a
-  parallel batch now each run in their own ephemeral worktree cloned from the
-  canonical one, so a step's writes can't race a sibling; the clones are torn down
-  after the batch (side-effects discarded). No scheduling change yet — this is the
-  foundation for letting finding-producing agents parallelize.
-
-### Changed
 
 - **Internal: one source of truth for "does a step write the tree."**
   `ResolvedPolicy.WritesTree` now backs both the parallel-batch scheduler
