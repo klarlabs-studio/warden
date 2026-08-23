@@ -113,6 +113,9 @@ jobs:
         run: bash .github/actions/install-warden.sh
         env:
           WARDEN_VERSION: latest
+          # See the note in .github/actions/*/action.yml: resolving "latest"
+          # unauthenticated shares a 60/hr limit across runners.
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Fetch existing notes
         run: git fetch origin 'refs/notes/warden:refs/notes/warden' || true
