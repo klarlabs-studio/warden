@@ -24,9 +24,27 @@ if [ -z "$ver" ] || [ "$ver" = "latest" ]; then
   # ${a[@]+"${a[@]}"} so an EMPTY array does not trip `set -u` on bash < 4.4
   # (macOS ships 3.2); runners have bash 5, but this script should not be
   # quietly unrunnable anywhere someone tries it by hand.
-  ver=$(curl -fsSL ${auth[@]+"${auth[@]}"} "https://api.github.com/repos/${repo}/releases/latest" |
+  # `set -e` used to kill the script here on a non-2xx, so a rate-limited
+  # resolve surfaced as a bare `curl: (22) ... 403` and exit 22 — which, on a
+  # REQUIRED provenance gate, reads as "warden refused this change" rather than
+  # "warden never ran". Capture the status and say which one happened.
+  api_status=0
+  api_body=$(curl -fsSL ${auth[@]+"${auth[@]}"} \
+    "https://api.github.com/repos/${repo}/releases/latest") || api_status=$?
+  if [ "$api_status" -ne 0 ]; then
+    echo "warden: could not reach the GitHub API to resolve the latest release (curl exit ${api_status})." >&2
+    if [ -z "${GITHUB_TOKEN:-}" ]; then
+      echo "warden: no GITHUB_TOKEN was set, so this request was unauthenticated — 60/hr shared" >&2
+      echo "warden: across every runner on this egress IP. Pass GITHUB_TOKEN: \${{ github.token }}." >&2
+    else
+      echo "warden: retry, or pin an exact version with warden-version to skip this lookup." >&2
+    fi
+    echo "warden: NOTHING WAS VERIFIED — this is an install failure, not a provenance verdict." >&2
+    exit 1
+  fi
+  ver=$(printf '%s' "$api_body" |
     sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n1)
-  [ -n "$ver" ] || { echo "warden: could not resolve the latest release tag" >&2; exit 1; }
+  [ -n "$ver" ] || { echo "warden: the GitHub API answered but named no release tag" >&2; exit 1; }
 fi
 
 # $ver is interpolated straight into the download URL below, so constrain it to
