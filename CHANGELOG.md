@@ -6,6 +6,29 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The npm channel could miss a release the other channels shipped.** 0.30.1
+  published binaries, checksums, SBOMs and the Homebrew tap, and did not publish
+  to npm — `npx @klarlabs-studio/warden` stayed on 0.30.0 while every other
+  channel moved. The release run reported failure; the release itself existed,
+  so nothing downstream noticed.
+
+  The npm job built its binaries with `go run
+  github.com/goreleaser/goreleaser/v2@latest`, which is two faults in one line.
+  Unpinned, so the release toolchain can change under a tag that was already
+  tested; and built FROM SOURCE, which binds the release to goreleaser's own Go
+  floor. That floor moved to 1.27, warden targets 1.26, `setup-go` pins
+  `GOTOOLCHAIN=local`, and the job died before it built anything:
+
+      goreleaser/v2@v2.18.0 requires go >= 1.27.0 (running go 1.26.6)
+
+  It now uses the same pinned `goreleaser-action` the sibling job has always
+  used — the action ships a goreleaser binary, so publishing no longer depends
+  on the runner's Go being new enough to compile one. `provenance-main.yml`
+  already carried the same fix for the same failure with nox; the release
+  workflow never got it.
+
 ## [0.30.1] - 2026-08-24
 
 One diagnosis, reported about warden's own trunk, that named a cause which had
