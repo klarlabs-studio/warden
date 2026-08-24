@@ -104,8 +104,21 @@ jobs:
           package-manager-cache: false
       - name: Report toolchain
         run: echo "node $(node -v) / npm $(npm -v)"
-      - name: Build binaries
-        run: go run github.com/goreleaser/goreleaser/v2@latest build --clean --snapshot=false
+      # The SAME pinned action the goreleaser job uses, for the same reason it
+      # uses it: the action ships a goreleaser binary, so the release does not
+      # depend on the runner's Go being new enough to COMPILE goreleaser.
+      #
+      # This step used to be `go run github.com/goreleaser/goreleaser/v2@latest`.
+      # Two faults in one line. `@latest` is unpinned, so the release toolchain
+      # could change under a tag that had already been tested. And building it
+      # from source binds the release to goreleaser's Go floor: on v0.30.1 that
+      # floor moved to 1.27, warden targets 1.26, setup-go pins GOTOOLCHAIN=local
+      # — and the npm channel silently did not publish while every other channel
+      # did. AGENTS.md already records this shape from the nox install step.
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: "~> v2"
+          args: build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
       # npm trusted publishing (OIDC). registry-url (above) is what makes the npm
