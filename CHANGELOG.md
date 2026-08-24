@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-08-24
+
+One diagnosis, reported about warden's own trunk, that named a cause which had
+not occurred — and a report that now says which of its exceptions can never be
+closed.
+
 ### Fixed
 
 - **A note that names no commit is no longer reported as one naming a different
