@@ -363,9 +363,17 @@ or an **org rolling warden across many repos** (where the roster + `extends:`
 inheritance earns its keep). It is often *too much* for a **solo or small repo**
 that already has branch protection (required signatures, required CI checks):
 the marginal security is small, and a required trusted-signed gate blocks
-**Dependabot/Renovate** (no warden note), **web-UI edits**, and any machine whose
-key isn't in the roster — so you end up reaching for the admin override, and a
-check you routinely override isn't really enforcing.
+**web-UI edits** and any machine whose key isn't in the roster — so you end up
+reaching for the admin override, and a check you routinely override isn't really
+enforcing.
+
+> **Since 0.30.0, bot commits are no longer part of that problem.** A commit the
+> forge authored — a squash merge, a web edit, a Dependabot or nox remediation
+> commit — is recognised as such and, with `forge: {accept_authored: true}`,
+> accepted on the strength of the forge's own signature rather than a note it
+> could never have. See [Commits the forge made](../README.md#commits-the-forge-made-forgeaccept_authored).
+> It is off by default and reported apart from the verified count, because it
+> asserts strictly less.
 
 **Advisory** (run the workflow, but don't add `gate` to branch protection's
 required checks) keeps the visibility and the trusted-signed signal without the
@@ -396,10 +404,15 @@ and the friction is acceptable.
 - **Don't stand up a bot/CI signing key.** A key in a CI secret that can mint
   *trusted* provenance moves the trust boundary from "a human ran warden on their
   machine" to "anything that can trigger CI or read the secret" — a much larger
-  attack surface that dilutes exactly what the gate asserts. For automation like
-  Dependabot under a required gate, prefer re-pushing the bot's branch **through
-  warden locally** (warden validates and signs it with *your* trusted key), or
-  run the gate advisory. Keep the trust boundary at a human.
+  attack surface that dilutes exactly what the gate asserts. Keep the trust
+  boundary at a human.
+
+  For automation under a required gate, `forge: {accept_authored: true}` (0.30.0)
+  is the answer that does not move that boundary: it accepts the FORGE's own
+  signature for commits the forge made, and nothing else — no key warden holds,
+  nothing a CI job can mint. Re-pushing the bot's branch **through warden
+  locally** remains the alternative if you would rather every commit on the
+  branch carry a real note.
 
 ## Gate vs. skip
 
