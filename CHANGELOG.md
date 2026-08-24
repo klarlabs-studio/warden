@@ -6,6 +6,25 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-08-24
+
+Ships what 0.30.1 could not: the npm channel, and binaries built against a
+patched standard library.
+
+### Security
+
+- **Built with a patched Go toolchain.** warden pinned `toolchain go1.26.4`, and
+  govulncheck reported REACHABLE call paths from warden's own code into that
+  toolchain's standard library — `GO-2026-6218` (net/url), `GO-2026-6090`
+  (crypto/tls) and `GO-2026-5972` (encoding/asn1). Now `go1.26.7`; verified
+  before and after under the resolution CI performs, 4 reachable
+  vulnerabilities and exit 3 becoming none and exit 0.
+
+  The `go` directive is untouched, so nothing importing warden has its floor
+  raised. A stale toolchain line is worse than a missing one: the file looks
+  like somebody already considered it, and nothing re-checks when a patch lands.
+  (#242)
+
 ### Fixed
 
 - **The npm channel could miss a release the other channels shipped.** 0.30.1
