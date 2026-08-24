@@ -318,6 +318,61 @@ Because it's part of the signed, hash-chained record, a validated commit ships a
 tamper-evident, signed fingerprint of exactly which dependency sets it had —
 shown by `warden why`.
 
+### Commits the forge made (`forge.accept_authored`)
+
+Warden's gate is a **client-side pre-push hook**. A commit the *forge* creates —
+a squash merge, a web-UI edit, a Dependabot or nox remediation commit — was
+never on a machine where warden could run, so it can carry no note. Under a
+**required** gate it can therefore never pass, and a repository ends up either
+not merging bot pull requests or reaching for the admin override. A check you
+routinely override is not enforcing anything.
+
+Since 0.30.0 warden reports that case as what it is rather than as a bypass:
+
+```
+✗ 6c17007b897e — authored by the forge (squash merge, web edit, or a bot),
+  signed by its key — no developer machine was in this commit's path
+```
+
+That much is unconditional, and the commit still **fails**. Naming a cause is
+not permission to ignore it. To let such commits through, opt in:
+
+```yaml
+forge:
+  accept_authored: true
+  # keys: [...]   # defaults to GitHub's published web-flow fingerprints
+```
+
+**What makes this safe is the signal it uses.** The obvious one — committer
+`GitHub <noreply@github.com>` — is free text that anyone sets with a single
+flag, so a gate reading it would enforce nothing. GitHub *signs* the commits it
+creates, so warden instead requires a signature **git can verify** against a
+pinned **full fingerprint**. The 64-bit key id is never matched on: it travels
+inside the signature packet, which is to say it comes from the same place as the
+thing being checked.
+
+A developer's `--no-verify` push carries their key or none, so it cannot reach
+this path.
+
+Three properties worth knowing before you enable it:
+
+- **Off by default.** It genuinely lowers what the gate asserts, so it has to be
+  a decision rather than an upgrade's side effect.
+- **Read from the range's BASE ref**, like the trusted-signer roster and for the
+  same reason: a pull request that could switch this on in its own head would be
+  deciding whether it has to be gated at all.
+- **Reported separately.** Accepted commits never merge into the verified count:
+
+  ```
+  verified 12 commit(s) in a1b2c3d..e4f5a6b (trusted-signed)
+    (2 accepted as forge-authored — the forge signed them; warden ran NO checks on them)
+  ```
+
+**GitHub-specific.** A self-hosted GitLab or Gitea may not sign what it creates,
+and there is nothing safe to key on when it does not — such a repository should
+leave the default in place rather than be handed a setting that quietly means
+"trust the committer field".
+
 ### Publishing the verdict when CI can't run
 
 The required check above assumes something on the forge can run `warden verify`.
@@ -601,6 +656,9 @@ risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
 status: { enabled: false }   # default — true publishes the gate verdict as a commit status under `warden/gate`, for repos whose CI cannot run (see below)
+forge: { accept_authored: false }   # default — true lets a range gate pass commits the FORGE made
+                                   # (squash merge, web edit, bot), when a pinned forge key's signature
+                                   # verifies. Reported apart from the verified count (see above)
 agent_trace: { path: "" }   # notarize an Agent Trace record; empty disables it
 signing: { required: false }   # default — true refuses to write an unsigned note instead of warning
 signing: { signer: local, required: false }   # signer: local|ssh; required: true refuses to write an unsigned note — true refuses to write an unsigned note instead of warning
