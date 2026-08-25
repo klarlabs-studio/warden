@@ -383,6 +383,11 @@ type fakeForge struct {
 	reachable error
 	answer    func(sha string) (domain.Approval, error)
 	asked     []string
+	// protection is what the forge says the branch rule is. The zero value is
+	// an UNKNOWN rule, which is the right default for a fake: a test that does
+	// not set it must not accidentally assert that a branch is unprotected.
+	protection    domain.BranchProtection
+	protectionFor []string
 }
 
 func (f *fakeForge) Available() bool                   { return f.available }
@@ -390,6 +395,11 @@ func (f *fakeForge) Reachable(_ context.Context) error { return f.reachable }
 func (f *fakeForge) ApprovalFor(_ context.Context, sha string) (domain.Approval, error) {
 	f.asked = append(f.asked, sha)
 	return f.answer(sha)
+}
+
+func (f *fakeForge) ProtectionFor(_ context.Context, branch string) domain.BranchProtection {
+	f.protectionFor = append(f.protectionFor, branch)
+	return f.protection
 }
 
 func neverAsked(t *testing.T) func(string) (domain.Approval, error) {
@@ -674,5 +684,50 @@ func TestEvidence_DigestIgnoresTheRepositoryLabel(t *testing.T) {
 	b.Repository = "https://github.com/klarlabs-studio/warden.git"
 	if a.Digest() != b.Digest() {
 		t.Error("the repository label leaked into the evidence digest")
+	}
+}
+
+// The rule is fetched for the branch under report, once — not per commit, and
+// not for whatever branch happens to be checked out.
+func TestCollectApprovals_ReadsTheRuleForTheReportedBranchOnce(t *testing.T) {
+	f := &fakeForge{
+		available: true,
+		answer:    func(string) (domain.Approval, error) { return domain.Approval{Found: true, PR: 1, Author: "a"}, nil },
+		protection: domain.BranchProtection{
+			Known: true, Protected: true, RequiredApprovals: 2, EnforceAdmins: true,
+		},
+	}
+	ev := domain.Evidence{Branch: "release-1.x", Population: []domain.CommitStatus{
+		{SHA: "aaa", HasNote: true, ChainIntact: true},
+		{SHA: "bbb", HasNote: true, ChainIntact: true},
+	}}
+
+	got, code := collectApprovals(context.Background(), f, ev, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if len(f.protectionFor) != 1 || f.protectionFor[0] != "release-1.x" {
+		t.Errorf("protection asked for %v, want exactly [release-1.x]", f.protectionFor)
+	}
+	if !got.Protection.RequiresIndependentReview() || !got.Protection.Enforceable() {
+		t.Errorf("the rule did not reach the evidence: %+v", got.Protection)
+	}
+}
+
+// A fake that says nothing about protection must produce an UNKNOWN rule, never
+// an implied "unprotected" — the report has to be able to tell those apart.
+func TestCollectApprovals_UnsetProtectionIsUnknownNotUnprotected(t *testing.T) {
+	f := &fakeForge{
+		available: true,
+		answer:    func(string) (domain.Approval, error) { return domain.Approval{Found: true}, nil },
+	}
+	ev := domain.Evidence{Branch: "main", Population: []domain.CommitStatus{{SHA: "a", HasNote: true, ChainIntact: true}}}
+
+	got, _ := collectApprovals(context.Background(), f, ev, io.Discard)
+	if got.Protection.Known {
+		t.Error("an unset rule must be unknown")
+	}
+	if got.Protection.Protected {
+		t.Error("an unknown rule must not read as protected either")
 	}
 }

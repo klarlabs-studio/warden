@@ -126,6 +126,10 @@ type approvalForge interface {
 	Available() bool
 	Reachable(ctx context.Context) error
 	ApprovalFor(ctx context.Context, sha string) (domain.Approval, error)
+	// ProtectionFor returns the branch's rule. It reports its own failure as an
+	// unknown BranchProtection rather than an error, because "warden could not
+	// read the rule" is a state the report must be able to print.
+	ProtectionFor(ctx context.Context, branch string) domain.BranchProtection
 }
 
 // collectApprovals attaches the forge's review records to the evidence, or
@@ -190,7 +194,9 @@ func collectApprovals(ctx context.Context, f approvalForge, ev domain.Evidence, 
 		_, _ = fmt.Fprintf(stderr, "warden: approval undetermined for %d of %d changes (first %s)\n",
 			undetermined, len(byCommit), firstReason)
 	}
-	return ev.WithApprovals(byCommit), 0
+	// One call for the whole branch, not one per commit — cheap next to the
+	// per-commit loop above, and the half of the picture the loop cannot give.
+	return ev.WithProtection(byCommit, f.ProtectionFor(ctx, ev.Branch)), 0
 }
 
 // repoLabel names the repository the evidence is about.
@@ -331,6 +337,10 @@ func printEvidenceMarkdown(w io.Writer, e domain.Evidence) {
 		p("## Separation of duties\n\n")
 		p("Who approved each change, as recorded by the forge. An approval by the\n")
 		p("author is reported as a self-approval and does not count as review.\n\n")
+		// The RULE before the outcomes. Counts alone cannot distinguish a
+		// control from a habit: twelve independent approvals read identically
+		// whether the forge demanded them or nobody happened to skip.
+		p("**Branch rule (`%s`).** %s\n\n", e.Branch, e.Protection.Summary())
 		p("| | Count |\n|---|---:|\n")
 		p("| Approved by someone other than the author | %d |\n", a.Independent)
 		p("| Self-approved only | %d |\n", a.SelfApprovedOnly)

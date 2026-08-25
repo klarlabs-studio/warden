@@ -6,6 +6,43 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`warden evidence --approvals` reports the branch RULE, not just the
+  outcomes.** Two repositories produced an identical line — twelve changes,
+  twelve independent approvals — where one required review and enforced it and
+  the other merely happened not to skip it. The first has a control; the second
+  has a habit, and an auditor could not tell them apart. warden's own CC8.1
+  limits text already conceded the gap: "a change merged with administrator
+  privileges past a required review appears as unapproved" is warden admitting
+  it could see the outcome and not the rule.
+
+  The report now states, before the counts, what the forge requires: approving
+  reviews, stale-review dismissal, last-push approval, conversation resolution
+  — and whether any of it binds administrators. That last one decides whether
+  the rest is a requirement or a default, so it is never omitted:
+
+      Branch rule (`main`). pull request required, but no approving review is;
+      stale approvals dismissed on new commits; all review threads must be
+      resolved. NOT enforced against administrators, so each rule above is a
+      default an admin may merge past.
+
+  The CC8.1 control text changes with the rule rather than describing approvals
+  generically, so "0 independent approvals" reads as the configuration choice it
+  is instead of sixteen control failures.
+
+  **Three states, kept apart.** Reading branch protection needs admin rights, so
+  an ordinary token gets 403 — and that is NOT the same as a branch having no
+  rule. A 404 is the forge answering that there is none, which is a finding; a
+  403 is warden failing to look, which is not. Folding them together would put
+  a control-gap accusation in an evidence document on the strength of a
+  permission warden does not hold.
+
+  **Its own limit, stated in the report.** Forges expose no history of their
+  protection settings, so this is the rule in force WHEN THE REPORT WAS
+  PRODUCED, not the rule that applied to each historical change. A rule enabled
+  last week reads as though it always applied, and the document says so.
+
 ## [0.30.2] - 2026-08-24
 
 Ships what 0.30.1 could not: the npm channel, and binaries built against a
