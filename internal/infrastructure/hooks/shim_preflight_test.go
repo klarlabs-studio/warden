@@ -27,13 +27,25 @@ func TestShim_VerifiesChecksumBeforeExec(t *testing.T) {
 	s := shim(domain.PreCommit, "1.2.3")
 
 	// Structural elements that must be present.
+	// Comments sit ABOVE their element rather than trailing it. gofmt aligns a
+	// column of trailing comments, and go1.26 and go1.27 align this particular
+	// block differently — so a trailing-comment layout is clean under whichever
+	// toolchain formatted it and flagged under the other, and warden's own lint
+	// gate becomes unpassable for anyone whose Go differs from CI's. There is
+	// nothing to align when each comment is on its own line.
 	for _, want := range []string{
-		"checksums.txt",                            // fetches the published digest list
-		"CHECKSUM MISMATCH",                        // reports a mismatch
-		"refusing to execute an unverified binary", // fails closed
-		"chmod 700",                                // user-only cache dir
-		"failed its integrity check",               // re-verify cached binary each run
-		"warden.sha256",                            // records the digest for re-verification
+		// fetches the published digest list
+		"checksums.txt",
+		// reports a mismatch
+		"CHECKSUM MISMATCH",
+		// fails closed
+		"refusing to execute an unverified binary",
+		// user-only cache dir
+		"chmod 700",
+		// re-verify cached binary each run
+		"failed its integrity check",
+		// records the digest for re-verification
+		"warden.sha256",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("shim missing supply-chain element %q\n---\n%s", want, s)
