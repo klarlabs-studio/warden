@@ -120,6 +120,33 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 				fix = &domain.Fix{Command: envFail.Remediation}
 			}
 		}
+		// The machine's state, reported BESIDE the verdict and never instead of
+		// it. A step that fails on a starved box looks exactly like one that
+		// fails because the code is broken, and "step test failed" is a claim
+		// about the change — which, on a box carrying 10.9x its cores, was false
+		// (#249).
+		//
+		// Deliberately not a reclassification. A timeout under load is still
+		// indistinguishable from a deadlock: an infinite loop times out too, and
+		// sooner when starved. Mapping it to EX_TEMPFAIL would tell an author
+		// their genuine hang was a busy machine — the same over-claim pointed the
+		// other way. So the verdict, the status and the exit code are untouched;
+		// only the evidence a human needs to judge it is added.
+		//
+		// Only when heavily oversubscribed. A caveat printed beneath every
+		// failure is a caveat nobody reads, and most failures ARE about the code.
+		// Into WHY, not Message. Message is the tool's own output, verbatim —
+		// callers and tests rely on that, and warden's commentary does not
+		// belong inside another program's words. Appending there also made
+		// Message vary with machine load between two runs of the same failure,
+		// which warden's own gate caught immediately by red-lining two tests
+		// that assert the output survives intact.
+		if caveat := loadCaveat(proc.CurrentLoad()); caveat != "" {
+			if why != "" {
+				why += " "
+			}
+			why += caveat
+		}
 		return domain.StepResult{
 			Step:   s.name,
 			Status: domain.StepFail,
@@ -240,4 +267,28 @@ func stepEnv(sc application.StepContext) []string {
 		"WARDEN_LINES_CHANGED="+strconv.Itoa(sc.Diff.LinesChanged),
 	)
 	return env
+}
+
+// loadCaveat renders the machine's state for a FAILED step, or "" when there is
+// nothing worth saying.
+//
+// Pure, and separate from the reading, so both the threshold and the wording
+// are testable without a loaded machine. The syscall stays one line at the call
+// site; everything that decides anything is here.
+//
+// It never changes a verdict. A step that failed still failed, the status is
+// still StepFail and the exit code is unchanged — this only supplies the
+// context a human needs to judge whether the failure was about the code. A
+// timeout under load remains indistinguishable from a deadlock (an infinite
+// loop times out too, and sooner when starved), so inferring the cause would be
+// the same over-claim as the one #249 reported, facing the other way.
+func loadCaveat(load proc.Load) string {
+	if !load.Contended() {
+		return ""
+	}
+	return "This ran at " + load.String() + " — roughly " +
+		strconv.FormatFloat(load.Ratio(), 'f', 1, 64) + "x oversubscribed. " +
+		"A wall-clock failure here may be the machine rather than your change; warden " +
+		"cannot tell which, so the verdict above stands. Re-run on a quiet machine " +
+		"before concluding the code is at fault."
 }
