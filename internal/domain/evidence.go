@@ -54,6 +54,9 @@ type Evidence struct {
 	// commit). Empty means "not collected", which the renderers must say rather
 	// than presenting as "no approvals found".
 	ApprovalByCommit map[string]Approval
+	// Protection is the forge's RULE for the branch, as distinct from the
+	// outcomes above. Populated alongside ApprovalByCommit.
+	Protection BranchProtection
 }
 
 // Assertions separates what the evidence supports from what it does not.
@@ -306,7 +309,22 @@ var standardAssertions = Assertions{
 // has no way to know the numbers under it cover only part of the population
 // unless the control text says so, in the same paragraph, with the count.
 func (e Evidence) WithApprovals(byCommit map[string]Approval) Evidence {
+	return e.withApprovalsAndProtection(byCommit, BranchProtection{})
+}
+
+// WithProtection is WithApprovals plus the forge's rule for the branch.
+//
+// The rule and the outcomes belong in one call because they are only meaningful
+// together. Outcomes without the rule cannot distinguish a control from a
+// habit; the rule without outcomes says what was demanded and not whether it
+// happened.
+func (e Evidence) WithProtection(byCommit map[string]Approval, p BranchProtection) Evidence {
+	return e.withApprovalsAndProtection(byCommit, p)
+}
+
+func (e Evidence) withApprovalsAndProtection(byCommit map[string]Approval, prot BranchProtection) Evidence {
 	e.ApprovalByCommit = byCommit
+	e.Protection = prot
 
 	total := len(byCommit)
 	var undetermined int
@@ -328,7 +346,22 @@ func (e Evidence) WithApprovals(byCommit map[string]Approval) Evidence {
 			continue
 		}
 		controls[i].Evidences += " Approval is included: for each change, the pull request it arrived through, its author, and who approved it." + incomplete
+		switch {
+		case prot.RequiresIndependentReview() && prot.Enforceable():
+			controls[i].Evidences += fmt.Sprintf(" The forge REQUIRES %d approving review(s) on this branch and enforces it against administrators, so the approvals below are a control rather than a convention.", prot.RequiredApprovals)
+		case prot.RequiresIndependentReview():
+			controls[i].Evidences += fmt.Sprintf(" The forge requires %d approving review(s) on this branch, but does NOT enforce that against administrators — an admin may merge past it, and such a merge appears here as unapproved.", prot.RequiredApprovals)
+		case prot.Known && prot.Protected:
+			controls[i].Evidences += " The forge requires a pull request on this branch but does NOT require an approving review, so any approvals below occurred without being demanded."
+		case prot.Known:
+			controls[i].Evidences += " The branch carries NO forge protection rule: nothing prevented a direct push or an unreviewed merge, so the approvals below are entirely voluntary."
+		}
 		controls[i].Limits = "Approval is evidenced only as strongly as the forge records it. An approval by the author is reported as a self-approval and does not count as separation of duties; a change merged with administrator privileges past a required review appears as unapproved. Authorization — that the change was wanted — is still a separate control with separate evidence."
+		if prot.Known {
+			controls[i].Limits += " The branch rule stated above is the one in force WHEN THIS REPORT WAS PRODUCED. Forges do not expose the history of their protection settings, so warden cannot show what was required at the time of each change; a rule enabled recently will read as though it always applied."
+		} else if prot.Reason != "" {
+			controls[i].Limits += " The branch's protection rule could not be read (" + prot.Reason + "), so this report does not say whether review was required — which is not the same as saying it was not."
+		}
 		if undetermined > 0 {
 			controls[i].Limits += fmt.Sprintf(" It also does not evidence approval for %d of %d changes, whose forge record warden could not read; this control is unevidenced for those changes.",
 				undetermined, total)
