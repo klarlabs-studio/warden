@@ -8,6 +8,41 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **A step that failed on a starved machine says so, without pretending to know
+  it.** A command that fails because the box was oversubscribed is
+  indistinguishable from one that fails because the code is broken: both are a
+  non-zero exit, and "step test failed" is a claim about the change. On a box
+  carrying 10.9x its cores that claim was false — a suite that fits a 10-minute
+  budget when idle hit it under contention, and the author was told their commit
+  had been rejected (#249).
+
+  A failing step now reports the machine's state beside the verdict when the
+  load average is at least 4x the core count:
+
+      This ran at 109.00 on 10 core(s) — roughly 10.9x oversubscribed. A
+      wall-clock failure here may be the machine rather than your change;
+      warden cannot tell which, so the verdict above stands.
+
+  It lands in the finding's `Why` — warden's own explanation — and never in
+  `Message`, which carries the tool's output verbatim.
+
+  **Deliberately not a reclassification.** Mapping a timeout to `EX_TEMPFAIL`
+  was the obvious request and is refused: an infinite loop times out too, and
+  *sooner* when starved, so warden would be telling an author their genuine
+  deadlock was a busy machine — the same over-claim reported here, facing the
+  other way. The status, the verdict and the exit code are untouched. Only the
+  evidence a human needs to judge it is added, which warden was not collecting
+  at all: nothing in the codebase read load, and no record carried machine
+  context.
+
+  A platform with no load average — Windows has none — reports UNKNOWN and
+  prints nothing, rather than a zero that would read as an idle machine.
+
+  Note this reaches the developer at the moment of failure and not through the
+  attestation, because a rejected commit has no attestation: the run returns
+  before a note is written.
+
+
 - **`warden evidence --approvals` reports the branch RULE, not just the
   outcomes.** Two repositories produced an identical line — twelve changes,
   twelve independent approvals — where one required review and enforced it and
