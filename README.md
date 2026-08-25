@@ -551,6 +551,28 @@ shows zero independent approvals, because that is true; the report says so and
 points at the compensating-control narrative rather than leaving an auditor to
 discover it.
 
+It also reports the branch **rule**, not only the outcomes — because the counts
+alone cannot tell a control from a habit. Twelve independent approvals read
+identically whether the forge demanded them or nobody happened to skip:
+
+```
+**Branch rule (`main`).** 2 approving review(s) required; stale approvals
+dismissed on new commits; all review threads must be resolved.
+```
+
+`enforce_admins` is never left out. A rule that does not bind administrators is
+a *default* somebody may merge past, and a report stating "2 reviews required"
+without that caveat would be accurate and still mislead — so it says
+`NOT enforced against administrators` in the same breath.
+
+Two limits, both stated in the document rather than left to be discovered.
+Reading branch protection needs **admin rights**, so an ordinary token gets a
+403 — and that is reported as *not determined*, never as "this branch is
+unprotected"; a 404 **is** the forge answering that there is no rule, and that
+stays a finding. And forges expose no history of their protection settings, so
+the rule shown is the one in force **when the report was produced**, not the one
+that applied to each historical change.
+
 ### Exporting to the supply-chain ecosystem
 
 `warden attest` projects a note into an in-toto Statement so it can feed sigstore,

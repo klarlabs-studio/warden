@@ -137,6 +137,39 @@ says so and points at the compensating-control narrative rather than leaving an
 auditor to discover it — which is the whole difference between evidence and a
 brochure.
 
+### The rule, not only the outcome
+
+Counts alone cannot distinguish a **control** from a **habit**. Twelve
+independent approvals read identically whether the forge demanded them or nobody
+happened to skip — and the second repository can stop tomorrow without anything
+recording that it did.
+
+So the report states the forge's branch rule before the counts:
+
+```
+**Branch rule (`main`).** 2 approving review(s) required; stale approvals
+dismissed on new commits; all review threads must be resolved.
+```
+
+The mapped CC8.1 text changes with it. Where review is required *and* enforced,
+it says the approvals are "a control rather than a convention". Where the branch
+has no rule at all, it says the approvals were "entirely voluntary". An auditor
+reading `0 independent approvals` alongside `no approving review is required`
+sees a configuration choice, not a control failure.
+
+**`enforce_admins` is never omitted.** A rule that does not bind administrators
+is a default somebody may merge past. "2 reviews required" without that caveat
+is accurate and still misleading, so the report adds `NOT enforced against
+administrators` in the same sentence.
+
+**Two limits, in the document.** Reading branch protection requires admin
+rights, so an ordinary token receives a 403 — reported as *not determined*,
+never as "this branch is unprotected". A 404 **is** the forge answering that no
+rule exists, and stays a finding. Separately, forges expose no history of their
+protection settings: the rule shown is the one in force **when the report was
+produced**, not the one that applied to each historical change, and a rule
+enabled last week will read as though it always applied.
+
 ## Feeding a GRC platform
 
 `--format json` emits a versioned document (`"schema": "warden.evidence/v1"`)
