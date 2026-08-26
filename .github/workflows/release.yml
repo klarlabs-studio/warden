@@ -67,12 +67,12 @@ jobs:
       # be.
       - name: Check the tap credential
         env:
-          TAP_GITHUB_TOKEN: ${{ secrets.kl_HOMEBREW_TAP_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_GITHUB_TOKEN}" ]; then
             echo "::error::the tap credential is empty: this workflow asked" \
-                 "for kl_HOMEBREW_TAP_TOKEN and got nothing back. An undefined" \
+                 "for HOMEBREW_TAP_TOKEN and got nothing back. An undefined" \
                  "secret expands to an empty string rather than failing, so this" \
                  "is a NAME problem, not an expired token — check the secret's" \
                  "exact spelling in the klarlabs-studio org settings, and that" \
@@ -117,11 +117,11 @@ jobs:
           # others stale — that is how v0.19.0 shipped with a 401 and 0.20.0
           # with a 403. The env var keeps its name because .goreleaser.yaml
           # reads {{ .Env.TAP_GITHUB_TOKEN }}; only the source changes.
-          # The org secret is named kl_HOMEBREW_TAP_TOKEN. An undefined secret
+          # The org secret is named HOMEBREW_TAP_TOKEN. An undefined secret
           # expands to an empty string rather than failing, so asking for the
           # unprefixed name sent an empty credential and got 401 Bad
           # credentials (401, not 403 — no credential presented at all).
-          TAP_GITHUB_TOKEN: ${{ secrets.kl_HOMEBREW_TAP_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
       # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
