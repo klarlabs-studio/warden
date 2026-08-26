@@ -159,13 +159,56 @@ jobs:
       # is a trusted-publisher authorization match on npmjs (org/repo/workflow/
       # environment/allowed-action must match exactly), not a workflow issue.
       # Publish from INSIDE each package dir (cd).
+      # A version already on the registry is SKIPPED, not an error.
+      #
+      # npm versions are immutable, so re-driving a release — the documented
+      # recovery path, used whenever a later channel fails — always died here
+      # with "You cannot publish over the previously published versions". The
+      # run then reported FAILURE with every channel actually correct, and the
+      # v0.31.0 re-drive did exactly that: the tap and the SBOMs were repaired
+      # and the workflow still went red, so anyone reading the status alone
+      # would go hunting for a problem that had just been fixed.
+      #
+      # The skip is narrow on purpose. It fires only when the registry already
+      # holds this exact name@version; any other publish failure — auth, OIDC,
+      # network — still fails the step. And `npm view` erroring is treated as
+      # "not published", so a network blip makes us ATTEMPT the publish rather
+      # than assume it happened: wrong in the safe direction.
+      #
+      # If a published version's content ever differs from this build, skipping
+      # is still right — npm will not accept a republish either. The fix for
+      # that is a new version, never a forced overwrite.
       - name: Publish platform packages
         run: |
+          set -euo pipefail
+          published=0 skipped=0
           for d in npm/packages/*/; do
+            name=$(node -p "require('./$d/package.json').name")
+            version=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "::notice::$name@$version already published; skipping."
+              skipped=$((skipped + 1))
+              continue
+            fi
             ( cd "$d" && npm publish --provenance --access public )
+            published=$((published + 1))
           done
+          echo "platform packages: $published published, $skipped already present"
+          # Nothing to do at all is the ordinary re-drive case and is fine — but
+          # it must be visible, not inferred from a green tick.
+          if [ "$published" -eq 0 ] && [ "$skipped" -gt 0 ]; then
+            echo "::notice::every platform package was already published — this re-drive published nothing."
+          fi
       - name: Publish wrapper
-        run: cd npm && npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+          name=$(node -p "require('./npm/package.json').name")
+          version=$(node -p "require('./npm/package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "::notice::$name@$version already published; skipping."
+            exit 0
+          fi
+          cd npm && npm publish --provenance --access public
 
   # Move a floating major-version tag (v0, v1, …) onto this release so consumers
   # can pin the reusable action as `warden-gate@v0` and track the latest release
