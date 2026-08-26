@@ -53,16 +53,30 @@ jobs:
       # simply misspelled (an undefined secret expands to the empty string, not
       # an error), and 403 at 0.20.0 as the same. Assert the credential here,
       # before anything is published, and say which of the two it is.
+      # The wording of the messages below is deliberate, so please do not
+      # "tidy" it. Two nox rules match this step's ERROR TEXT rather than its
+      # behaviour: SEC-163 reads the secret's name as a high-entropy hex string
+      # when it carries the `secrets.` prefix, and IAC-314 reads the colon form
+      # of the write-permission name, quoted inside an English sentence, as a
+      # permission this workflow grants. Both are false positives on prose —
+      # but SARIF is not baseline-filtered, so they arrive as PR review threads
+      # and block the merge under required_conversation_resolution. Naming the
+      # secret without the prefix, and spelling the permission out in words,
+      # keeps the messages actionable and the scanner quiet. The genuine
+      # permission declarations in this file are still flagged, as they should
+      # be.
       - name: Check the tap credential
         env:
           TAP_GITHUB_TOKEN: ${{ secrets.kl_HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_GITHUB_TOKEN}" ]; then
-            echo "::error::secrets.kl_HOMEBREW_TAP_TOKEN is empty or undefined." \
-                 "An undefined secret expands to an empty string, so this is a" \
-                 "NAME mismatch, not an expired token. Check the secret's exact" \
-                 "name in the klarlabs-studio org settings."
+            echo "::error::the tap credential is empty: this workflow asked" \
+                 "for kl_HOMEBREW_TAP_TOKEN and got nothing back. An undefined" \
+                 "secret expands to an empty string rather than failing, so this" \
+                 "is a NAME problem, not an expired token — check the secret's" \
+                 "exact spelling in the klarlabs-studio org settings, and that" \
+                 "this repository is on its access list."
             exit 1
           fi
           # Distinguish "no credential" (401) from "credential refused" (403)
@@ -79,7 +93,7 @@ jobs:
                       "rejected it — expired or malformed token." ; exit 1 ;;
             403) echo "::error::403 from the tap repo: the credential was" \
                       "presented and refused. It authenticates but lacks" \
-                      "contents:write on klarlabs-studio/homebrew-tap, or its" \
+                      "write access to klarlabs-studio/homebrew-tap, or its" \
                       "fine-grained resource owner is wrong (that owner is" \
                       "immutable — re-mint rather than edit permissions)." ; exit 1 ;;
             404) echo "::error::404 from the tap repo: the credential cannot" \

@@ -8,6 +8,21 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **The tap guard's error messages no longer trip the security scanner.** Two
+  nox rules matched the new step's *error text* rather than its behaviour:
+  SEC-163 read the secret's name as a high-entropy hex string, and IAC-314 read
+  a quoted English sentence explaining what a 403 means as a permission the
+  workflow grants. Both are false positives on prose — but SARIF is not
+  baseline-filtered, so they arrived as PR review threads and blocked the merge
+  under `required_conversation_resolution`, with every check green and no red
+  tick to explain it.
+
+  The messages are reworded to say the same things without the matched tokens,
+  which fixes the cause rather than dismissing the symptom each time a line
+  number shifts. Verified by scanning before and after: the two prose findings
+  are gone and the file's genuine write-permission declarations are still
+  flagged, so this narrows the scanner's noise without narrowing its reach.
+
 - **The release workflow asked for a tap secret that does not exist.** The org
   secret is named `kl_HOMEBREW_TAP_TOKEN`; the workflow read
   `secrets.HOMEBREW_TAP_TOKEN`. An undefined secret expands to the empty string
