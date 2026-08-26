@@ -40,26 +40,29 @@ All notable changes to warden are documented here. The format follows
   are gone and the file's genuine write-permission declarations are still
   flagged, so this narrows the scanner's noise without narrowing its reach.
 
-- **The release workflow asked for a tap secret that does not exist.** The org
-  secret is named `kl_HOMEBREW_TAP_TOKEN`; the workflow read
-  `secrets.HOMEBREW_TAP_TOKEN`. An undefined secret expands to the empty string
-  rather than failing, so the job presented **no credential at all** and the tap
-  push returned 401 — which is precisely what 401 means, as distinct from the
-  403 an expired-but-present token returns.
+- **The tap credential is now asserted before a release can half-ship.**
+  goreleaser reaches the Homebrew tap push only at the END of a release, after
+  the binaries are built, signed and uploaded, so a bad tap credential fails a
+  release that has already published — which is how v0.31.0 shipped without its
+  SBOMs. A **Check the tap credential** step now runs *before* goreleaser
+  publishes anything, reporting empty, 401, 403 and 404 as the different faults
+  they are, so a release that cannot finish is abandoned while abandoning it is
+  still cheap. A regression test pins the guard's position and its branches.
 
-  That distinction was available from the first failure and read past twice.
-  The 401 was diagnosed by analogy with v0.19.0 and 0.20.0, where the cause
-  genuinely was a stale PAT, and a replacement token was minted that fixed
-  nothing — the new secret was undefined under that name too. The status code
-  had been reporting the actual fault the whole time.
+  The v0.31.0 failure itself was an expired token, and rotating it fixed it.
+  During this work that was re-diagnosed as a secret-name mismatch, and both
+  workflows were briefly pointed at a name that does not exist — which broke
+  the release path rather than repairing it, until the probe below caught it.
+  The account here is the corrected one: there is exactly one tap secret,
+  `HOMEBREW_TAP_TOKEN`, and it is the one the workflows read.
 
-  The workflow now reads the secret that exists, and a new **Check the tap
-  credential** step asserts it *before* goreleaser publishes anything: empty is
-  reported as a name mismatch, 401/403/404 are reported as the different faults
-  they are, and a release that cannot finish is abandoned while abandoning it is
-  still cheap. A regression test pins the guard's position and its branches, so
-  neither the check nor the distinction between "no credential" and "credential
-  refused" can be quietly dropped.
+  The general mechanism that made the wrong story plausible is real and worth
+  keeping in mind: an undefined secret expands to the empty string rather than
+  failing, so **401** means no credential was presented (a name or access-list
+  problem) while **403** means one was presented and refused. What was missing
+  was the check that distinguishes them —
+  `GET /repos/{owner}/{repo}/actions/organization-secrets` lists the org secrets
+  available to a repository and needs only repo admin.
 
 - **Re-driving a release no longer reports failure for work already done.** npm
   versions are immutable, so the documented recovery path — `workflow_dispatch`
