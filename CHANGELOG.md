@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-08-26
+
+Two things warden could not previously say: what the forge REQUIRED, and what
+the machine was doing. Both are the same omission — a verdict reported without
+the context needed to judge it.
+
 ### Added
 
 - **A step that failed on a starved machine says so, without pretending to know
