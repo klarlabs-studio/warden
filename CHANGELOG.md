@@ -6,6 +6,36 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A release no longer loses its SBOMs to an unrelated credential.** goreleaser
+  publishes the GitHub Release and THEN pushes the Homebrew cask, so an expired
+  tap token fails a step that runs AFTER the release already exists — and every
+  later step in that job was skipped by default. v0.31.0 shipped its binaries,
+  checksums and cosign bundle with **no SBOMs at all**, because a Homebrew
+  token had expired. For a tool whose subject is supply-chain provenance,
+  losing the supply-chain artifacts to a packaging credential is the wrong
+  thing to lose.
+
+  The SBOM step now runs on `always() && !cancelled()` and decides from the
+  RELEASE rather than from an exit code — attaching artifacts if and only if a
+  release exists to attach them to, and warning rather than failing twice when
+  goreleaser died before publishing. That is the rule the `major-tag` job in
+  the same file already adopted after v0.19.0, where the identical expired PAT
+  stranded the floating `v0` tag; the lesson had simply never reached the step
+  beside it.
+
+  A test now enforces both halves for every step that uploads a release asset,
+  so it reaches the next one automatically: the step must survive an earlier
+  failure, and any step that swallows a tool's exit code with `|| true` must
+  verify the tool produced something. `nox scan` exits non-zero on findings
+  even when baselined, so its artifacts — not its status — are what stand
+  between a green release and an empty SBOM.
+
+  Also scoped `GOTOOLCHAIN: auto` to that step: nox's Go floor can move past
+  warden's, and `setup-go` pins `GOTOOLCHAIN=local`, which turns that into a
+  hard failure. The same shape already documented in `provenance-main.yml`.
+
 ## [0.31.0] - 2026-08-26
 
 Two things warden could not previously say: what the forge REQUIRED, and what
