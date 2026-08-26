@@ -54,12 +54,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Scopes the tap-repo push for the brew cask. Sourced from the ORG
           # secret so there is exactly one place to rotate: the same credential
-          # previously lived under three names across the five repos publishing
-          # to felixgeelhaar/homebrew-tap, and updating one of them left the
+          # previously lived under three names across the repos publishing
+          # to klarlabs-studio/homebrew-tap, and updating one of them left the
           # others stale — that is how v0.19.0 shipped with a 401 and 0.20.0
           # with a 403. The env var keeps its name because .goreleaser.yaml
           # reads {{ .Env.TAP_GITHUB_TOKEN }}; only the source changes.
-          TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # The org secret is named kl_HOMEBREW_TAP_TOKEN. An undefined secret
+          # expands to an empty string rather than failing, so asking for the
+          # unprefixed name sent an empty credential and got 401 Bad
+          # credentials (401, not 403 — no credential presented at all).
+          TAP_GITHUB_TOKEN: ${{ secrets.kl_HOMEBREW_TAP_TOKEN }}
 
       # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
       # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
