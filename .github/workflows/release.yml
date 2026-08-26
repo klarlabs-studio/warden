@@ -44,6 +44,50 @@ jobs:
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.0.6
+      # goreleaser reaches the tap push at the very END of a release, after the
+      # binaries are built, signed, and uploaded. A tap credential that is empty
+      # or unauthorized therefore fails a release that has already half-shipped,
+      # and it fails as an HTTP status from a git push rather than as a name.
+      # Both tap failures to date were read wrong from that vantage point: 401
+      # at v0.19.0 was diagnosed as an expired PAT when the secret name was
+      # simply misspelled (an undefined secret expands to the empty string, not
+      # an error), and 403 at 0.20.0 as the same. Assert the credential here,
+      # before anything is published, and say which of the two it is.
+      - name: Check the tap credential
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.kl_HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_GITHUB_TOKEN}" ]; then
+            echo "::error::secrets.kl_HOMEBREW_TAP_TOKEN is empty or undefined." \
+                 "An undefined secret expands to an empty string, so this is a" \
+                 "NAME mismatch, not an expired token. Check the secret's exact" \
+                 "name in the klarlabs-studio org settings."
+            exit 1
+          fi
+          # Distinguish "no credential" (401) from "credential refused" (403)
+          # while the release can still be abandoned cheaply. Only the status
+          # code is echoed; the body may quote the request.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${TAP_GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/klarlabs-studio/homebrew-tap)
+          case "$code" in
+            200) echo "tap credential accepted (200)" ;;
+            401) echo "::error::401 from the tap repo: the credential was not" \
+                      "accepted at all. The secret holds something, but GitHub" \
+                      "rejected it — expired or malformed token." ; exit 1 ;;
+            403) echo "::error::403 from the tap repo: the credential was" \
+                      "presented and refused. It authenticates but lacks" \
+                      "contents:write on klarlabs-studio/homebrew-tap, or its" \
+                      "fine-grained resource owner is wrong (that owner is" \
+                      "immutable — re-mint rather than edit permissions)." ; exit 1 ;;
+            404) echo "::error::404 from the tap repo: the credential cannot" \
+                      "see klarlabs-studio/homebrew-tap. For a fine-grained" \
+                      "token this is indistinguishable from no access." ; exit 1 ;;
+            *)   echo "::error::unexpected HTTP $code from the tap repo." ; exit 1 ;;
+          esac
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           # Exact, not a range. A release is the artifact that most needs to be

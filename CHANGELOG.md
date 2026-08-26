@@ -8,6 +8,27 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **The release workflow asked for a tap secret that does not exist.** The org
+  secret is named `kl_HOMEBREW_TAP_TOKEN`; the workflow read
+  `secrets.HOMEBREW_TAP_TOKEN`. An undefined secret expands to the empty string
+  rather than failing, so the job presented **no credential at all** and the tap
+  push returned 401 — which is precisely what 401 means, as distinct from the
+  403 an expired-but-present token returns.
+
+  That distinction was available from the first failure and read past twice.
+  The 401 was diagnosed by analogy with v0.19.0 and 0.20.0, where the cause
+  genuinely was a stale PAT, and a replacement token was minted that fixed
+  nothing — the new secret was undefined under that name too. The status code
+  had been reporting the actual fault the whole time.
+
+  The workflow now reads the secret that exists, and a new **Check the tap
+  credential** step asserts it *before* goreleaser publishes anything: empty is
+  reported as a name mismatch, 401/403/404 are reported as the different faults
+  they are, and a release that cannot finish is abandoned while abandoning it is
+  still cheap. A regression test pins the guard's position and its branches, so
+  neither the check nor the distinction between "no credential" and "credential
+  refused" can be quietly dropped.
+
 - **Re-driving a release no longer reports failure for work already done.** npm
   versions are immutable, so the documented recovery path — `workflow_dispatch`
   against the tag, used whenever a later channel fails — always died with "You
@@ -25,19 +46,18 @@ All notable changes to warden are documented here. The format follows
   explicitly rather than leaving it to be inferred from a green tick.
 
 - **A release no longer loses its SBOMs to an unrelated credential.** goreleaser
-  publishes the GitHub Release and THEN pushes the Homebrew cask, so an expired
-  tap token fails a step that runs AFTER the release already exists — and every
+  publishes the GitHub Release and THEN pushes the Homebrew cask, so a bad tap
+  credential fails a step that runs AFTER the release already exists — and every
   later step in that job was skipped by default. v0.31.0 shipped its binaries,
-  checksums and cosign bundle with **no SBOMs at all**, because a Homebrew
-  token had expired. For a tool whose subject is supply-chain provenance,
-  losing the supply-chain artifacts to a packaging credential is the wrong
-  thing to lose.
+  checksums and cosign bundle with **no SBOMs at all**, because that push was
+  rejected. For a tool whose subject is supply-chain provenance, losing the
+  supply-chain artifacts to a packaging credential is the wrong thing to lose.
 
   The SBOM step now runs on `always() && !cancelled()` and decides from the
   RELEASE rather than from an exit code — attaching artifacts if and only if a
   release exists to attach them to, and warning rather than failing twice when
   goreleaser died before publishing. That is the rule the `major-tag` job in
-  the same file already adopted after v0.19.0, where the identical expired PAT
+  the same file already adopted after v0.19.0, where a bad tap credential
   stranded the floating `v0` tag; the lesson had simply never reached the step
   beside it.
 
