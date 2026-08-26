@@ -8,6 +8,22 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **Re-driving a release no longer reports failure for work already done.** npm
+  versions are immutable, so the documented recovery path — `workflow_dispatch`
+  against the tag, used whenever a later channel fails — always died with "You
+  cannot publish over the previously published versions". The v0.31.0 re-drive
+  is the worked example: it repaired the Homebrew tap and attached the missing
+  SBOMs, and the run still went red, so anyone reading the status alone would
+  have hunted for a problem that had just been fixed.
+
+  A version already on the registry is now skipped with a notice. The skip is
+  deliberately narrow — it fires only when the registry holds that exact
+  `name@version`, and every other publish failure (auth, OIDC, network) still
+  fails the step. `npm view` erroring is treated as "not published", so a
+  network blip makes warden ATTEMPT the publish rather than assume it happened:
+  wrong in the safe direction. A re-drive that publishes nothing says so
+  explicitly rather than leaving it to be inferred from a green tick.
+
 - **A release no longer loses its SBOMs to an unrelated credential.** goreleaser
   publishes the GitHub Release and THEN pushes the Homebrew cask, so an expired
   tap token fails a step that runs AFTER the release already exists — and every

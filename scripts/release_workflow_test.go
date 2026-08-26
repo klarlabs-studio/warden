@@ -112,3 +112,44 @@ func TestReleaseWorkflow_ToleratedExitStillChecksTheArtifact(t *testing.T) {
 		}
 	}
 }
+
+// A release must be re-drivable. `workflow_dispatch` exists on this workflow
+// precisely so a run can be repeated when a later channel fails — the tap
+// credential expiring is the recurring case — and a step that errors merely
+// because its work is ALREADY DONE turns every recovery into a red run.
+//
+// v0.31.0 is the worked example. The re-drive repaired the Homebrew tap and
+// attached the missing SBOMs, and the workflow still reported failure, because
+// npm versions are immutable and the packages were already published. Anyone
+// reading the run status would have gone looking for a problem that had just
+// been fixed.
+func TestReleaseWorkflow_PublishStepsAreRedrivable(t *testing.T) {
+	w := loadReleaseWorkflow(t)
+	var checked int
+	for _, job := range w.Jobs {
+		for _, s := range job.Steps {
+			if !strings.Contains(s.Run, "npm publish") {
+				continue
+			}
+			checked++
+			// The guard must consult the REGISTRY. Anything cheaper — a `|| true`,
+			// or grepping npm's error text — either swallows real failures or
+			// depends on wording npm can change.
+			if !strings.Contains(s.Run, "npm view") {
+				t.Errorf("step %q publishes to npm without first checking whether the version "+
+					"is already there.\n  Re-driving a release then fails on npm's immutability and "+
+					"reports the whole run red with every channel correct. See v0.31.0.", s.Name)
+			}
+			// And it must not reach for the blunt instrument: `|| true` on a
+			// publish hides authentication and OIDC failures too, which is how a
+			// channel silently stops shipping.
+			if strings.Contains(s.Run, "npm publish --provenance --access public || true") {
+				t.Errorf("step %q swallows every publish failure, not just the already-published "+
+					"case; an auth or OIDC failure would report success", s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no npm publish step found; either the workflow changed or this check is blind")
+	}
+}
