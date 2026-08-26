@@ -66,10 +66,35 @@ jobs:
       # generation must not gate on that, so tolerate the exit code and verify
       # the artifacts before uploading them to the goreleaser-created release.
       - name: Generate + attach SBOM
+        # Run even when goreleaser failed, and decide from the RELEASE rather
+        # than from the step's exit code — the rule the major-tag job below
+        # already learned, from the same cause.
+        #
+        # goreleaser publishes the release and THEN pushes the brew cask. A
+        # stale tap credential fails that last step, which used to skip this one
+        # entirely: v0.31.0 published its binaries, checksums and cosign bundle
+        # and shipped with NO SBOMs, because a Homebrew token had expired. For a
+        # tool whose subject is supply-chain provenance, losing the supply-chain
+        # artifacts to an unrelated credential is the wrong thing to lose.
+        if: always() && !cancelled()
         run: |
+          set -euo pipefail
+          # The honest guard: attach SBOMs if and only if a release exists to
+          # attach them to. A goreleaser that died BEFORE publishing leaves
+          # nothing here to do, and the run has already failed loudly for that
+          # reason — a second failure would only obscure the first.
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "::warning::no release exists for ${GITHUB_REF_NAME}, so no SBOMs were attached." \
+                 "goreleaser failed before publishing; fix that, then re-drive this workflow."
+            exit 0
+          fi
           go install github.com/nox-hq/nox/cli@v0.8.1
           mv "$(go env GOPATH)/bin/cli" "$(go env GOPATH)/bin/nox"
           mkdir -p release-artifacts
+          # nox exits non-zero on findings, even baselined ones. SBOM generation
+          # must not gate on that, so the exit code is tolerated and the
+          # ARTIFACTS are checked instead — a green scan that produced no file
+          # would otherwise upload nothing and say nothing.
           nox -format cdx,spdx -output release-artifacts scan . || true
           test -s release-artifacts/sbom.cdx.json
           test -s release-artifacts/sbom.spdx.json
@@ -78,6 +103,11 @@ jobs:
             release-artifacts/sbom.spdx.json --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # nox's own Go floor can move past warden's; setup-go pins
+          # GOTOOLCHAIN=local, which turns that into "requires go >= X" and
+          # kills the step. Scoped to this step only, so the release build
+          # itself stays on the toolchain go.mod names.
+          GOTOOLCHAIN: auto
 
   # Assemble the per-platform npm packages from the same binaries and publish
   # them + the main wrapper. The wrapper carries no logic — just launches the
