@@ -6,6 +6,23 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`Tap credential check` — verify the Homebrew credential without cutting a
+  release.** The inline guard added alongside it only runs *during* a release,
+  which left "does this credential actually work?" answerable only by
+  publishing something. This workflow answers it on demand: dispatch it before a
+  release, after rotating the token, or after changing which repositories an org
+  secret is shared with.
+
+  It reports the distinct faults separately — empty (a name or access-list
+  problem, since an undefined secret expands to an empty string), 401, 403, 404
+  — and then asks GitHub explicitly whether the credential can **push**. Being
+  able to read the tap repo does not imply being able to write to it, and
+  goreleaser needs to write; checking only reachability would let a read-only
+  token pass and still fail the cask push. It holds `contents: read` and
+  publishes nothing.
+
 ### Fixed
 
 - **The tap guard's error messages no longer trip the security scanner.** Two
