@@ -14,22 +14,32 @@ import (
 // exists. Every later step in that job is skipped by default.
 //
 // v0.31.0 shipped exactly that way — binaries, checksums and a cosign bundle
-// published, and NO SBOMs, because a Homebrew token had expired. For a tool
-// whose subject is supply-chain provenance, losing the supply-chain artifacts
-// to an unrelated credential is the wrong thing to lose.
+// published, and NO SBOMs, because the tap push 401'd. For a tool whose subject
+// is supply-chain provenance, losing the supply-chain artifacts to an unrelated
+// credential is the wrong thing to lose.
 //
-// The `major-tag` job had already learned this from v0.19.0, where the same
-// expired PAT stranded the floating `v0` tag. The lesson simply never reached
-// the step next to it. This test is what makes it reach the next one too.
+// That 401 was first read as an expired PAT, by analogy with v0.19.0 and 0.20.0
+// where it genuinely was one. It was not: the org secret is named
+// kl_HOMEBREW_TAP_TOKEN and this workflow asked for HOMEBREW_TAP_TOKEN. An
+// undefined secret expands to the empty string rather than failing, so the job
+// presented NO credential and got the status that means exactly that — 401, not
+// the 403 an expired-but-present token returns. The status code distinguished
+// the two causes all along and was read past twice.
+//
+// The `major-tag` job had already learned the ordering lesson from v0.19.0,
+// where a bad tap credential stranded the floating `v0` tag. The lesson simply
+// never reached the step next to it. This test is what makes it reach the next
+// one too.
 const releaseWorkflow = "../.github/workflows/release.yml"
 
 type ghWorkflow struct {
 	Jobs map[string]struct {
 		Steps []struct {
-			Name string `yaml:"name"`
-			Uses string `yaml:"uses"`
-			If   string `yaml:"if"`
-			Run  string `yaml:"run"`
+			Name string            `yaml:"name"`
+			Uses string            `yaml:"uses"`
+			If   string            `yaml:"if"`
+			Run  string            `yaml:"run"`
+			Env  map[string]string `yaml:"env"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
@@ -152,4 +162,82 @@ func TestReleaseWorkflow_PublishStepsAreRedrivable(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no npm publish step found; either the workflow changed or this check is blind")
 	}
+}
+
+// The tap credential must be asserted BEFORE goreleaser runs, not discovered
+// from the HTTP status of a push that happens after the release is published.
+//
+// Both prior tap failures were diagnosed wrong from that late vantage point,
+// and one of them — an undefined secret expanding to the empty string — is
+// mechanically detectable a few seconds into the job. A guard that runs first
+// converts a half-shipped release into a named, cheap failure.
+func TestReleaseWorkflow_TapCredentialIsCheckedBeforePublishing(t *testing.T) {
+	w := loadReleaseWorkflow(t)
+
+	job, ok := w.Jobs["goreleaser"]
+	if !ok {
+		t.Fatal("no goreleaser job: the guard this test protects has no home")
+	}
+
+	guard, publish := -1, -1
+	for i, s := range job.Steps {
+		if strings.Contains(s.Uses, "goreleaser-action") && publish < 0 {
+			publish = i
+		}
+		// The guard is identified by what it READS, not by its name, so
+		// renaming the step cannot silently retire the invariant.
+		if _, reads := s.Env["TAP_GITHUB_TOKEN"]; reads && s.Run != "" && guard < 0 {
+			guard = i
+		}
+	}
+
+	if publish < 0 {
+		t.Fatal("no goreleaser-action step in the goreleaser job")
+	}
+	if guard < 0 {
+		t.Fatal("no step reads TAP_GITHUB_TOKEN and runs a check before goreleaser; " +
+			"an empty or refused tap credential would again surface as an HTTP " +
+			"status from a push that happens after the release is published")
+	}
+	if guard > publish {
+		t.Errorf("tap credential is checked at step %d, after goreleaser publishes at step %d; "+
+			"a guard that runs after the release exists has nothing left to protect", guard, publish)
+	}
+
+	// Assert against the guard's CODE, not its prose. A shell comment is part
+	// of the run body, so a first draft of this test was satisfied by the word
+	// "403" appearing in a comment explaining the check — and passed happily
+	// with the actual 403 branch deleted. Strip comments first.
+	body := stripShellComments(job.Steps[guard].Run)
+
+	// The empty case is the one that was misread, and it is the one a guard
+	// checking only reachability would miss: an empty bearer token is a
+	// well-formed request that GitHub answers, not a transport error.
+	if !strings.Contains(body, "-z ") {
+		t.Error("the tap guard does not test for an EMPTY credential; " +
+			"an undefined secret expands to the empty string, which is how " +
+			"v0.31.0 failed, and no reachability check will catch it")
+	}
+	// Case arms, not bare numbers: `403)` is a branch, `403` is a sentence.
+	for _, arm := range []string{"401)", "403)"} {
+		if !strings.Contains(body, arm) {
+			t.Errorf("the tap guard has no %s branch; 401 means no credential was "+
+				"presented (a NAME problem) and 403 means one was presented and "+
+				"refused (a PERMISSION problem), and conflating them is what sent "+
+				"two investigations the wrong way", strings.TrimSuffix(arm, ")"))
+		}
+	}
+}
+
+// stripShellComments removes whole-line `#` comments so an assertion about a
+// script tests what the script DOES rather than what it says about itself.
+func stripShellComments(run string) string {
+	var kept []string
+	for _, ln := range strings.Split(run, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "#") {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return strings.Join(kept, "\n")
 }
