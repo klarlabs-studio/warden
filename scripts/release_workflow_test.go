@@ -40,6 +40,7 @@ type ghWorkflow struct {
 			If   string            `yaml:"if"`
 			Run  string            `yaml:"run"`
 			Env  map[string]string `yaml:"env"`
+			With map[string]string `yaml:"with"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
@@ -240,4 +241,61 @@ func stripShellComments(run string) string {
 		kept = append(kept, ln)
 	}
 	return strings.Join(kept, "\n")
+}
+
+// Every goreleaser invocation in this workflow must pin an EXACT version.
+//
+// Two jobs run goreleaser: one publishes the GitHub release and the Homebrew
+// cask, the other builds the binaries that get packaged for npm. They produce
+// artifacts for the SAME tag, so a floating range in either means one channel's
+// binaries were built by a different toolchain than the other's — a difference
+// that is invisible in the release notes and undetectable after the fact.
+//
+// The release job already carried a comment insisting on an exact version. The
+// npm job, a hundred lines away, used "~> v2" — the same lesson failing to
+// reach the step next to it, which is the recurring shape in this file.
+func TestReleaseWorkflow_GoreleaserVersionsArePinnedExactly(t *testing.T) {
+	w := loadReleaseWorkflow(t)
+
+	seen := 0
+	versions := map[string]string{}
+	for jobName, job := range w.Jobs {
+		for _, st := range job.Steps {
+			if !strings.Contains(st.Uses, "goreleaser-action") {
+				continue
+			}
+			seen++
+			v := st.With["version"]
+			switch {
+			case v == "":
+				t.Errorf("job %q: goreleaser-action declares no version; it would "+
+					"resolve to whatever the action defaults to on the day it ran", jobName)
+				continue
+			// A range is anything not purely a version number. "~> v2", "latest"
+			// and "v2" all resolve differently as time passes.
+			case strings.ContainsAny(v, "~^*><= "), strings.EqualFold(v, "latest"):
+				t.Errorf("job %q: goreleaser version %q is a range, not a pin; "+
+					"a release is the artifact that most needs to be reproducible "+
+					"from what this file says", jobName, v)
+				continue
+			}
+			versions[jobName] = v
+		}
+	}
+
+	if seen < 2 {
+		t.Fatalf("expected at least 2 goreleaser-action steps, found %d; "+
+			"this test guards the consistency BETWEEN them", seen)
+	}
+
+	// Pinned-but-different is its own defect: one tag, two builders.
+	distinct := map[string]bool{}
+	for _, v := range versions {
+		distinct[v] = true
+	}
+	if len(distinct) > 1 {
+		t.Errorf("goreleaser versions disagree across jobs: %v; the GitHub/Homebrew "+
+			"artifacts and the npm artifacts for one tag would be built by "+
+			"different toolchains", versions)
+	}
 }

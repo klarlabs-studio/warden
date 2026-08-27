@@ -46,6 +46,21 @@ All notable changes to warden are documented here. The format follows
 
 ### Fixed
 
+- **npm artifacts and GitHub/Homebrew artifacts are now built by the same
+  goreleaser.** The release job pinned `2.16.0`, under a comment explaining that
+  a release is the artifact most needing to be reproducible from what the file
+  says. The npm job, a hundred lines below, used `~> v2` — so for any given tag,
+  the binaries npm users install were built by whichever 2.x happened to be
+  newest that day, while the GitHub release and Homebrew cask for that same tag
+  came from the pinned one. One version, two builders, and nothing in the
+  release notes would show it.
+
+  Both jobs now pin `2.16.0`, and a regression test requires every
+  `goreleaser-action` step to declare an exact version and requires those
+  versions to agree with each other. Found by running a snapshot build to
+  validate the release path without publishing — the pipeline repairs made since
+  0.31.0 had all been merged but never exercised together.
+
 - **The tap guard's error messages no longer trip the security scanner.** Two
   nox rules matched the new step's *error text* rather than its behaviour:
   SEC-163 read the secret's name as a high-entropy hex string, and IAC-314 read

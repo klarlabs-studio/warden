@@ -209,7 +209,12 @@ jobs:
       # did. AGENTS.md already records this shape from the nox install step.
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: "~> v2"
+          # The SAME exact version the release job uses. This job builds the
+          # binaries that npm users install, so a floating range here means the
+          # npm artifacts for a given tag are built by whichever 2.x happened to
+          # be newest that day, while the GitHub and Homebrew artifacts for that
+          # same tag come from the pinned one. One version, two builders.
+          version: "2.16.0"
           args: build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
