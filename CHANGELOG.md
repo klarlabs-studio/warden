@@ -6,6 +6,27 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies refreshed.** `axi` 1.4.0 → 1.5.0, `fortify` 1.8.1 → 1.10.0,
+  `mcp` 1.24.0 → 1.27.0, `statekit` 1.13.2 → 1.14.0, `golang.org/x/crypto`
+  0.54.0 → 0.55.0, and `golang.org/x/text` 0.40.0 → 0.41.0 transitively.
+
+  The `go` and `toolchain` directives are deliberately unchanged: raising them
+  turns every Lint job red until golangci-lint is bumped in the same commit, and
+  that coupling is not worth carrying for a routine refresh.
+
+  Verified beyond the test suite, because a library bump can pass every unit
+  test and still break the wiring that composes it: the rebuilt binary was
+  exercised across `version`, `status`, `verify`, `axi` and `steps`, and the MCP
+  server — the largest jump at three minor versions — was driven over stdio
+  through `initialize` and `tools/list`, returning all ten tools.
+
+  `govulncheck` is unchanged at 0 vulnerabilities affecting warden. The one
+  advisory against a required module, GO-2026-5932, is `x/crypto/openpgp` being
+  unmaintained; it has no fix, and warden does not call it — commit signatures
+  go through git and gpg.
+
 ### Added
 
 - **`Tap credential check` — verify the Homebrew credential without cutting a
