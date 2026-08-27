@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-08-27
+
+A release-pipeline release. Nothing in warden's own behaviour changes; what
+changes is that a release can now fail early and legibly instead of late and
+half-published, and that its four channels are built from one toolchain.
+
+0.31.0 shipped its binaries, checksums and cosign bundle with no SBOMs at all,
+because goreleaser pushes the Homebrew cask AFTER publishing the release and
+that push was rejected. Everything here follows from pulling that thread — and
+one of the fixes along the way was itself wrong, pointed the release at a secret
+that does not exist, and was caught by the check added two commits earlier.
+
 ### Changed
 
 - **Dependencies refreshed.** `axi` 1.4.0 → 1.5.0, `fortify` 1.8.1 → 1.10.0,
