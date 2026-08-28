@@ -6,6 +6,41 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The VSA names the refs that pointed at the commit.** SLSA's Verification
+  Summary Attestation asks producers to set `subject.annotations.source_refs`,
+  and tells consumers to check that an allowed branch appears in it — it is what
+  stops a revision being presented under a ref it was never on. `warden attest
+  --predicate vsa` now emits it: local branches, tags and remote-tracking refs
+  that point at the commit, fully qualified and sorted.
+
+  A commit with no refs on it — every commit in the middle of a branch — emits
+  no annotation at all, rather than an empty list. `source_refs: []` would assert
+  "warden looked and found none", which is a stronger claim than staying silent.
+  These are refs as *this repository* names them at attest time, so a consumer
+  must not read `refs/heads/main` as proof the commit is on main upstream; a
+  local branch name is chosen by whoever holds the checkout. It narrows what a
+  consumer must consider, it does not settle it.
+
+### Documentation
+
+- **ADR 0004 records what warden claims in `verifiedLevels`, and what it
+  refuses to.** SLSA v1.2 added a Source Track — branch protection, review
+  requirements, revision provenance — which is warden's actual subject matter.
+  The existing code comment reasoned only about *build* levels, so it did not
+  answer whether warden should claim `SLSA_SOURCE_LEVEL_n`.
+
+  It should not, and the ADR says why: the spec assigns every source level to
+  the SCS, and warden is a client-side hook, not the system that owns the
+  branch. The accepted consequence is now written down rather than incidental —
+  because consumers MUST ignore unrecognized levels, a conformant reader treats
+  warden's VSA as asserting no level at all, and should read
+  `verificationResult` instead. The ADR also records why `warden evidence`'s
+  branch-protection data does not close the gap: Source L3 asks for
+  *contemporaneous* evidence, and reading protection now says nothing about what
+  it was when the revision was merged.
+
 ## [0.31.1] - 2026-08-27
 
 A release-pipeline release. Nothing in warden's own behaviour changes; what

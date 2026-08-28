@@ -64,10 +64,16 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 		// The remote only makes the URIs resolvable; a local-only repo still
 		// produces a valid statement, identified by commit alone.
 		var remote string
+		var sourceRefs []string
 		if repo := svc.Repo(); repo != nil {
 			remote = repo.RemoteURL("origin")
+			// A failure to list refs is not a failure to attest. The refs are a
+			// SHOULD that narrows what a consumer must consider; losing them
+			// weakens the statement without making it wrong, whereas refusing to
+			// emit would withhold a verification that did happen.
+			sourceRefs, _ = repo.RefsPointingAt(res.SHA)
 		}
-		statement = buildVSA(res, remote)
+		statement = buildVSA(res, remote, sourceRefs)
 	}
 
 	out := statement
@@ -111,6 +117,10 @@ type intotoStatement struct {
 type intotoSubject struct {
 	Name   string            `json:"name"`
 	Digest map[string]string `json:"digest"`
+	// Annotations carries in-toto subject annotations. SLSA's VSA asks for
+	// `source_refs` here; omitempty keeps it out of statements that have none,
+	// so a commit with no refs pointing at it emits no empty object.
+	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
 type attestPredicate struct {

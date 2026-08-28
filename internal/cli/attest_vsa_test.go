@@ -35,14 +35,14 @@ func TestBuildVSA_NeverClaimsASLSABuildLevel(t *testing.T) {
 	res.SignatureValid = true
 	res.Trusted = true
 
-	data, err := json.Marshal(buildVSA(res, "https://githost/org/repo.git"))
+	data, err := json.Marshal(buildVSA(res, "https://githost/org/repo.git", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(data), "SLSA_BUILD_LEVEL") {
 		t.Errorf("a warden VSA must never assert a SLSA build level:\n%s", data)
 	}
-	for _, lvl := range buildVSA(res, "").Predicate.VerifiedLevels {
+	for _, lvl := range buildVSA(res, "", nil).Predicate.VerifiedLevels {
 		if !strings.HasPrefix(lvl, "WARDEN_") {
 			t.Errorf("verified level %q is not warden-namespaced", lvl)
 		}
@@ -55,20 +55,20 @@ func TestBuildVSA_NeverClaimsASLSABuildLevel(t *testing.T) {
 func TestBuildVSA_LevelsAccumulate(t *testing.T) {
 	base := gatedResult()
 
-	gated := buildVSA(base, "")
+	gated := buildVSA(base, "", nil)
 	if got := gated.Predicate.VerifiedLevels; len(got) != 1 || got[0] != levelGated {
 		t.Errorf("attested-only levels = %v, want just %s", got, levelGated)
 	}
 
 	signed := base
 	signed.SignatureValid = true
-	if got := buildVSA(signed, "").Predicate.VerifiedLevels; len(got) != 2 {
+	if got := buildVSA(signed, "", nil).Predicate.VerifiedLevels; len(got) != 2 {
 		t.Errorf("signed levels = %v, want gated+signed", got)
 	}
 
 	trusted := signed
 	trusted.Trusted = true
-	got := buildVSA(trusted, "").Predicate.VerifiedLevels
+	got := buildVSA(trusted, "", nil).Predicate.VerifiedLevels
 	if len(got) != 3 || got[2] != levelTrusted {
 		t.Errorf("trusted levels = %v, want gated+signed+trusted", got)
 	}
@@ -86,7 +86,7 @@ func TestBuildVSA_UnattestedIsFailedWithNoLevels(t *testing.T) {
 		Trusted:        true,
 		Record:         &domain.RunRecord{CommitSHA: "a-different-commit", RunID: "run-1"},
 	}
-	vsa := buildVSA(res, "")
+	vsa := buildVSA(res, "", nil)
 	if vsa.Predicate.VerificationResult != "FAILED" {
 		t.Errorf("verificationResult = %q, want FAILED", vsa.Predicate.VerificationResult)
 	}
@@ -99,7 +99,7 @@ func TestBuildVSA_UnattestedIsFailedWithNoLevels(t *testing.T) {
 // fabricated digest is worse than none: it makes the statement look verifiable
 // while being uncheckable.
 func TestBuildVSA_PolicyHasNoFabricatedDigest(t *testing.T) {
-	vsa := buildVSA(gatedResult(), "https://githost/org/repo.git")
+	vsa := buildVSA(gatedResult(), "https://githost/org/repo.git", nil)
 	if len(vsa.Predicate.Policy.Digest) != 0 {
 		t.Errorf("policy digest must be omitted, got %v", vsa.Predicate.Policy.Digest)
 	}
@@ -113,7 +113,7 @@ func TestBuildVSA_PolicyHasNoFabricatedDigest(t *testing.T) {
 // A local-only repo has no globally resolvable name. Saying so is better than
 // inventing a URL.
 func TestBuildVSA_NoRemoteFallsBackToCommitIdentity(t *testing.T) {
-	vsa := buildVSA(gatedResult(), "")
+	vsa := buildVSA(gatedResult(), "", nil)
 	if vsa.Predicate.ResourceURI != "git:abc123" {
 		t.Errorf("resourceUri = %q, want git:abc123", vsa.Predicate.ResourceURI)
 	}
@@ -163,7 +163,7 @@ func TestNormalizeRemote_CarriesNoCredential(t *testing.T) {
 // The credential must not survive into the signed statement either — the unit
 // above proves the helper, this proves the field a consumer actually reads.
 func TestBuildVSA_ResourceURICarriesNoCredential(t *testing.T) {
-	vsa := buildVSA(gatedResult(), "https://ci-user:redacted@githost/org/repo.git")
+	vsa := buildVSA(gatedResult(), "https://ci-user:redacted@githost/org/repo.git", nil)
 	for _, uri := range []string{vsa.Predicate.ResourceURI, vsa.Predicate.Policy.URI} {
 		if strings.Contains(uri, "redacted") || strings.Contains(uri, "ci-user") {
 			t.Errorf("uri = %q, which leaks the remote's credential", uri)
@@ -209,7 +209,7 @@ func TestBuildVSA_IsAdditiveNotAReplacement(t *testing.T) {
 	if native.Predicate.Evidence == nil {
 		t.Error("the warden predicate must keep carrying the evidence chain")
 	}
-	if got := buildVSA(res, "").PredicateType; got != vsaPredicateID {
+	if got := buildVSA(res, "", nil).PredicateType; got != vsaPredicateID {
 		t.Errorf("vsa predicateType = %q, want %q", got, vsaPredicateID)
 	}
 }
@@ -217,7 +217,7 @@ func TestBuildVSA_IsAdditiveNotAReplacement(t *testing.T) {
 // The summary describes the verification that HAPPENED, so the verifier version
 // comes from the signed record rather than from the binary running now.
 func TestBuildVSA_VerifierVersionComesFromTheRecord(t *testing.T) {
-	vsa := buildVSA(gatedResult(), "")
+	vsa := buildVSA(gatedResult(), "", nil)
 	if got := vsa.Predicate.Verifier.Version["warden"]; got != "0.21.0" {
 		t.Errorf("verifier version = %q, want the record's 0.21.0", got)
 	}
@@ -235,5 +235,47 @@ func TestAttest_UnknownPredicateIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(errb, "unknown predicate") {
 		t.Errorf("error should name the problem: %q", errb)
+	}
+}
+
+// SLSA's VSA asks producers to set `subject.annotations.source_refs`, and tells
+// consumers to check that an allowed branch appears in it. Without it a consumer
+// cannot tell which ref a revision was presented under, which is the substitution
+// the field exists to prevent.
+func TestVSA_SubjectCarriesSourceRefs(t *testing.T) {
+	vsa := buildVSA(gatedResult(), "", []string{"refs/heads/main", "refs/tags/v1.0.0"})
+
+	ann := vsa.Subject[0].Annotations
+	if ann == nil {
+		t.Fatal("subject carries no annotations; source_refs is where a consumer looks for the ref")
+	}
+	refs, ok := ann["source_refs"].([]string)
+	if !ok {
+		t.Fatalf("source_refs is %T, want []string", ann["source_refs"])
+	}
+	if len(refs) != 2 || refs[0] != "refs/heads/main" || refs[1] != "refs/tags/v1.0.0" {
+		t.Errorf("source_refs = %v, want the refs passed in, in order", refs)
+	}
+}
+
+// A commit with no refs pointing at it is the ordinary case — every commit in
+// the middle of a branch looks like that. Emitting `source_refs: []` would say
+// "warden looked and found none", which is a different and stronger claim than
+// staying silent, and the kind of over-statement this project treats as a defect.
+func TestVSA_NoRefsEmitsNoAnnotation(t *testing.T) {
+	for _, refs := range [][]string{nil, {}} {
+		vsa := buildVSA(gatedResult(), "", refs)
+		if vsa.Subject[0].Annotations != nil {
+			t.Errorf("refs=%v: annotations = %v, want nil", refs, vsa.Subject[0].Annotations)
+		}
+		// The absence must survive serialization, not just the struct: a
+		// marshaled empty map would still put the key on the wire.
+		b, err := json.Marshal(vsa)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(b), "annotations") {
+			t.Errorf("refs=%v: serialized statement still carries an annotations key: %s", refs, b)
+		}
 	}
 }

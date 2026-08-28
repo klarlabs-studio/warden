@@ -30,6 +30,13 @@ import (
 // open enum precisely so verifiers can report their own results, so warden
 // reports warden's. A consumer looking for SLSA_BUILD_LEVEL_3 correctly finds
 // nothing here.
+//
+// SLSA v1.2 added a SOURCE track, which is warden's actual subject matter and a
+// different enum from the build one this paragraph was written about. Whether
+// warden should claim SLSA_SOURCE_LEVEL_n — and the accepted consequence that a
+// conformant consumer, required to ignore unrecognized levels, reads this
+// statement as asserting none — is settled in docs/adr/0004. Short version:
+// every source level is a property the SCS attests, and warden is not the SCS.
 const vsaPredicateID = "https://slsa.dev/verification_summary/v1"
 
 // Predicate selectors for `warden attest --predicate`.
@@ -101,7 +108,7 @@ type vsaDescriptor struct {
 // remoteURL names the repository when one is configured; it is only used to make
 // the resource and policy URIs resolvable, and a repo without a remote still
 // produces a valid statement identified by commit alone.
-func buildVSA(res service.VerifyResult, remoteURL string) vsaStatement {
+func buildVSA(res service.VerifyResult, remoteURL string, sourceRefs []string) vsaStatement {
 	rec := res.Record
 	attested := res.Validated || rec.Attests(res.SHA)
 
@@ -135,9 +142,19 @@ func buildVSA(res service.VerifyResult, remoteURL string) vsaStatement {
 		pred.Verifier.Version = map[string]string{"warden": rec.WardenVersion}
 	}
 
+	subject := intotoSubject{Name: "git+commit", Digest: map[string]string{"gitCommit": res.SHA}}
+	// `source_refs` is a SHOULD in the VSA spec, and consumers are told to check
+	// that an allowed branch appears in it — it is what stops a revision being
+	// presented under a ref it was never on. Emit it only when refs actually
+	// point at the commit; an empty list would assert "no refs" rather than
+	// "warden did not look", and those are different claims.
+	if len(sourceRefs) > 0 {
+		subject.Annotations = map[string]any{"source_refs": sourceRefs}
+	}
+
 	return vsaStatement{
 		Type:          statementType,
-		Subject:       []intotoSubject{{Name: "git+commit", Digest: map[string]string{"gitCommit": res.SHA}}},
+		Subject:       []intotoSubject{subject},
 		PredicateType: vsaPredicateID,
 		Predicate:     pred,
 	}

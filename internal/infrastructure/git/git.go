@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -174,6 +175,43 @@ func (r *Repo) ConfigValue(key string) string {
 // the miss as "unknown" and fall back to a bare identifier.
 func (r *Repo) RemoteURL(remote string) string {
 	return r.ConfigValue("remote." + remote + ".url")
+}
+
+// RefsPointingAt returns the fully-qualified refs that point at sha right now:
+// local branches, tags, and remote-tracking branches, sorted and deduplicated.
+//
+// "Right now" is the point. SLSA's VSA asks for the references that pointed at a
+// revision WHEN THE ATTESTATION WAS CREATED, which is a fact about this
+// repository at this moment — not about the gated run, which may have happened
+// on a different ref, and not about the upstream repository, which this checkout
+// cannot see. A caller must not read `refs/heads/main` here as proof the commit
+// is on main upstream: a local branch name is chosen by whoever holds the
+// checkout. It narrows what a consumer must consider; it does not settle it.
+//
+// A commit with no refs pointing at it is ordinary — it is what every commit in
+// the middle of a branch looks like — so an empty result is not an error, and
+// the caller omits the annotation rather than emitting an empty list.
+func (r *Repo) RefsPointingAt(sha string) ([]string, error) {
+	if sha == "" {
+		return nil, nil
+	}
+	out, err := r.run("for-each-ref", "--points-at", sha, "--format=%(refname)",
+		"refs/heads", "refs/tags", "refs/remotes")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var refs []string
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || seen[ln] {
+			continue
+		}
+		seen[ln] = true
+		refs = append(refs, ln)
+	}
+	sort.Strings(refs)
+	return refs, nil
 }
 
 // MergeBase returns the best common ancestor of HEAD and ref (e.g.
