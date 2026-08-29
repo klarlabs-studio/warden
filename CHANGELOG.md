@@ -6,6 +6,14 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-08-29
+
+One fix, in the npm wrapper: the message a user sees when the platform binary is
+missing. It gave the same text for a platform warden does not build for and a
+platform it does build for whose package simply is not installed — two failures
+with opposite fixes, and the second reported as the first sends people to build
+from source to solve what `npm install` fixes.
+
 ### Fixed
 
 - **The npm wrapper no longer blames your platform for an install problem.**
