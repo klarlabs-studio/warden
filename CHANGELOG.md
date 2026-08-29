@@ -6,6 +6,29 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The npm wrapper no longer blames your platform for an install problem.**
+  When the platform binary was missing it gave one message for two failures
+  with opposite fixes: a platform warden genuinely does not build for (install
+  another way) and a platform it *does* build for whose package simply is not
+  installed (reinstall). The second was reported as the first, sending people to
+  build from source to solve something `npm install` fixes.
+
+  It now distinguishes them by reading its own `optionalDependencies`, which
+  lists every platform published for that release — no network call needed. When
+  it cannot tell, because the manifest is missing or malformed, it makes the
+  weaker claim rather than guessing.
+
+  This is not hypothetical: npm propagates a publish to the packument on its own
+  schedule, and warden's last two releases each had exactly one platform package
+  (`win32-x64`, published last) resolve **90 seconds to five minutes** after the
+  wrapper did. Anyone installing in that window gets the wrapper with its
+  optional dependency silently skipped.
+
+  The wrapper had no tests at all despite being the entry point for every `npx`
+  user; it has four now.
+
 ## [0.32.0] - 2026-08-29
 
 A minor release rather than a patch: `warden attest --predicate vsa` gains a
