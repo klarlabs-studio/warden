@@ -46,8 +46,9 @@ Settings → Branches → main → Require status checks to pass
 While Actions cannot run, that is the required check. The jobs that cannot
 start keep reporting failure, so remove them from the required list for as long
 as the outage lasts — leaving them required is what blocks every pull request
-regardless of the code. Note down what you removed; putting it back is the
-last step of the cleanup below.
+regardless of the code. Note down what you removed: putting it back is the
+first step of [turning this off again](#turning-it-off-again), and that list
+is the only record of what "back" was.
 
 Override the context if you want a different name:
 
@@ -104,9 +105,38 @@ This commit will read as ungated to branch protection until it is.
 and exits successfully. A reporting failure never unwinds a push that already
 succeeded, for the same reason a pull-request failure does not.
 
-## When to turn it off again
+## Turning it off again
 
 This is a workaround for a forge that cannot run your checks, and it is off by
 default because it writes to a surface other people read as CI. When Actions
-work again, the Action posts the same check under the same name, and you can
-drop `status.enabled` without touching branch protection.
+work again, turn it off — but not by starting with `status.enabled`.
+
+The Action does **not** post the same check under the same name. It posts
+`Warden provenance`, its job name; warden posts `warden/gate`, and the section
+above is the record of why those had to differ. So `warden/gate` is a required
+check that nothing but warden writes. Drop `status.enabled` while it is still
+required and every pull request blocks forever, with all its other checks
+green and nothing on the page naming the missing one — the same permanent
+block this document exists to get you out of, arrived at from the other side.
+
+Take branch protection down first, in this order. At no point is a check
+required that nothing can post:
+
+1. **Put back the Actions checks you removed** — the list you noted down when
+   you made `warden/gate` required.
+2. **Open a throwaway pull request and watch them pass.** Restoring them is a
+   claim that Actions works again; this is the only step that checks it. If
+   the jobs still report `failure` with zero steps, the outage is not over —
+   stop here and change nothing else.
+3. **Remove `warden/gate` from the required list.** Until now it was the only
+   thing holding the branch; after step 2 the Actions checks are.
+4. **Now drop `status.enabled` from `.warden.yaml`.** Warden stops posting a
+   status nothing requires any more.
+
+Steps 3 and 4 are in that order for one reason: reverse them and there is a
+window — however short — where `warden/gate` is required and no longer
+published, which blocks every pull request opened during it.
+
+Nothing here touches the signed note. `status.enabled` only ever controlled
+the pointer; the evidence is written on every passing gate either way, and
+`warden verify` reads it the same before and after.
