@@ -52,13 +52,7 @@ func wrapperHarness(t *testing.T, pkgJSON string) string {
 
 func runWrapper(t *testing.T, dir string) (string, int) {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		// Skipping here is a real gap, not a pass: GitHub-hosted runners ship
-		// node, so this should never skip in CI. If it does, the wrapper is
-		// going untested rather than being tested and passing.
-		t.Skipf("node not on PATH, wrapper left untested: %v", err)
-	}
+	node := requireNode(t)
 	cmd := exec.Command(node, filepath.Join(dir, "bin", "warden.cjs"), "version")
 	out, err := cmd.CombinedOutput()
 	code := 0
@@ -164,13 +158,32 @@ func TestNpmWrapper_MissingManifestFallsBackToTheWeakerClaim(t *testing.T) {
 // values, so a hand-written table would test a different string than ships.
 func nodePlatformArch(t *testing.T) string {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skipf("node not on PATH, wrapper left untested: %v", err)
-	}
+	node := requireNode(t)
 	out, err := exec.Command(node, "-p", "process.platform+'-'+process.arch").Output()
 	if err != nil {
 		t.Fatalf("ask node for platform: %v", err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// requireNode locates node, and refuses to let its absence pass quietly where
+// node is supposed to exist.
+//
+// Skipping on a missing dependency is the right call on a contributor's laptop
+// and the wrong one in CI, where the whole point is that these ran. Without
+// `-v`, `go test` prints nothing at all for a skipped test — a skip and a pass
+// are indistinguishable in the log — so a silent skip would report this file as
+// covered while it covered nothing. GitHub-hosted runners ship node, so in CI
+// its absence is a broken environment and must be loud.
+func requireNode(t *testing.T) string {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err == nil {
+		return node
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatalf("node not on PATH in CI, so the npm wrapper went untested: %v", err)
+	}
+	t.Skipf("node not on PATH, wrapper left untested locally: %v", err)
+	return ""
 }
