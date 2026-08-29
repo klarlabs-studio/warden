@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-08-29
+
+A minor release rather than a patch: `warden attest --predicate vsa` gains a
+field, so anything parsing that output sees something new.
+
+Both changes come from reading warden against SLSA v1.2, which added a **Source
+Track** — branch protection, review requirements, revision provenance. That is
+warden's subject matter, and warden turns out to sit next to it rather than
+inside it. The VSA now carries the refs a commit was reachable from, and the
+documentation says plainly what the statement does *not* claim, which was the
+part most likely to be misread.
+
 ### Added
 
 - **The VSA names the refs that pointed at the commit.** SLSA's Verification
