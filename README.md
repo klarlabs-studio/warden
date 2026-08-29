@@ -83,7 +83,7 @@ Warden overlaps three tool categories and replaces none of them:
 | **husky / lefthook / pre-commit** | *"run these checks on commit"* | …in a clean worktree, and leave proof |
 | **gittuf** | *"was this ref advanced by an authorized key?"* — authorization | *"did the checks actually run and pass on this tree?"* — validation |
 | **sigstore / gitsign** | *"who signed this, per a transparency log"* | warden signs with a local key or your SSH key; `signing.signer` is where a keyless signer would slot in |
-| **SLSA** | build provenance, at the artifact layer | source provenance, one layer earlier — exportable as a **VSA** (`warden attest --predicate vsa`) |
+| **SLSA** | build provenance, at the artifact layer; the v1.2 **Source Track** is attested by your *forge* | source provenance, one layer earlier — exportable as a VSA-shaped statement (`warden attest --predicate vsa`), carrying warden's verdict rather than a SLSA level ([ADR 0004](docs/adr/0004-slsa-source-track-and-verified-levels.md)) |
 | **Agent Trace** | a standard shape for AI attribution | makes someone else's trace **tamper-evident** |
 
 A gittuf policy requiring a warden attestation, or a warden note wrapped in a
@@ -597,11 +597,42 @@ It reports what warden actually verified, and nothing more:
 "verifiedLevels": ["WARDEN_SOURCE_GATED", "WARDEN_SOURCE_SIGNED", "WARDEN_SOURCE_TRUSTED"]
 ```
 
+The subject also names the refs the commit was reachable from when the statement
+was made, which is what stops a revision being presented under a ref it was never
+on:
+
+```json
+"annotations": { "source_refs": [
+  "refs/heads/main", "refs/remotes/origin/main", "refs/tags/v0.31.1"
+]}
+```
+
+Those are refs as *your* repository names them. `refs/heads/main` here is not
+proof the commit is on main upstream — a local branch name belongs to whoever
+holds the checkout. It narrows what a consumer must consider; it does not settle
+it. A commit with no refs on it emits no annotation at all rather than an empty
+list, because `[]` would claim warden looked and found none.
+
 Those levels are warden-namespaced **on purpose**. Warden does not produce a SLSA
 build level and will never claim one — a consumer looking for `SLSA_BUILD_LEVEL_3`
 correctly finds nothing here. They also accumulate: a signature proves the *note*
 was signed, never that the *commit* was gated, so `SIGNED` cannot appear without
 `GATED`, and an unattested note reports `FAILED` with no levels at all.
+
+**Read `verificationResult`, not `verifiedLevels`.** SLSA v1.2 added a *Source*
+Track, and this is the one thing to know before wiring warden into SLSA tooling:
+conformant consumers MUST ignore level values they don't recognize, so all three
+of warden's are ignored and no SLSA level remains. A strict reader sees this
+statement assert **no level at all**. That is deliberate — every source level is
+something the *source control system* attests, and warden is a client-side hook,
+not the system that owns your branch. `verificationResult` is the field that
+survives, and it answers the question worth asking: did warden's gate pass on
+this commit?
+
+So this is a VSA-*shaped* statement carrying warden's verdict, not a conformant
+Source VSA — warden is not an SCS and does not claim to be one. The reasoning,
+including why `warden evidence`'s branch-protection data does *not* close the
+gap, is in [ADR 0004](docs/adr/0004-slsa-source-track-and-verified-levels.md).
 
 The VSA is the interop view, not a replacement — it has nowhere to put the
 hash-chained evidence entries or the dependency SBOM, which are the parts that

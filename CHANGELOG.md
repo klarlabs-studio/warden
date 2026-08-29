@@ -25,6 +25,21 @@ All notable changes to warden are documented here. The format follows
 
 ### Documentation
 
+- **The README no longer implies warden's VSA carries a SLSA level.** Its
+  explanation of `verifiedLevels` reasoned only about *build* levels, which was
+  accurate but stopped short: a reader could reasonably conclude the statement
+  works as a source attestation with SLSA tooling. It does not — conformant
+  consumers must ignore unrecognized levels, so all three of warden's are
+  ignored and none remains.
+
+  The section now says so directly, points integrators at `verificationResult`
+  as the field that survives, describes the output as a VSA-*shaped* statement
+  rather than a conformant Source VSA, and links [ADR
+  0004](docs/adr/0004-slsa-source-track-and-verified-levels.md). It also
+  documents the new `source_refs` annotation, including the part a consumer
+  most needs to know: those are refs as *your* repository names them, so
+  `refs/heads/main` is not proof the commit is on main upstream.
+
 - **ADR 0004 records what warden claims in `verifiedLevels`, and what it
   refuses to.** SLSA v1.2 added a Source Track — branch protection, review
   requirements, revision provenance — which is warden's actual subject matter.
