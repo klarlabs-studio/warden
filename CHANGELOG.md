@@ -6,6 +6,53 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-08-29
+
+A step that failed without saying anything, and a document whose last
+paragraph would have blocked every pull request in a repository that followed
+it.
+
+### Fixed
+
+- **A step that fails silently now says so.** A command that failed without
+  writing to either stream produced a finding with an empty message, an empty
+  location and no rule. It printed as
+
+  ```
+      [high]
+    warden: step lint failed
+  ```
+
+  which names neither what failed nor why: the commit is refused and the
+  developer is given nothing to begin from.
+
+  Seen for real — golangci-lint lost a race for its machine-global lock and
+  exited without touching stdout or stderr. The contention path already
+  handled the case where the tool *says* it is blocked; this is the case where
+  it says nothing. The finding now carries the exit status, which is the one
+  fact available when the command was silent (137 says it was killed, 3 says
+  it ran and disagreed), a rule of `step/no-output`, and a why naming the
+  likely causes: killed by a timeout or the OOM killer, a lost lock race, or a
+  refusal to start. A command that *did* print keeps its own words.
+
+### Documentation
+
+- **"Publishing the gate verdict where CI cannot run" had no safe way to stop
+  using it.** The closing section said the Action "posts the same check under
+  the same name", so `status.enabled` could be dropped without touching branch
+  protection. It does not: the Action posts `Warden provenance`, warden posts
+  `warden/gate`, and the section directly above is the record of why those had
+  to differ — GitHub holds a commit status and a check run as separate
+  entries, which is what made a shared name fail the first time.
+
+  Followed, that advice leaves `warden/gate` required with nothing left to
+  publish it: every pull request blocked permanently, every other check green,
+  nothing on the page naming what is missing. It is replaced by four steps in
+  the order that never leaves a required check unpostable — restore the
+  Actions checks, prove they actually run, drop `warden/gate` from the
+  required list, and only then stop posting it. A forward reference further up
+  promised a cleanup section that was never written; it now points at one.
+
 ## [0.32.1] - 2026-08-29
 
 One fix, in the npm wrapper: the message a user sees when the platform binary is
