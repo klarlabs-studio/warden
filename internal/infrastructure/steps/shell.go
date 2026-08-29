@@ -4,6 +4,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -46,6 +47,17 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 
 	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
 	return s.resultFor(ctx, sc, out, err, contended), nil
+}
+
+// exitDescription renders how a command ended, for a message that has nothing
+// else to go on. A status is more use than "failed": 137 says it was killed,
+// 1 says it ran and disagreed.
+func exitDescription(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return strconv.Itoa(ee.ExitCode())
+	}
+	return "without a status"
 }
 
 // resultFor turns a finished command into the step's normalized result. It is
@@ -102,6 +114,29 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 				fix = &domain.Fix{Command: "# add --allow-parallel-runners to the " +
 					string(s.name) + " command in .warden.yaml"}
 			}
+		// The command failed and wrote nothing. Without this the finding carries
+		// an empty message, an empty location and no rule, and prints as
+		//
+		//     [high]
+		//     warden: step lint failed
+		//
+		// which names neither what failed nor why — the reader is told to fix
+		// something and given no way to begin. Observed when golangci-lint lost
+		// a race for its machine-global lock and exited without writing to
+		// either stream.
+		//
+		// This is last in the switch on purpose: the cases above recognize a
+		// specific silence and can say more about it. This one only knows that
+		// there was silence, which is still worth saying out loud.
+		case msg == "":
+			msg = string(s.name) + " exited " + exitDescription(err) + " and printed nothing"
+			summary = string(s.name) + " failed silently"
+			rule = "step/no-output"
+			why = "The command failed without writing to stdout or stderr, so its own output " +
+				"explains nothing. That usually means it was killed rather than finished — a " +
+				"timeout, an out-of-memory kill, a lost race for a tool's lock — or that it " +
+				"refused to start. Running it by hand is the fastest way to see what it would " +
+				"have said."
 		// The command never ran either, for the other environmental reason: the
 		// executable it needs is not installed. Same rule — fail, but say what is
 		// actually wrong, and name the command that fixes it.
