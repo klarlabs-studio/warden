@@ -268,6 +268,21 @@ func (r *Repository) SetHooks(h domain.HookConfig) error {
 	}
 	root := doc.Content[0]
 
+	// Nothing to change, so change nothing. This has to come before the
+	// choice of write path, not inside one of them: the splice bails on
+	// flow style, and a file written as `hooks: {pre_commit: true,
+	// pre_push: true}` then fell through to the encoder and was reflowed
+	// for a toggle that was already in the requested position (#269).
+	//
+	// This is #134's own "suggested direction", finally taken. Comparing
+	// before writing covers the case a per-clone setup target hits every
+	// single time after the first — `make install-hooks` run by a
+	// contributor whose gate is already armed — no matter how the file is
+	// formatted or which write path would have handled it.
+	if declared, ok := declaredHooks(root); ok && declared == h {
+		return nil
+	}
+
 	if out, ok := spliceHooks(data, root, h); ok {
 		if bytes.Equal(out, data) {
 			// Already correct. Writing identical bytes would still bump mtime and
@@ -297,6 +312,36 @@ func (r *Repository) SetHooks(h domain.HookConfig) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// declaredHooks reports the hooks this file states outright, and whether
+// it states both of them.
+//
+// Deliberately read from this file's own node tree rather than from
+// Load(): Load resolves `extends`, and a value inherited from a base is
+// not this file's. Treating it as this file's would skip the write that
+// overrides it — a toggle silently not applied, which is the failure
+// shape this project keeps rediscovering under new clothes.
+//
+// A missing or partial hooks block reports false rather than defaulting
+// the absent half to false. The two are equivalent to a reader, but not
+// to a caller deciding whether a write is needed: without the key on the
+// page there is nothing to compare, so the write goes ahead and the
+// block gets created.
+func declaredHooks(root *yaml.Node) (domain.HookConfig, bool) {
+	hooks := mapValue(root, "hooks")
+	if hooks == nil || hooks.Kind != yaml.MappingNode {
+		return domain.HookConfig{}, false
+	}
+	preCommit := mapValue(hooks, "pre_commit")
+	prePush := mapValue(hooks, "pre_push")
+	if !spliceable(preCommit) || !spliceable(prePush) {
+		return domain.HookConfig{}, false
+	}
+	return domain.HookConfig{
+		PreCommit: preCommit.Value == "true",
+		PrePush:   prePush.Value == "true",
+	}, true
 }
 
 // spliceHooks rewrites the two hook values directly in the original bytes,
