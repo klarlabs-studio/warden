@@ -194,7 +194,13 @@ continuous-monitoring program does with these.
 
 ## It works on a fresh clone
 
-The adoption point `warden init` records lives in `.git/warden/adoption` —
+The adoption point is recorded once, by the first `warden init` on a
+repository; later runs re-arm the hooks and leave it alone, because
+advancing it silently would shrink the population an auditor is looking
+at. `warden init --re-adopt` moves it deliberately and reports how many
+commits that removed from the audit range.
+
+The adoption point lives in `.git/warden/adoption` —
 local, untracked, per-clone state. That is fine for `warden doctor` on the
 machine that ran init, and useless for evidence: an artifact only one laptop
 can produce is not evidence, because the person checking it cannot reproduce it.
