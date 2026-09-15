@@ -6,6 +6,94 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-15
+
+A minor release rather than a patch: `warden init` no longer moves the adoption
+point on a repository that has already adopted warden, and anything that relied
+on it doing so needs the new `--re-adopt` flag.
+
+Both fixes are the same shape, which is the shape this project keeps
+rediscovering — a command that did more than it was asked to, quietly. One
+rewrote a file it had no reason to touch. The other narrowed a security audit
+and reported success in the same words either way.
+
+### Changed
+
+- **`warden init` keeps an existing adoption point.** It used to re-record the
+  point at HEAD every single time it ran, including on a repository that had
+  already adopted warden, and printed the same success line either way. Every
+  commit between the old point and HEAD then dropped out of `warden doctor`'s
+  range — not reported as unverified, reported as *not existing*, with the
+  audit still reading green.
+
+  Re-running a setup step is an ordinary thing for a person to do: an
+  idempotent-looking line in a `make install-hooks` target, a README that says
+  "run `warden init`" being followed twice. The effect was to launder un-gated
+  history out of the audit.
+
+  This matters more than the usual idempotency complaint because the adoption
+  point *is* the claim "from here on, this history was gated". Advancing it
+  silently converts "these commits were never gated" into "there are no such
+  commits". Same family as the scanner drift in #88 and the unparseable note in
+  #195: a guarantee that quietly stops covering something while still reading
+  as green.
+
+  `init` now re-arms the hooks, keeps the point, and says which one it kept.
+  (#270)
+
+### Added
+
+- **`warden init --re-adopt`** moves the adoption point deliberately, and says
+  what it cost:
+
+  ```
+  adoption point MOVED 7989935c1ff0 -> 9e3440d7ecb5.
+    2 commit(s) are no longer in `warden doctor`'s audit range.
+  ```
+
+  The count is the reason the flag is explicit rather than the default. It is
+  taken before the write — the only moment both points are known — and a count
+  that cannot be taken stays zero rather than being guessed at. Re-adopting a
+  repository already at HEAD is not reported as a move: announcing commits
+  leaving the audit when none did is the same over-claim in the other
+  direction. (#270)
+
+### Fixed
+
+- **`warden hooks enable` no longer reflows a config it does not need to
+  change.** Blank separator lines dropped, flow-mapping spacing collapsed —
+  for a toggle that was already in the requested position. This is #134, fixed
+  in 0.20.4, back in 0.31.1.
+
+  Not because anyone reverted the fix. 0.20.4's no-op check lives *inside* the
+  byte-splice fast path, and the splice deliberately bails on flow style, where
+  both hook values share a line and the first edit invalidates the second's
+  column. So a config written `hooks: { pre_commit: true, pre_push: true }`
+  fell through to the node encoder — which round-trips comments but not blank
+  lines or intra-line spacing — and was reformatted for a write that was never
+  needed.
+
+  The pre-existing no-op test used *block* style, which the splice handles, so
+  it passed throughout. A test written from the same mental model as the code
+  cannot catch a wrong mental model.
+
+  The comparison now runs before the choice of write path, so it applies
+  however the file is formatted. It reads what the file itself declares rather
+  than what `Load()` resolves: `Load` follows `extends`, and a hook enabled by
+  a base is not this file's setting — treating it as this file's would skip the
+  local write that overrides it, which is a toggle silently not applied and
+  strictly worse than the churn being fixed. (#269)
+
+### Security
+
+- **grpc 1.83.0 → 1.83.2**, for GHSA-vp52-pcj8-j9qc (heap memory exhaustion via
+  HTTP/2 DATA frame fragmentation) and GHSA-2v4p-qf9q-27wj (xDS server crash on
+  a request missing both `:authority` and `Host`). grpc is an indirect
+  dependency and reachability could not be established either way, which is an
+  argument for waiving only if "could not prove reachable" is read as "not
+  reachable". The fix was a patch release. Carries golang.org/x/net
+  0.57.0 → 0.58.0.
+
 ## [0.32.2] - 2026-08-29
 
 A step that failed without saying anything, and a document whose last
