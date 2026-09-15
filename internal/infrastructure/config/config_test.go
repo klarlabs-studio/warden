@@ -533,3 +533,121 @@ func TestRepository_ExtendsCycleErrors(t *testing.T) {
 		t.Error("an extends cycle must error")
 	}
 }
+
+// #269: the no-op check used to live inside the splice fast path, and the
+// splice bails on flow style. A `hooks: { pre_commit: true, pre_push: true }`
+// written by hand therefore fell through to the node encoder and was reflowed
+// for a toggle that was already in the requested position.
+//
+// The pre-existing no-op test used block style, which the splice handles — so
+// it passed throughout. That is the trap this project keeps naming: a test
+// written from the same mental model as the code cannot catch a wrong one.
+func TestRepository_SetHooksNoOpLeavesFlowStyleAlone(t *testing.T) {
+	dir := t.TempDir()
+	const original = `status:
+  enabled: true
+
+hooks: { pre_commit: true, pre_push: true }
+
+commands:
+  fmt: echo fmt
+`
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	// Exactly what `make install-hooks` runs in a clone whose gate is
+	// already armed.
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: true}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != original {
+		t.Errorf("a no-op toggle reflowed the file.\n--- got ---\n%s\n--- want ---\n%s", out, original)
+	}
+}
+
+// The counterweight, and the more important half: skipping a write that was
+// actually needed is a toggle silently not applied, which is strictly worse
+// than the cosmetic churn being fixed.
+func TestRepository_SetHooksStillAppliesARealFlowStyleToggle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("hooks: { pre_commit: true, pre_push: true }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: false}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Hooks.PreCommit || cfg.Hooks.PrePush {
+		t.Errorf("a real toggle was skipped as a no-op: %+v", cfg.Hooks)
+	}
+}
+
+// A partial hooks block has nothing to compare against for the missing half,
+// so the write goes ahead and completes it. "Absent" and "false" read the same
+// to a reader of the config, but not to a caller deciding whether to write.
+func TestRepository_SetHooksCompletesAPartialBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("hooks:\n  pre_commit: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(dir)
+
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: false, PrePush: false}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "pre_push") {
+		t.Errorf("pre_push was never written; a half-declared block is not a no-op:\n%s", data)
+	}
+}
+
+// The no-op check reads what THIS file declares, never what Load() resolves.
+// A hook enabled by a base the config extends is not this file's setting, and
+// treating it as this file's would skip the local write that overrides it —
+// the toggle would report success and change nothing.
+func TestRepository_SetHooksOverridesAnInheritedHook(t *testing.T) {
+	repoDir := t.TempDir()
+	baseDir := filepath.Join(repoDir, "policy")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "base.yaml"),
+		[]byte("hooks:\n  pre_commit: true\n  pre_push: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repoDir, FileName)
+	if err := os.WriteFile(path, []byte("extends: policy/base.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(repoDir)
+
+	// The base enables both. Asking for both is a no-op to the *effective*
+	// config but not to this file, which declares neither.
+	if err := repo.SetHooks(domain.HookConfig{PreCommit: true, PrePush: false}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hooks.PrePush {
+		t.Error("pre_push stayed enabled: the local override was skipped as a no-op against the base")
+	}
+}
