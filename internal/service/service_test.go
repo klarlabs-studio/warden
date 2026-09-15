@@ -326,9 +326,14 @@ func TestService_InitWritesStarterWhenNoConfigExists(t *testing.T) {
 }
 
 // commitEmpty adds a commit so the adoption point and HEAD can diverge.
+//
+// --no-verify because these commits land AFTER Init has installed
+// warden's own hooks, and the pre-commit shim would try to fetch the
+// pinned binary for the test version. What is under test is where the
+// adoption point ends up, not whether the gate runs.
 func commitEmpty(t *testing.T, dir, msg string) {
 	t.Helper()
-	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+	cmd := exec.Command("git", "commit", "--no-verify", "--allow-empty", "-m", msg)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
