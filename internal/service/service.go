@@ -277,27 +277,99 @@ func hookSteps(cfg domain.Config, hook domain.Hook) []domain.StepName {
 // ApplyFixPatch re-applies a pre-commit auto-fix patch to the live working tree.
 func (s *Service) ApplyFixPatch(patch string) error { return s.repo.ApplyPatch(patch) }
 
-// Init installs the selected hooks, writes a starter config if absent, and
-// records the adoption point (§9). It returns the project language detected when
-// writing a starter config (LangUnknown when a config already existed or none
-// was recognized), so the caller can report what it pre-filled.
-func (s *Service) Init(selected []domain.Hook) (domain.Language, error) {
+// InitResult is what Init did, in the terms the operator needs to hear it.
+//
+// The adoption point fields exist because moving that point is not a
+// setup detail: it is the claim "from here on, this history was gated",
+// and narrowing it silently turns "these commits were never gated" into
+// "there are no such commits" while the report stays green.
+type InitResult struct {
+	// Lang is the project language detected when writing a starter
+	// config, LangUnknown when a config already existed or none was
+	// recognized.
+	Lang domain.Language
+	// Adoption is the point in force after Init.
+	Adoption string
+	// Previous is the point that was in force before, empty on a repo
+	// that had never adopted warden.
+	Previous string
+	// Moved reports whether Init changed the adoption point.
+	Moved bool
+	// LeftAudit is how many commits dropped out of doctor's range because
+	// the point moved forward. Only meaningful when Moved is true and
+	// Previous is set.
+	LeftAudit int
+}
+
+// Adopted reports whether the repository had already adopted warden
+// before this Init ran.
+func (r InitResult) Adopted() bool { return r.Previous != "" }
+
+// Init installs the selected hooks, writes a starter config if absent,
+// and records the adoption point (§9) on a repository that has not
+// adopted warden yet.
+//
+// On a repository that already has an adoption point, Init re-arms the
+// hooks and LEAVES THE POINT ALONE unless reAdopt is set. Re-running a
+// setup step is an ordinary thing for a person to do — an
+// idempotent-looking line in `make install-hooks`, a README that says
+// "run warden init" followed twice — and the old behavior advanced the
+// point to HEAD every time. Every commit in between silently left
+// doctor's audit range: not reported as unverified, reported as not
+// existing.
+//
+// That is the wrong direction for a failure in a provenance tool, and it
+// is the same family as every other bug this project has shipped — a
+// guarantee that quietly stops covering something while still reading as
+// green. Moving the point is now a deliberate act, and the caller is
+// handed the numbers to say what it cost.
+func (s *Service) Init(selected []domain.Hook, reAdopt bool) (InitResult, error) {
 	gitDir, err := s.repo.GitDir()
 	if err != nil {
-		return domain.LangUnknown, err
+		return InitResult{}, err
 	}
 	if err := hooks.Install(gitDir, selected, s.version); err != nil {
-		return domain.LangUnknown, err
+		return InitResult{}, err
 	}
 	lang, err := s.writeStarterConfig(selected)
 	if err != nil {
-		return domain.LangUnknown, err
+		return InitResult{}, err
 	}
+	res := InitResult{Lang: lang}
+
+	// A read failure is not "never adopted". Treating it as one is how the
+	// point would get overwritten by the very error path meant to protect
+	// it.
+	previous, err := s.repo.ReadAdoption()
+	if err != nil {
+		return res, fmt.Errorf("read existing adoption point: %w", err)
+	}
+	res.Previous = previous
+
+	if previous != "" && !reAdopt {
+		res.Adoption = previous
+		return res, nil
+	}
+
 	head, err := s.repo.HeadSHA()
 	if err != nil {
-		return domain.LangUnknown, fmt.Errorf("read HEAD for adoption point: %w", err)
+		return res, fmt.Errorf("read HEAD for adoption point: %w", err)
 	}
-	return lang, s.repo.WriteAdoption(head)
+	if previous != "" && previous != head {
+		// Count before writing: this is the only moment both points are
+		// known, and the number is the whole reason the flag is explicit.
+		// A count we cannot take is reported as unknown by staying zero
+		// rather than guessed at.
+		if left, err := s.repo.CommitsSince(head, previous); err == nil {
+			res.LeftAudit = len(left)
+		}
+	}
+	if err := s.repo.WriteAdoption(head); err != nil {
+		return res, err
+	}
+	res.Adoption = head
+	res.Moved = previous != head
+	return res, nil
 }
 
 // SetHook enables or disables a single hook after init, updating both the

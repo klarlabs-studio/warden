@@ -154,6 +154,12 @@ warden init                      # installs pre-commit + pre-push hooks, writes 
 warden policy explain            # print the resolved effective policy for a hypothetical push
 ```
 
+`warden init` is safe to run again. On a repository that has already
+adopted warden it re-arms the hooks and **keeps the existing adoption
+point**, so wiring it into a `make install-hooks` target cannot narrow
+your audit range. Moving the point needs `--re-adopt`, which prints the
+old and new commits and how many just left `warden doctor`'s range.
+
 From then on `git commit` / `git push` are gated. Warden's own push runs with
 `--no-verify` so it never re-triggers the hook and recurses.
 

@@ -16,7 +16,7 @@ import (
 func initAdopted(t *testing.T) (string, *Service) {
 	t.Helper()
 	dir, svc := newRepoSvc(t)
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 	return dir, svc
