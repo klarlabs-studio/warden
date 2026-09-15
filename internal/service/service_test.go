@@ -48,7 +48,7 @@ func TestService_InitWritesConfigHooksAndAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,12 +85,12 @@ func TestService_InitDetectsLanguageAndPrefillsCommands(t *testing.T) {
 	}
 	svc, _ := New(dir, "test", autoApprover{})
 
-	lang, err := svc.Init(domain.AllHooks)
+	res, err := svc.Init(domain.AllHooks, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lang != domain.LangRust {
-		t.Fatalf("detected language = %q, want rust", lang)
+	if res.Lang != domain.LangRust {
+		t.Fatalf("detected language = %q, want rust", res.Lang)
 	}
 	cfg, _ := svc.Config()
 	if cfg.Commands["test"] != "cargo test" {
@@ -104,12 +104,12 @@ func TestService_InitDetectsLanguageAndPrefillsCommands(t *testing.T) {
 func TestService_InitUnknownLanguageLeavesPlaceholders(t *testing.T) {
 	dir := initRepo(t) // no marker files
 	svc, _ := New(dir, "test", autoApprover{})
-	lang, err := svc.Init(domain.AllHooks)
+	res, err := svc.Init(domain.AllHooks, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lang != domain.LangUnknown {
-		t.Errorf("no marker should be LangUnknown, got %q", lang)
+	if res.Lang != domain.LangUnknown {
+		t.Errorf("no marker should be LangUnknown, got %q", res.Lang)
 	}
 	cfg, _ := svc.Config()
 	if _, ok := cfg.Commands["lint"]; !ok {
@@ -127,7 +127,7 @@ func TestService_InitDoesNotClobberUserConfig(t *testing.T) {
 	if err := svc.configs.Save(domain.Config{Commands: map[string]string{"lint": "custom"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Init([]domain.Hook{domain.PrePush}); err != nil {
+	if _, err := svc.Init([]domain.Hook{domain.PrePush}, false); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := svc.Config()
@@ -142,7 +142,7 @@ func TestService_InitDoesNotClobberUserConfig(t *testing.T) {
 func TestService_SetHookTogglesShimAndConfig(t *testing.T) {
 	dir := initRepo(t)
 	svc, _ := New(dir, "test", autoApprover{})
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.SetHook(domain.PreCommit, false); err != nil {
@@ -240,7 +240,7 @@ func TestService_DoctorFlagsUnverifiedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 	// A commit made after adoption with no note is unverified.
@@ -291,7 +291,7 @@ func TestService_InitPreservesAConfigWithNoCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,10 +317,130 @@ func TestService_InitWritesStarterWhenNoConfigExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Init(domain.AllHooks); err != nil {
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".warden.yaml")); err != nil {
 		t.Fatalf("init should write a starter config when none exists: %v", err)
+	}
+}
+
+// commitEmpty adds a commit so the adoption point and HEAD can diverge.
+func commitEmpty(t *testing.T, dir, msg string) {
+	t.Helper()
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", msg)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+}
+
+// #270: a second `init` used to re-record the adoption point at HEAD,
+// silently dropping every commit in between out of `warden doctor`'s
+// range. Those commits were not reported as unverified — they were
+// reported as not existing, and the audit stayed green.
+//
+// Re-running a setup step is an ordinary thing to do: an
+// idempotent-looking line in `make install-hooks`, a README followed
+// twice. It must not narrow the audit.
+func TestService_InitKeepsAnExistingAdoptionPoint(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Init(domain.AllHooks, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Adopted() {
+		t.Error("a fresh repository reported a previous adoption point")
+	}
+	if first.Adoption == "" {
+		t.Fatal("no adoption point recorded on first init")
+	}
+
+	commitEmpty(t, dir, "commit B")
+	commitEmpty(t, dir, "commit C")
+
+	second, err := svc.Init(domain.AllHooks, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Moved {
+		t.Error("a plain second init moved the adoption point")
+	}
+	if second.Adoption != first.Adoption {
+		t.Errorf("adoption point = %s, want the original %s", second.Adoption, first.Adoption)
+	}
+	if !second.Adopted() {
+		t.Error("an already-adopted repository reported no previous point")
+	}
+	// The record on disk is what doctor reads; asserting only the return
+	// value would pass on a function that computed the right answer and
+	// wrote the wrong one.
+	onDisk, err := svc.Repo().ReadAdoption()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk != first.Adoption {
+		t.Errorf("adoption file holds %s, want %s", onDisk, first.Adoption)
+	}
+}
+
+// Moving the point stays possible, and says what it cost. The count is
+// the reason the flag is explicit rather than the default.
+func TestService_InitReAdoptMovesAndReportsWhatLeftTheAudit(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.Init(domain.AllHooks, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitEmpty(t, dir, "commit B")
+	commitEmpty(t, dir, "commit C")
+
+	moved, err := svc.Init(domain.AllHooks, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moved.Moved {
+		t.Fatal("--re-adopt did not move the adoption point")
+	}
+	if moved.Previous != first.Adoption {
+		t.Errorf("Previous = %s, want %s", moved.Previous, first.Adoption)
+	}
+	if moved.Adoption == first.Adoption {
+		t.Error("the adoption point did not advance to HEAD")
+	}
+	if moved.LeftAudit != 2 {
+		t.Errorf("LeftAudit = %d, want 2 — commits B and C just left doctor's range", moved.LeftAudit)
+	}
+}
+
+// --re-adopt on a repository already at HEAD is not a move, and must not
+// be announced as one: a report of commits leaving the audit when none
+// did is the same over-claim in the opposite direction.
+func TestService_InitReAdoptAtHeadIsNotAMove(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
+		t.Fatal(err)
+	}
+	again, err := svc.Init(domain.AllHooks, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Moved {
+		t.Error("re-adopting at the same HEAD reported a move")
+	}
+	if again.LeftAudit != 0 {
+		t.Errorf("LeftAudit = %d, want 0 — nothing left the range", again.LeftAudit)
 	}
 }
