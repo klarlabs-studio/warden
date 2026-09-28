@@ -70,7 +70,7 @@ func finding(f domain.Finding) string {
 		loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 	}
 	if loc != "" {
-		return fmt.Sprintf("**[%s]** `%s` — %s", f.Severity, loc, f.Message)
+		return fmt.Sprintf("**[%s]** ", f.Severity) + "`" + loc + "` — " + f.Message
 	}
 	return fmt.Sprintf("**[%s]** %s", f.Severity, f.Message)
 }
