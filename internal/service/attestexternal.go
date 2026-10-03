@@ -60,7 +60,13 @@ func (s *Service) AttestExternal(commitish string, ref domain.ExternalRunRef, pu
 	// commit already carries a LOCAL note, replacing it with a weaker external
 	// claim is a downgrade nobody asked for.
 	if existing, _ := s.repo.ReadNote(sha); existing != nil && existing.Attests(sha) {
-		return ExternalAttestResult{SHA: sha, RunID: existing.RunID, AlreadyHad: true}, nil
+		res := ExternalAttestResult{SHA: sha, RunID: existing.RunID, AlreadyHad: true}
+		if push {
+			if err := s.repo.PushNotes(s.remote); err != nil {
+				return res, fmt.Errorf("%w: existing note not published: %v", ErrExternalAttestation, err)
+			}
+		}
+		return res, nil
 	}
 
 	root, entries := domain.ExternalEvidence(ref)

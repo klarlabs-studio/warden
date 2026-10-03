@@ -106,11 +106,11 @@ func TestCmdReattest(t *testing.T) {
 	// itself wrote nothing.
 	out.Reset()
 	errb.Reset()
-	if code := cmdReattest([]string{"--all", "--push"}, &out, &errb); code != 0 {
-		t.Fatalf("--all --push sweep: code=%d err=%q", code, errb.String())
+	if code := cmdReattest([]string{"--all", "--push"}, &out, &errb); code == 0 {
+		t.Fatal("missing remote must fail publication")
 	}
-	if !strings.Contains(out.String(), "pushed notes to the remote") {
-		t.Errorf("--push must report the publish attempt, got %q", out.String())
+	if strings.Contains(out.String(), "pushed notes to the remote") || !strings.Contains(errb.String(), "not published") {
+		t.Fatalf("incorrect publication report: %s %s", out.String(), errb.String())
 	}
 }
 

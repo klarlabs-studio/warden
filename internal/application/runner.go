@@ -455,6 +455,13 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// The push closure runs only after the kernel's approval gate clears. It
 	// prepares the branch and push mode. Publication waits for signed evidence.
 	push := func(ctx context.Context) (domain.StepResult, error) {
+		dirty, err := wt.TrackedDirty()
+		if err != nil {
+			return domain.StepResult{}, fmt.Errorf("check validated tree: %w", err)
+		}
+		if dirty {
+			return domain.StepResult{}, fmt.Errorf("refusing to attest uncommitted changes in the validated worktree")
+		}
 		finalSHA, err := wt.HeadSHA()
 		if err != nil {
 			return domain.StepResult{}, err

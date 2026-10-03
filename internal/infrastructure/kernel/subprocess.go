@@ -76,6 +76,14 @@ func (s SubprocessStep) Run(ctx context.Context, sc application.StepContext) (do
 	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
 		return domain.StepResult{}, fmt.Errorf("decode %s output: %w", s.bin, err)
 	}
+	if out.SchemaVersion != stepsdk.SchemaVersion {
+		return domain.StepResult{}, fmt.Errorf("%s: unsupported schema version %d", s.bin, out.SchemaVersion)
+	}
+	switch out.Status {
+	case stepsdk.StatusPass, stepsdk.StatusFail, stepsdk.StatusNeedsApproval:
+	default:
+		return domain.StepResult{}, fmt.Errorf("%s: invalid step status %q", s.bin, out.Status)
+	}
 	return fromWireOutput(s.name, out), nil
 }
 

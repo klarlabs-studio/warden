@@ -157,9 +157,33 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	// stdin we must not block on — there we gate as before. A parse error or empty
 	// payload falls through to gating (fail safe toward enforcement).
 	if hook == domain.PrePush && !isatty.IsTerminal(os.Stdin.Fd()) {
-		if gatable, err := pushGatable(os.Stdin); err == nil && !gatable {
+		payload, err := io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if len(payload) > 1<<20 {
+			return fail(stderr, fmt.Errorf("push ref list exceeds limit"))
+		}
+		if gatable, err := pushGatable(strings.NewReader(string(payload))); err == nil && !gatable {
 			_, _ = fmt.Fprintln(stdout, "warden: push advances no branch; nothing to gate.")
 			return 0
+		}
+		if strings.TrimSpace(string(payload)) != "" {
+			repo, err := git.Open(".")
+			if err != nil {
+				return fail(stderr, err)
+			}
+			branch, err := repo.CurrentBranch()
+			if err != nil {
+				return fail(stderr, err)
+			}
+			head, err := repo.HeadSHA()
+			if err != nil {
+				return fail(stderr, err)
+			}
+			if err := checkPushTargets(string(payload), branch, head); err != nil {
+				return fail(stderr, err)
+			}
 		}
 	}
 
@@ -574,4 +598,24 @@ func printFindings(w io.Writer, findings []domain.Finding) {
 			_, _ = fmt.Fprintf(w, "%sfix: a %d-line patch is available\n", indent, lines)
 		}
 	}
+}
+
+// Until runs can target multiple refs, reject pushes the current-branch gate
+// cannot observe. A passing run must describe every branch update it permits.
+func checkPushTargets(payload, branch, head string) error {
+	updates := 0
+	for line := range strings.SplitSeq(strings.TrimSpace(payload), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return fmt.Errorf("malformed pre-push ref list")
+		}
+		if !strings.HasPrefix(fields[2], "refs/heads/") || isZeroSHA(fields[1]) {
+			continue
+		}
+		updates++
+		if fields[1] != head || fields[2] != "refs/heads/"+branch || updates > 1 {
+			return fmt.Errorf("push must update only the checked-out branch %s at %s; check out the target branch and push it separately", branch, short(head))
+		}
+	}
+	return nil
 }

@@ -244,3 +244,12 @@ func TestToWireFindingsEmptyIsNil(t *testing.T) {
 		t.Errorf("toWireFindings(empty) = %#v, want nil", got)
 	}
 }
+
+func TestSubprocessRejectsMalformedContract(t *testing.T) {
+	for _, reply := range []string{`{}`, `{"schema_version":1}`, `{"schema_version":2,"status":"pass"}`, `{"schema_version":1,"status":"unknown"}`} {
+		bin, _ := writeFakeStep(t, reply, 0, "")
+		if _, err := NewSubprocessStep("fake", bin).Run(context.Background(), stepCtx(t)); err == nil {
+			t.Fatalf("accepted reply %s", reply)
+		}
+	}
+}

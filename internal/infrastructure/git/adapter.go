@@ -82,10 +82,11 @@ func (a *Adapter) PushAnchor(remote, sha string) error {
 // worktreeAdapter adapts *Worktree to application.Worktree (Dir field → method).
 type worktreeAdapter struct{ wt *Worktree }
 
-func (w worktreeAdapter) Dir() string                { return w.wt.Dir }
-func (w worktreeAdapter) HeadSHA() (string, error)   { return w.wt.HeadSHA() }
-func (w worktreeAdapter) DiffSince() (string, error) { return w.wt.DiffSince() }
-func (w worktreeAdapter) Remove() error              { return w.wt.Remove() }
+func (w worktreeAdapter) Dir() string                 { return w.wt.Dir }
+func (w worktreeAdapter) HeadSHA() (string, error)    { return w.wt.HeadSHA() }
+func (w worktreeAdapter) TrackedDirty() (bool, error) { return w.wt.TrackedDirty() }
+func (w worktreeAdapter) DiffSince() (string, error)  { return w.wt.DiffSince() }
+func (w worktreeAdapter) Remove() error               { return w.wt.Remove() }
 
 func (w worktreeAdapter) Clone(materializeDeps bool) (application.Worktree, error) {
 	clone, err := w.wt.Clone(materializeDeps)
