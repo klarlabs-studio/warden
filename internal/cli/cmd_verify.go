@@ -45,29 +45,36 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	policy, err := externalPolicy(*allowExternal, *requireExternal)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	// A range gate resolves its roster from the BASE ref (the trusted side), so it
 	// gets its own resolution path — see runVerifyRange.
 	if *rangeSpec != "" {
-		return runVerifyRange(svc, *rangeSpec, *keys, *requireSigned, *skipMerges, *jsonOut, *quiet, stdout, stderr)
+		return runVerifyRange(svc, *rangeSpec, *keys, *requireSigned, *skipMerges, *jsonOut, *quiet, stdout, stderr, policy)
 	}
 
 	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
 	// roster, so a repo enforces trusted provenance without passing fingerprints.
 	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
-	policy, err := externalPolicy(*allowExternal, *requireExternal)
-	if err != nil {
-		return fail(stderr, err)
-	}
 	res, err := svc.VerifyWithPolicy(*commit, policy, trusted...)
 	if err != nil {
 		return fail(stderr, err)
 	}
 
+	if *requireSigned && !res.SignatureValid && !res.CarriedTrust {
+		res.Validated = false
+	}
 	if !*quiet {
 		if fromRoster {
 			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
 		}
-		printVerify(stdout, res, len(trusted) > 0)
+		if *requireSigned && !res.SignatureValid && !res.CarriedTrust {
+			_, _ = fmt.Fprintf(stdout, "unverified %s — a valid signature is required\n", short(res.SHA))
+		} else {
+			printVerify(stdout, res, len(trusted) > 0)
+		}
 	}
 	if res.Validated {
 		return 0
@@ -104,7 +111,7 @@ func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fr
 // pre-receive hook wraps — see docs/adr/0002. The CLI passes intent (an explicit
 // --key, or "use the committed roster"); the service resolves the roster from the
 // trusted BASE ref, so the trust invariant lives in the core, not here.
-func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, skipMerges, jsonOut, quiet bool, stdout, stderr io.Writer) int {
+func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, skipMerges, jsonOut, quiet bool, stdout, stderr io.Writer, policy service.ExternalPolicy) int {
 	base, head, ok := parseRange(spec)
 	if !ok {
 		_, _ = fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
@@ -114,6 +121,7 @@ func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, s
 		RequireSigned: requireSigned,
 		SkipMerges:    skipMerges,
 	}
+	opts.ExternalPolicy = policy
 	if k := strings.TrimSpace(keyFlag); k != "" {
 		opts.TrustedKeys = splitList(k) // explicit pin wins outright
 	} else {
@@ -236,6 +244,8 @@ func gateDepth(opts service.RangeVerifyOptions) string {
 // report.
 func reasonHint(r domain.VerifyReason) string {
 	switch r {
+	case domain.ReasonExternal:
+		return "attestation kind does not satisfy the external-run policy"
 	case domain.ReasonMissing:
 		return "no warden note (pushed with --no-verify, or made outside warden)"
 	case domain.ReasonUnreadable:

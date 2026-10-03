@@ -38,7 +38,9 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 		// needs publishing. Returning here without pushing would report success
 		// while the note stays local forever.
 		if push {
-			_ = s.repo.PushNotes(s.remote)
+			if err := s.repo.PushNotes(s.remote); err != nil {
+				return ReattestResult{Target: target, AlreadyHad: true}, fmt.Errorf("note not published: %w", err)
+			}
 		}
 		return ReattestResult{Target: target, AlreadyHad: true}, nil
 	}
@@ -102,7 +104,9 @@ func (s *Service) Reattest(commitish string, push bool) (ReattestResult, error) 
 	}
 	_ = s.repo.AnchorAttested(target) // keep the evidence reachable (#212 §3)
 	if push {
-		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
+		if err := s.repo.PushNotes(s.remote); err != nil {
+			return ReattestResult{Target: target, Source: source, Wrote: true}, fmt.Errorf("note written locally but not published: %w", err)
+		}
 	}
 	return ReattestResult{Target: target, Source: source, Wrote: true}, nil
 }
@@ -162,7 +166,9 @@ func (s *Service) ReattestAll(branch string, push bool, onProgress func(sha stri
 		}
 	}
 	if push {
-		_ = s.repo.PushNotes(s.remote) // best-effort, mirrors the gate's note push
+		if err := s.repo.PushNotes(s.remote); err != nil {
+			return out, fmt.Errorf("notes not published: %w", err)
+		}
 	}
 	return out, nil
 }
@@ -289,7 +295,7 @@ func (s *Service) treeEqualSource(target, targetTree string, trusted []string) (
 		// AND be signed by a trusted key — otherwise a forged, unsigned, or merely
 		// self-signed-but-untrusted note could be laundered into a locally-trusted
 		// re-attestation.
-		if rec.Attests(c) && rec.VerifySignature() && keyTrusted(rec, trusted) {
+		if !rec.IsExternal() && rec.Attests(c) && rec.VerifySignature() && keyTrusted(rec, trusted) {
 			return c, rec, nil
 		}
 	}

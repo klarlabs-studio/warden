@@ -138,9 +138,7 @@ func scanFile(worktreeDir, rel string) []domain.Finding {
 	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
 	for line := 1; sc.Scan(); line++ {
 		text := sc.Text()
-		if interpolationRe.MatchString(text) {
-			continue
-		}
+		text = interpolationRe.ReplaceAllString(text, " ")
 		for _, p := range credentialPatterns {
 			m := p.re.FindString(text)
 			if m == "" || dummyRe.MatchString(m) {

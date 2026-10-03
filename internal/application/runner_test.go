@@ -26,10 +26,11 @@ type fakeWorktree struct {
 	clones    []*fakeWorktree // clones minted by Clone, for isolation assertions
 }
 
-func (w *fakeWorktree) Dir() string                { return w.dir }
-func (w *fakeWorktree) HeadSHA() (string, error)   { return w.headSHA, nil }
-func (w *fakeWorktree) DiffSince() (string, error) { return w.diffSince, nil }
-func (w *fakeWorktree) Remove() error              { w.removed = true; return nil }
+func (w *fakeWorktree) Dir() string                 { return w.dir }
+func (w *fakeWorktree) HeadSHA() (string, error)    { return w.headSHA, nil }
+func (w *fakeWorktree) TrackedDirty() (bool, error) { return w.diffSince != "", nil }
+func (w *fakeWorktree) DiffSince() (string, error)  { return w.diffSince, nil }
+func (w *fakeWorktree) Remove() error               { w.removed = true; return nil }
 func (w *fakeWorktree) Clone(bool) (Worktree, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

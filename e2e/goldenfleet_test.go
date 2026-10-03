@@ -599,3 +599,72 @@ func TestGoldenFleet_RequiredSigningFailureLeavesRemoteUntouched(t *testing.T) {
 		}
 	}
 }
+
+func TestGoldenFleet_UncommittedValidationCannotAttest(t *testing.T) {
+	for _, stage := range []bool{false, true} {
+		g := newGoldenRepo(t)
+		g.adopt()
+		if err := os.WriteFile(filepath.Join(g.dir, "state.txt"), []byte("bad\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		lint := "printf 'good\\n' > state.txt"
+		if stage {
+			lint += " && git add state.txt"
+		}
+		cfg := "hooks: { pre_push: true }\nsteps: { pre_push: [lint, test] }\ncommands:\n  lint: \"" + lint + "\"\n  test: \"grep -q good state.txt\"\nrules: []\n"
+		if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0600); err != nil {
+			t.Fatal(err)
+		}
+		g.git("add", "state.txt", ".warden.yaml")
+		g.git("commit", "--no-verify", "-m", "committed tree fails check")
+		sha := g.revParse("HEAD")
+		for _, args := range [][]string{{"run", "pre-push"}, {"run", "pre-push", "--attest-only"}} {
+			out, code := g.warden(args...)
+			if code == 0 || code == 3 || !strings.Contains(out, "uncommitted changes") {
+				t.Fatalf("dirty validation accepted: staged=%t exit=%d %s", stage, code, out)
+			}
+			if out, code := g.warden("verify", "--commit", sha); code == 0 {
+				t.Fatalf("dirty run wrote attestation: %s", out)
+			}
+		}
+	}
+}
+
+func TestGoldenFleet_OtherBranchPushIsRefused(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	cfg := "hooks: { pre_push: true }\nsteps: { pre_push: [test] }\ncommands: { test: \"grep -q good state.txt\" }\nrules: []\n"
+	if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, "state.txt"), []byte("good\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", ".warden.yaml", "state.txt")
+	g.git("commit", "--no-verify", "-m", "passing main")
+	g.git("switch", "-c", "bad-feature")
+	if err := os.WriteFile(filepath.Join(g.dir, "state.txt"), []byte("bad\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g.git("commit", "--no-verify", "-am", "failing feature")
+	badSHA := g.revParse("HEAD")
+	g.git("switch", "main")
+	hook := "#!/bin/sh\nexec '" + strings.ReplaceAll(wardenBin, "'", "'\\''") + "' run pre-push\n"
+	if err := os.WriteFile(filepath.Join(g.dir, ".git", "hooks", "pre-push"), []byte(hook), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "push", "origin", "bad-feature")
+	cmd.Dir = g.dir
+	cmd.Env = append(hookEnv(), "WARDEN_CONFIG_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "checked-out branch") {
+		t.Fatalf("other branch push accepted: %v %s", err, out)
+	}
+	cmd = exec.Command("git", "-C", g.remote, "rev-parse", "--verify", "refs/heads/bad-feature")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("unchecked branch reached remote: %s", out)
+	}
+	if out, code := g.warden("verify", "--commit", badSHA); code == 0 {
+		t.Fatalf("unchecked branch gained a note: %s", out)
+	}
+}

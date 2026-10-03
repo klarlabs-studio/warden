@@ -175,6 +175,12 @@ From then on `git commit` / `git push` are gated. Warden's own push runs with
   provenance note under `refs/notes/warden` for each validated commit. If the
   branch moved mid-run the fast-forward is aborted, never forced.
 
+The hook permits one branch update at a time, matching the checked-out branch
+and the commit Git supplied. Check out each target branch and push it separately;
+multi-branch pushes and branch-renaming refspecs are refused. Before signing,
+Warden also requires the validation worktree's tracked files and index to match
+its commit. A formatter's uncommitted edits cannot become proof for that commit.
+
 **A passing push exits 0 and prints no error.** When the pipeline changed
 nothing, Warden stands aside and lets git perform and report the push itself, so
 `git push` means exactly what it always did and its exit code answers "did it
@@ -706,7 +712,7 @@ steps:
   pre_push: [intent, rebase, review, test, document, lint, credentials]   # credentials: refuse a push carrying a secret (see below)
 parallel: true   # default — run independent checks concurrently (see below)
 writes: [codegen]   # steps whose tree writes must be KEPT — run as sequential barriers (not isolated/discarded)
-symlink_deps: false   # default false = hardlink-copy node_modules into the worktree (works with Turbopack); true = fast symlink
+symlink_deps: false   # default false = copy node_modules into the worktree (works with Turbopack); true = fast symlink
 timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer than this ("0" = no limit; a malformed value is rejected at load, never silently unlimited)
 notify: true     # default — desktop notification after a slow interactive pre-push (a failed/blocked push always notifies)
 notify_after: 10s   # default — a *passing* run only notifies once it ran at least this long (fast green gates stay silent); must be a valid Go duration or the config is rejected at load
@@ -1132,9 +1138,8 @@ under `.git/` that survives the worktree, so the second run onward is warm:
 Measured on a six-crate Rust workspace, the real pre-commit gate: **86s → 4s.**
 
 This is a *redirection*, not a copy — deliberately. Dependency directories are
-hardlink-copied into the worktree (see `symlink_deps`), which works because
-`node_modules` is read-mostly (with the in-place-write caveat under
-[Dependencies come from your checkout](#dependencies-come-from-your-checkout)).
+copied into the worktree with independent regular-file contents (see
+`symlink_deps`).
 A compiler **writes** to its cache constantly, and hardlinks share inodes, so
 copying one that way would corrupt your live cache. Pointing the toolchain at its
 own directory lets its own locking handle concurrency — which is what those
@@ -1208,7 +1213,7 @@ A validation worktree holds **tracked files only**, so it starts with no
 `node_modules`. Warden does not reinstall — a per-run `npm ci` is the dominant
 cost on a large JS repo, and paying it on every commit would make the gate
 something people turn off. It exposes the dependency directories from your live
-checkout instead (hardlink-copied by default, symlinked under `symlink_deps`).
+checkout instead (independently copied by default, symlinked under `symlink_deps`).
 
 That is a deliberate trade, and it has a consequence worth stating plainly:
 
@@ -1244,11 +1249,10 @@ having to know it.
 
 Two smaller consequences of the same mechanism:
 
-- **Hardlinks share inodes.** A tool that rewrites a dependency file **in place**
-  — `patch-package`, some cache writers — writes through to your real
-  `node_modules`. Creating and deleting files inside the worktree is isolated
-  (directories are recreated, not linked), so this is narrow, but it is not
-  nothing. `symlink_deps: true` does not help; it shares the whole directory.
+- **Regular dependency files are copied independently.** In-place writes stay
+  in the disposable worktree. `symlink_deps: true` opts into sharing the live
+  directory; preserved links such as workspace dependencies still follow their
+  configured targets.
 - **Compiler caches are never shared this way.** A compiler writes to its cache
   constantly, so warden redirects each toolchain at its own directory rather
   than linking one — see

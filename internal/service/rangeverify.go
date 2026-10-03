@@ -12,7 +12,8 @@ import (
 // not suddenly fail a repo that never signed. RequireSigned adds "the signature
 // must verify"; TrustedKeys additionally pins "…and be one of these keys".
 type RangeVerifyOptions struct {
-	RequireSigned bool
+	RequireSigned  bool
+	ExternalPolicy ExternalPolicy
 	// TrustedKeys pins the trusted signer set explicitly (an out-of-band anchor).
 	// When set it wins outright. When empty and UseRoster is true, VerifyRange
 	// reads the roster from the BASE ref itself (see below).
@@ -214,6 +215,16 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitV
 	if !rec.Attests(sha) {
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonBrokenChain}
 	}
+	if rec.IsExternal() {
+		if opts.ExternalPolicy == ExternalReject {
+			return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonExternal}
+		}
+		if rec.ValidateExternal() != nil || !rec.VerifySignature() {
+			return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonBrokenChain}
+		}
+	} else if opts.ExternalPolicy == ExternalRequire {
+		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonExternal}
+	}
 	// A trusted-key requirement implies the signature must first verify.
 	if opts.RequireSigned || len(opts.TrustedKeys) > 0 {
 		if !rec.VerifySignature() {
@@ -240,7 +251,7 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitV
 // cannot check because the runner lacks the public key, or a fingerprint that
 // does not match, all leave the commit exactly as un-noted as it was.
 func (s *Service) forgeVerdict(sha string, opts RangeVerifyOptions) (domain.CommitVerdict, bool) {
-	if len(opts.ForgeKeys) == 0 {
+	if opts.ExternalPolicy == ExternalRequire || len(opts.ForgeKeys) == 0 {
 		return domain.CommitVerdict{}, false
 	}
 	_, fingerprint, good, err := s.repo.CommitSignature(sha)

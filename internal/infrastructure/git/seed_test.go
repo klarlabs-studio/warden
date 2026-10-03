@@ -232,7 +232,7 @@ func TestCreateWorktree_MaterializesNodeModules(t *testing.T) {
 	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("node_modules should be a real directory, got mode %v", fi.Mode())
 	}
-	// The regular file is materialized (hardlink or copy) as a real file.
+	// The regular file is materialized (independent copy) as a real file.
 	mfi, err := os.Lstat(filepath.Join(wt.Dir, "node_modules", "marker"))
 	if err != nil || mfi.Mode()&os.ModeSymlink != 0 || !mfi.Mode().IsRegular() {
 		t.Fatalf("marker should be a real regular file: mode=%v err=%v", mfi.Mode(), err)

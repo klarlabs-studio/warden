@@ -39,7 +39,7 @@ type Git interface {
 	// branch", for the repo that has no default head to compare against either.
 	EmptyTree() (string, error)
 
-	// SeedWorktreeFrom* build the disposable worktree. materializeDeps hardlink-
+	// SeedWorktreeFrom* build the disposable worktree. materializeDeps independently
 	// copies gitignored dependency dirs (node_modules) into it as real files
 	// rather than symlinking them, for build tools that reject an out-of-root
 	// symlink (Next.js/Turbopack). See domain.Config.MaterializeDeps.
@@ -86,6 +86,8 @@ type Worktree interface {
 	// HeadSHA is the worktree's current commit, read after steps have run and
 	// (for rebase/fix steps) committed their changes.
 	HeadSHA() (string, error)
+	// TrackedDirty detects staged or unstaged changes relative to HEAD.
+	TrackedDirty() (bool, error)
 	// DiffSince returns a patch of everything changed in the worktree relative
 	// to the commit it was seeded from — used to re-apply pre-commit fixes.
 	DiffSince() (string, error)

@@ -98,6 +98,11 @@ func (r *Run) RecordStep(res StepResult) error {
 	if r.IsTerminal() {
 		return fmt.Errorf("record step %s: %w", res.Step, ErrRunTerminal)
 	}
+	switch res.Status {
+	case StepPass, StepFail, StepNeedsApproval:
+	default:
+		return fmt.Errorf("invalid step status %q", res.Status)
+	}
 	r.results = append(r.results, res)
 	r.addFindings(res.Findings)
 

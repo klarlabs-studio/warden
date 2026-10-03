@@ -8,7 +8,8 @@ type VerifyReason string
 const (
 	// ReasonOK is the zero value — the commit carries trustworthy provenance to
 	// the depth the gate required.
-	ReasonOK VerifyReason = ""
+	ReasonOK       VerifyReason = ""
+	ReasonExternal VerifyReason = "external-policy"
 	// ReasonMissing: no refs/notes/warden record exists for the commit (a
 	// --no-verify push, an uninstalled hook, or a commit made outside warden).
 	ReasonMissing VerifyReason = "missing"

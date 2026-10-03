@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -122,7 +123,7 @@ func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trus
 		// invariants: bound to THIS commit, and signed. A note that fails them was
 		// written by something that did not go through warden's writer, so the
 		// safe reading is that it is not an attestation at all.
-		if err := rec.ValidateExternal(); err != nil {
+		if err := rec.ValidateExternal(); err != nil || !res.SignatureValid {
 			res.Validated = false
 		}
 	case !res.External && policy == ExternalRequire:
@@ -182,10 +183,21 @@ func (s *Service) carriedOriginalHolds(target string, rec *domain.RunRecord, tru
 		return false
 	}
 	orig := rec.CarriedOriginal
+	// Only relocation and signer metadata may differ from the trusted claim.
+	carried := *rec
+	carried.CommitSHA = orig.CommitSHA
+	carried.ReattestedFrom = orig.ReattestedFrom
+	carried.PublicKey = orig.PublicKey
+	carried.Algorithm = orig.Algorithm
+	outerPayload, outerErr := carried.SigningPayload()
+	originalPayload, originalErr := orig.SigningPayload()
+	if outerErr != nil || originalErr != nil || !bytes.Equal(outerPayload, originalPayload) {
+		return false
+	}
 	// The carried record must be the real thing: bound to the source commit,
 	// chain intact, signature valid, signer on the roster. Anything less and this
 	// is just a note claiming to quote one.
-	if !orig.Attests(rec.ReattestedFrom) || !orig.VerifySignature() || !keyTrusted(orig, trustedKeys) {
+	if orig.IsExternal() || !orig.Attests(rec.ReattestedFrom) || !orig.VerifySignature() || !keyTrusted(orig, trustedKeys) {
 		return false
 	}
 	// And the content must actually be the same content. This is the step that

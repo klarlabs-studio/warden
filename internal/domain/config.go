@@ -37,7 +37,7 @@ type Config struct {
 	Cache map[string][]string `yaml:"cache"`
 
 	// SymlinkDeps opts out of dependency materialization. By default warden
-	// hardlink-copies gitignored dependency directories (node_modules) into the
+	// copies gitignored dependency directories (node_modules) into the
 	// disposable worktree as REAL files, so any tool works — including Next.js 16
 	// / Turbopack, which rejects a node_modules symlink whose target resolves
 	// outside the worktree root. Hardlinks are near-instant on the same

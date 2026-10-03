@@ -21,7 +21,7 @@ import (
 // recompilation per push. It had produced ZERO provenance notes: nobody had ever
 // waited for it, so the gate was installed and 100% routed around.
 //
-// Dependency directories were already solved by hardlink-copying node_modules
+// Dependency directories were already solved by copying node_modules
 // into the worktree. A build cache is a different problem and must not be solved
 // the same way: node_modules is read-mostly, whereas a compiler WRITES to its
 // cache, and hardlinks share inodes — so a gated build could corrupt the

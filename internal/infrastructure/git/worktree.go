@@ -204,12 +204,11 @@ var depDirNames = map[string]bool{"node_modules": true}
 // the disposable worktree with no node_modules, failing every JS step.
 //
 // When materialize is true (the product default — see domain.Config.SymlinkDeps),
-// the directory is hardlink-copied so the deps are REAL files inside the worktree
+// the directory is copied so the deps are REAL files inside the worktree
 // root, which every tool accepts — including Next.js 16 / Turbopack, which
 // rejects a node_modules symlink whose real target resolves outside the
 // worktree's filesystem root ("Symlink node_modules is invalid, it points out of
-// the filesystem root"). Hardlinks are near-instant on the same filesystem and
-// fall back to a byte copy across filesystems. When materialize is false
+// the filesystem root"). Copies have independent contents, so a step cannot modify the live install. When materialize is false
 // (symlink_deps: true) it instead SYMLINKS the resolved directory — fast, O(1),
 // and enough for tsc/eslint/vitest and Node's own resolver, which follow it.
 func (w *Worktree) exposeGitignoredDeps(materialize bool) {
@@ -267,10 +266,8 @@ func (w *Worktree) exposeGitignoredDeps(materialize bool) {
 	})
 }
 
-// materializeTree recreates the directory tree rooted at src under dst using
-// hardlinks for regular files (near-instant, no extra disk on the same
-// filesystem), falling back to a byte copy when a hardlink can't be made (e.g.
-// src and dst live on different filesystems). Directories are recreated and
+// materializeTree recreates the directory tree rooted at src under dst using independent
+// copies for regular files. Directories are recreated and
 // symlinks are preserved verbatim, so the result is a real in-root directory a
 // filesystem-root-strict tool (Turbopack) accepts.
 func materializeTree(src, dst string) error {
@@ -293,11 +290,7 @@ func materializeTree(src, dst string) error {
 			}
 			return os.Symlink(link, out)
 		case d.Type().IsRegular():
-			// Hardlink shares the inode (fast); on a cross-filesystem link error,
-			// fall back to copying the bytes so materialization still succeeds.
-			if err := os.Link(path, out); err == nil {
-				return nil
-			}
+			// Independent bytes keep a step from modifying the live install.
 			return copyFile(path, out)
 		default:
 			return nil // skip sockets/devices/pipes — never present in node_modules
@@ -305,8 +298,7 @@ func materializeTree(src, dst string) error {
 	})
 }
 
-// copyFile copies src to dst preserving the file mode, used as the cross-
-// filesystem fallback for materializeTree.
+// copyFile copies src to dst preserving the file mode for materializeTree.
 func copyFile(src, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {
@@ -378,4 +370,10 @@ func (w *Worktree) Remove() error {
 		return fmt.Errorf("git: remove worktree dir: %w", rmErr)
 	}
 	return nil
+}
+
+// TrackedDirty compares both index and working tree with the checked commit.
+func (w *Worktree) TrackedDirty() (bool, error) {
+	diff, err := runRawIn(w.Dir, "diff", "HEAD", "--binary")
+	return diff != "", err
 }
