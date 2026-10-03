@@ -77,12 +77,15 @@ type RangeVerifyRequest struct {
 
 // RunSummary is a delivery-neutral run result the MCP tool returns.
 type RunSummary struct {
-	Outcome  string            `json:"outcome"` // passed|failed|rejected|aborted
-	Hook     string            `json:"hook"`
-	Steps    []domain.StepName `json:"steps"`
-	Findings []domain.Finding  `json:"findings"`
-	Message  string            `json:"message"`
-	RunID    string            `json:"run_id,omitempty"`
+	Outcome       string            `json:"outcome"` // passed|failed|rejected|aborted
+	Hook          string            `json:"hook"`
+	Steps         []domain.StepName `json:"steps"`
+	Findings      []domain.Finding  `json:"findings"`
+	Message       string            `json:"message"`
+	RunID         string            `json:"run_id,omitempty"`
+	Provenance    string            `json:"provenance,omitempty"`
+	PushPerformed bool              `json:"push_performed"`
+	Warnings      []string          `json:"warnings,omitempty"`
 	// Blocker names the environmental obstacle that ended a failed run — a
 	// tool's lock, a missing toolchain — rather than the change itself; empty
 	// means the verdict is about the change. Retryable is the actionable half:
@@ -281,7 +284,8 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		Description("Poll a run started by run_trigger. Reports the steps that have finished so " +
 			"far and, once the pipeline ends, the full summary. Phase is running, complete or " +
 			"errored — note that 'complete' means the run finished, NOT that the gate passed; read " +
-			"summary.outcome for the verdict.").
+			"summary.outcome for the validation verdict and summary.provenance for note publication. " +
+			"Use summary.push_performed before retrying a run with incomplete provenance.").
 		ReadOnly().
 		Handler(func(in RunStatusInput) (RunStatusOutput, error) {
 			return handleRunStatus(runs, in)

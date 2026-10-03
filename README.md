@@ -1287,6 +1287,7 @@ ready", so a retry wrapper can tell them apart without parsing prose:
 | `1` | the gate reached a verdict about your change | no |
 | `2` | usage error | no |
 | `3` | **passed**, and *warden* performed the push (see below) | no — you're done |
+| `4` | checks passed, but provenance publication is incomplete | repair notes; inspect `push_performed` before retrying a branch push |
 | `75` | a step couldn't run: another process holds its lock (`EX_TEMPFAIL`) | **yes**, later |
 | `78` | a step couldn't run: its toolchain/deps aren't installed (`EX_CONFIG`) | no — run the remediation |
 
@@ -1294,6 +1295,14 @@ A passing pre-push usually exits `0`. It exits `3` in the one case where warden
 performs the push itself — after a step rewrote the branch, or when a force is
 needed — because git's own now-stale push must then be stopped from racing it.
 That case is a **success**: your commits are on the remote.
+
+Publication failures report `provenance=missing` (no note written) or
+`provenance=local` (note written but unpublished), alongside `push_performed`.
+Exit `4` stops a pending git push; when warden already pushed, it cannot undo
+that push. Publish the note before retrying or opening a PR. A published note
+is reported as `provenance=published`; signature trust remains a separate
+verification check. The axi and MCP run summaries expose these fields and
+warnings as structured data.
 
 These codes are what `warden run` returns. **Git does not propagate a hook's exit
 status** — it only distinguishes zero from non-zero, then reports its own failure

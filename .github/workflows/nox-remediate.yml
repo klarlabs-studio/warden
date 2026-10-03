@@ -40,3 +40,17 @@ jobs:
     secrets: inherit
     # with:
     #   include-major: true   # also apply major-version action bumps
+
+  close-superseded:
+    # Preserve human edits and any older fix whose file contents are absent
+    # from the new snapshot. A newer PR alone is not evidence of replacement.
+    needs: [remediate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify cleanup scope
+        run: python3 -m unittest discover -s .github/scripts
+      - name: Close older untouched remediation PRs
+        env:
+          GH_TOKEN: ${{ secrets.NOX_TOKEN || github.token }}
+        run: python3 .github/scripts/close_superseded_remediations.py

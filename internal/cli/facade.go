@@ -71,8 +71,11 @@ func (f facade) runTrigger(ctx context.Context, hook domain.Hook, onStep func(mc
 		// Carry the blocker through: the run already decided whether the
 		// obstacle was the machine or the change, and an agent needs that
 		// verdict as data, not prose.
-		Blocker:   string(res.Blocker),
-		Retryable: res.Blocker.Retryable(),
+		Blocker:       string(res.Blocker),
+		Retryable:     res.Blocker.Retryable(),
+		Provenance:    res.Provenance,
+		PushPerformed: res.PushPerformed,
+		Warnings:      res.Warnings,
 	}
 	if res.Record != nil {
 		summary.RunID = res.Record.RunID

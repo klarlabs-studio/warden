@@ -468,6 +468,43 @@ func TestGoldenFleet_AttestOnlyLeavesTheBranchAlone(t *testing.T) {
 	}
 }
 
+// A remote can accept branch commits while refusing notes. The local record
+// must exist, the remote record must be absent, and the run must say which
+// artifact failed rather than treating passing checks as published provenance.
+func TestGoldenFleet_UnpublishedNoteIsDegradedSuccess(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	g.commit("checks can pass while notes publication fails")
+	head := g.revParse("HEAD")
+	remoteBefore := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main"))
+	hook := filepath.Join(g.remote, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nwhile read -r old new ref; do\n  if [ \"$ref\" = refs/notes/warden ]; then exit 1; fi\ndone\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, code := g.warden("run", "pre-push")
+	if code != 4 || !strings.Contains(out, "provenance=local push_performed=false") {
+		t.Fatalf("unpublished note must be visible as degraded success: exit=%d\n%s", code, out)
+	}
+	if got := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main")); got != remoteBefore {
+		t.Fatalf("pending branch push moved: %s -> %s", remoteBefore, got)
+	}
+	if out, code := g.warden("verify", "--commit", head); code != 0 {
+		t.Fatalf("local note must attest the checked commit: %d %s", code, out)
+	}
+	cmd := exec.Command("git", "--git-dir="+g.remote, "notes", "--ref=warden", "show", head)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("remote unexpectedly has the rejected note: %s", out)
+	}
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	g.git("push", "--no-verify", "origin", "refs/notes/warden:refs/notes/warden")
+	cmd = exec.Command("git", "--git-dir="+g.remote, "notes", "--ref=warden", "show", head)
+	if out, err := cmd.CombinedOutput(); err != nil || len(out) == 0 {
+		t.Fatalf("recovery failed to publish note: %v %s", err, out)
+	}
+}
+
 // The RENDERED summary must account for every commit too, not just the JSON.
 //
 // TestGoldenFleet_BucketsAccountForEveryCommit reads the JSON report, so a

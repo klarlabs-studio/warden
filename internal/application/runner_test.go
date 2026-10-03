@@ -55,6 +55,7 @@ type fakeGit struct {
 	unmergedRemote    []string
 	unmergedRemoteErr error
 	notesPushed       bool
+	pushNotesErr      error
 	anchorsPushed     []string
 	anchorErr         error
 	anchored          []string
@@ -162,7 +163,13 @@ func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	return nil
 }
 func (g *fakeGit) AnchorAttested(sha string) error { g.anchored = append(g.anchored, sha); return nil }
-func (g *fakeGit) PushNotes(string) error          { g.notesPushed = true; return nil }
+func (g *fakeGit) PushNotes(string) error {
+	if g.pushNotesErr != nil {
+		return g.pushNotesErr
+	}
+	g.notesPushed = true
+	return nil
+}
 func (g *fakeGit) PushAnchor(_, sha string) error {
 	g.anchorsPushed = append(g.anchorsPushed, sha)
 	return g.anchorErr
