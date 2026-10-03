@@ -40,9 +40,26 @@ jobs:
       pull-requests: write
     secrets: inherit
     with:
-      # unix-first: native git hooks, disposable worktrees, and a unix-socket
-      # attach channel — no OS-specific matrix needed.
+      # Runtime tests run on Unix; Windows compilation is checked below.
       cross-platform: false
+
+  windows-build:
+    name: Windows compile (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Compile Windows packages
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: go build ./...
 
   # warden-specific end-to-end: build the binary and drive the real gate
   # (pre-commit, pre-push self-push + provenance notes, doctor bypass audit)
@@ -62,6 +79,8 @@ jobs:
         run: |
           git config --global user.email ci@warden.test
           git config --global user.name ci
+      - name: Test remediation cleanup scope
+        run: python3 -m unittest discover -s .github/scripts
       # -count=1 is REQUIRED, not hygiene. These tests drive a separately built
       # binary, so the test package's own inputs never change when internal/**
       # does — Go replays a cached PASS and the suite silently stops running.

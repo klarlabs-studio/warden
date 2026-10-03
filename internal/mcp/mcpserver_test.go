@@ -241,12 +241,15 @@ func TestHandleStepsList_Error(t *testing.T) {
 // run_status. These tests therefore assert the handle, then wait.
 func TestHandleRunTrigger_StartsAndReportsThroughStatus(t *testing.T) {
 	want := RunSummary{
-		Outcome:  "passed",
-		Hook:     "pre-push",
-		Steps:    []domain.StepName{domain.StepLint},
-		Findings: []domain.Finding{{Severity: domain.SeverityLow, Message: "nit"}},
-		Message:  "all green",
-		RunID:    "run-42",
+		Outcome:       "passed",
+		Hook:          "pre-push",
+		Steps:         []domain.StepName{domain.StepLint},
+		Findings:      []domain.Finding{{Severity: domain.SeverityLow, Message: "nit"}},
+		Message:       "all green",
+		RunID:         "run-42",
+		Provenance:    "local",
+		PushPerformed: true,
+		Warnings:      []string{"notes publication failed"},
 	}
 	f := &fakeFacade{run: want}
 	runs := newRegistry()
@@ -268,6 +271,9 @@ func TestHandleRunTrigger_StartsAndReportsThroughStatus(t *testing.T) {
 	}
 	if f.hookRan() != domain.PrePush {
 		t.Errorf("hook not forwarded: got %q", f.hookRan())
+	}
+	if got.Summary.Provenance != "local" || !got.Summary.PushPerformed || len(got.Summary.Warnings) != 1 {
+		t.Fatalf("publication state dropped: %+v", got.Summary)
 	}
 }
 

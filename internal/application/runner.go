@@ -67,11 +67,17 @@ type RunResult struct {
 	AttestOnly bool
 	Message    string
 	// Warnings are non-fatal notices the run wants the developer to see —
-	// currently only a WARDEN_ALLOW_DISCARD override naming the commits it
+	// including provenance publication failures and overrides naming commits
 	// force-pushed over. Kept out of Message so the verdict line stays the
 	// verdict, and out of the application layer's own stdout so delivery
 	// keeps owning I/O.
 	Warnings []string
+	// Provenance records the observed note publication state, independently of
+	// the validation verdict. Empty means publication was not attempted.
+	Provenance string
+	// PushPerformed distinguishes an already completed push from a pending git
+	// push when provenance publication degrades an otherwise passing run.
+	PushPerformed bool
 	// Blocker names the environmental obstacle that ended a failed run (a tool's
 	// lock, a missing toolchain) rather than the change itself. BlockerNone means
 	// the verdict is about the change. Delivery maps it to a distinct exit code.
@@ -556,11 +562,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	var noteErr error
 	var notePushWarning string
+	provenance := "missing"
 	// noteWriteWarning covers the failure one step earlier than notePushWarning:
-	// no note was written AT ALL, not even locally. It stays best-effort in the
-	// gate path — the push already happened, so failing now would block a
-	// developer over a side-channel (§9) — but it must not be SILENT. `git notes
-	// add` needs a committer identity and fails outright without one, which is
+	// no note was written AT ALL, not even locally. Checks remain passed, but
+	// delivery reports degraded publication and stops any pending git push.
+	// A push already performed cannot be undone. `git notes add` needs a
+	// committer identity and fails outright without one, which is
 	// how an --attest-only run once reported "attested" having written nothing
 	// (#183). The gate path had the same hole, minus the exit code.
 	var noteWriteWarning string
@@ -569,19 +576,20 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			"), so there was no commit to bind the record to. This commit will read as ungated everywhere."
 	}
 	if shaErr == nil {
-		// Note-push is best-effort in the GATE path: the push already happened, so
-		// failing the run now would block a developer over a side-channel (§9).
+		// Record publication independently: validation passed even if this write
+		// fails, and the branch may already have been pushed.
 		if noteErr = r.Git.WriteNote(finalSHA, *record); noteErr != nil {
 			noteWriteWarning = "provenance note could NOT be written: " + noteErr.Error() +
-				". The push succeeded, but this commit carries no provenance and will read as an " +
+				". This commit carries no provenance and will read as an " +
 				"ungated bypass everywhere — including in the CI gate."
 		} else {
+			provenance = "local"
 			// Anchor before publishing: the note is worthless for re-attestation if
 			// the commit it annotates gets collected once the branch goes away, and
 			// `--delete-branch` is the default merge flow (#212 §3). Silent on
 			// failure — this is a durability hint, and the run has already pushed.
 			_ = r.Git.AnchorAttested(finalSHA)
-			// Best-effort, but no longer SILENT. A note that reaches no remote is
+			// A publication failure is degraded success. A note that reaches no remote is
 			// provenance nobody else can use: the commit verifies on this machine
 			// and reads as an ungated bypass everywhere else, including in the CI
 			// gate — which then accuses the author of something they did not do.
@@ -591,6 +599,8 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			if err := r.Git.PushNotes(r.Settings.Remote); err != nil {
 				notePushWarning = "provenance note written locally but NOT published: " + err.Error() +
 					". This commit will read as ungated to everyone else until the note reaches the remote."
+			} else {
+				provenance = "published"
 			}
 		}
 	}
@@ -612,6 +622,13 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		}
 	}
 	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes, r.Settings.AttestOnly)
+	if provenance != "published" {
+		if gitCompletes {
+			msg = "checks passed; provenance incomplete; git push stopped before publication"
+		} else {
+			msg += "; provenance incomplete"
+		}
+	}
 	if err := run.MarkPushed(*record, msg); err != nil {
 		return RunResult{}, err
 	}
@@ -619,6 +636,8 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	res := r.result(run, "")
 	res.GitCompletesPush = gitCompletes
 	res.AttestOnly = r.Settings.AttestOnly
+	res.Provenance = provenance
+	res.PushPerformed = !gitCompletes && !r.Settings.AttestOnly
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
 	}
@@ -637,7 +656,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// Publishing the verdict is best-effort and post-push for the same reason
 	// as PR creation, and matters most where CI cannot run: without it the
 	// commit is gated but looks ungated to branch protection.
-	if cfg.Status.Enabled && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
+	if provenance == "published" && cfg.Status.Enabled && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
 		// The forge refuses a status for a commit it has never seen, and when
 		// git is completing the push the branch has not reached it yet. Put the
 		// commit there under its anchor ref first — explicitly, and checked,
@@ -656,7 +675,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	// PR creation is best-effort and post-push: a forge failure never unwinds a
 	// push that already succeeded (§4.3). Only run it when enabled and usable.
-	if willOpenPR {
+	if willOpenPR && provenance == "published" {
 		if pr, err := r.Forge.EnsurePR(ctx, branch, prCfg.Base); err == nil {
 			res.PR = &pr
 			if pr.URL != "" {

@@ -55,6 +55,10 @@ const (
 // so a distinct non-zero value costs nothing and settles the question.
 const exitWardenPushed = 3
 
+// Checks passed, but the note was not published. The push may already have
+// landed; callers must inspect the reported push state before retrying.
+const exitProvenanceIncomplete = 4
+
 // exitForBlocker maps a run's blocker to its process exit code. A verdict that
 // is about the change rather than the environment exits 1, like any other
 // failed hook.
@@ -76,9 +80,13 @@ func exitForBlocker(b domain.Blocker) int {
 //
 //	0                  passed; git completes the push itself
 //	exitWardenPushed   passed; warden pushed, git must stand down
+//	exitProvenanceIncomplete  checks passed; note publication incomplete
 //	1 / 75 / 78        the gate reached a verdict, or could not run
 func prePushExitCode(res application.RunResult) int {
 	if res.Outcome == domain.OutcomePassed {
+		if res.Provenance == "missing" || res.Provenance == "local" {
+			return exitProvenanceIncomplete
+		}
 		// exit 3 exists to stop git racing a push warden already performed. An
 		// --attest-only run performs NO push, so there is nothing to stand down
 		// and nothing stale to guard against: a pass is a plain success.
@@ -313,6 +321,9 @@ func runWithTUI(ctx context.Context, hook domain.Hook, stdout, stderr io.Writer)
 // are printed whatever the outcome: an override that dropped someone's work is
 // exactly the thing that must not be swallowed by a failing run.
 func printWarnings(w io.Writer, res application.RunResult) {
+	if res.Provenance != "" {
+		_, _ = fmt.Fprintf(w, "warden: provenance=%s push_performed=%t\n", res.Provenance, res.PushPerformed)
+	}
 	for _, warn := range res.Warnings {
 		_, _ = fmt.Fprintf(w, "warden: %s\n", warn)
 	}
@@ -333,7 +344,11 @@ func printWarnings(w io.Writer, res application.RunResult) {
 // then reports the real outcome and warden exits 0, so there is nothing to
 // apologize for. On a real failure git's error is correct and stands.
 func noteGitPushError(w io.Writer, res application.RunResult) {
-	if res.Outcome != domain.OutcomePassed || res.GitCompletesPush {
+	if res.Outcome != domain.OutcomePassed || res.GitCompletesPush || res.AttestOnly {
+		return
+	}
+	if prePushExitCode(res) == exitProvenanceIncomplete {
+		_, _ = fmt.Fprintln(w, "warden: checks passed and the commit was pushed, but provenance is incomplete (exit 4). Repair publication before retrying the branch push.")
 		return
 	}
 	_, _ = fmt.Fprintf(w, "warden: git will now print 'error: failed to push some refs' — that's expected, not a failure; warden already pushed your gated commit. (exit %d means exactly this: passed, warden pushed.)\n", exitWardenPushed)

@@ -287,10 +287,13 @@ func axiRunTrigger(f facade, args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	return emitTOON(stdout, stderr, map[string]any{
-		"outcome": summary.Outcome,
-		"hook":    summary.Hook,
-		"message": summary.Message,
-		"run_id":  summary.RunID,
+		"outcome":        summary.Outcome,
+		"hook":           summary.Hook,
+		"message":        summary.Message,
+		"run_id":         summary.RunID,
+		"provenance":     summary.Provenance,
+		"push_performed": summary.PushPerformed,
+		"warnings":       anyStrings(summary.Warnings),
 		// findings/blocker/retryable are what make a failure actionable. Without
 		// them the verb reports only THAT something went wrong, leaving an agent
 		// to re-run the gate interactively to discover what — which is exactly
