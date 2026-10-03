@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -85,5 +86,22 @@ func TestSigningConfig_DefaultsToNotRequired(t *testing.T) {
 	var cfg domain.Config
 	if cfg.Signing.Required {
 		t.Error("signing.required must default to false so existing repos are unaffected")
+	}
+}
+
+func TestRunner_RequiredSigningFailureDoesNotPublishBranch(t *testing.T) {
+	for _, owned := range []bool{false, true} {
+		git := &fakeGit{root: t.TempDir(), branch: "feature", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}, rewritesHistory: owned}
+		cfg := prePushCfg()
+		cfg.Signing.Required = true
+		r := newRunner(t, git, &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}, fakeApprover{approve: true}, cfg)
+		r.Signer = failingSigner{}
+		res, err := r.Run(context.Background(), domain.PrePush)
+		if err == nil || !strings.Contains(err.Error(), "unsigned provenance") {
+			t.Fatalf("error=%v", err)
+		}
+		if git.pushed || git.wroteNote || git.notesPushed || res.PushPerformed {
+			t.Fatalf("signing failure published artifacts: push=%t note=%t notes=%t result=%+v", git.pushed, git.wroteNote, git.notesPushed, res)
+		}
 	}
 }
