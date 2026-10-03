@@ -568,3 +568,34 @@ func TestGoldenFleet_FullyGatedRepoIsClean(t *testing.T) {
 		t.Error("the repo must be reported as adopted")
 	}
 }
+
+// A rewriting gate owns the branch push. Required signing must fail before
+// that publication, even when every validation step passed.
+func TestGoldenFleet_RequiredSigningFailureLeavesRemoteUntouched(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	cfg := "hooks: { pre_push: true }\nsteps: { pre_push: [amender] }\ncommands: { amender: \"git commit -q --allow-empty --no-verify -m checked-rewrite\" }\nsigning: { required: true }\nrules: []\n"
+	if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", ".warden.yaml")
+	g.git("commit", "--no-verify", "-m", "require signing")
+	before := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main"))
+	blockedDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedDir, []byte("block key creation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code := g.wardenEnv([]string{"WARDEN_CONFIG_DIR=" + blockedDir}, "run", "pre-push")
+	if code == 0 || code == 3 || !strings.Contains(out, "unsigned provenance") {
+		t.Fatalf("expected signing refusal: exit=%d %s", code, out)
+	}
+	if got := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main")); got != before {
+		t.Fatalf("signing failure pushed branch: %s -> %s", before, got)
+	}
+	for _, dir := range []string{g.dir, g.remote} {
+		cmd := exec.Command("git", "-C", dir, "show-ref", "--verify", "refs/notes/warden")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Fatalf("signing failure wrote notes in %s: %s", dir, out)
+		}
+	}
+}

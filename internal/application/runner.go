@@ -413,7 +413,14 @@ func (r *Runner) delegateToGit(finalSHA, seedTip string, force domain.PushForce,
 
 // runPrePush runs the full pipeline in a worktree cloned from the branch tip,
 // then fast-forwards back and pushes on approval (§4.3).
-func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, cfg domain.Config) (RunResult, error) {
+func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats, cfg domain.Config) (res RunResult, runErr error) {
+	var pushPerformed bool
+	provenance := ""
+	defer func() {
+		res.PushPerformed = pushPerformed
+		res.Provenance = provenance
+		res.AttestOnly = r.Settings.AttestOnly
+	}()
 	prCfg := cfg.PR
 	seedTip, err := r.Git.HeadSHA()
 	if err != nil {
@@ -434,6 +441,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	var spanBase string
 	// gitCompletes records that warden left the push to git — see delegateToGit.
 	var gitCompletes bool
+	var pushForce domain.PushForce
 	// discardWarning carries a WARDEN_ALLOW_DISCARD override up to the caller so
 	// delivery can print which commits were force-pushed over.
 	var discardWarning string
@@ -445,7 +453,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	willOpenPR := prCfg.Enabled && r.Forge != nil && r.Forge.Available()
 
 	// The push closure runs only after the kernel's approval gate clears. It
-	// performs the real fast-forward-back, push, and note write (§4.3 step 2).
+	// prepares the branch and push mode. Publication waits for signed evidence.
 	push := func(ctx context.Context) (domain.StepResult, error) {
 		finalSHA, err := wt.HeadSHA()
 		if err != nil {
@@ -489,9 +497,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 			gitCompletes = true
 			return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 		}
-		if err := r.Git.Push(r.Settings.Remote, branch, force); err != nil {
-			return domain.StepResult{}, fmt.Errorf("push: %w", err)
-		}
+		pushForce = force
 		return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 	}
 
@@ -560,9 +566,16 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		unsignedWarning = "provenance note written UNSIGNED: " + reason +
 			". It still proves the checks ran, but not WHO ran them — `warden verify --require-signed` will reject it. Set signing.required to fail instead."
 	}
+	// Signing and trace validation must succeed before any branch publication.
+	if !gitCompletes && !r.Settings.AttestOnly {
+		if err := r.Git.Push(r.Settings.Remote, branch, pushForce); err != nil {
+			return r.result(run, ""), fmt.Errorf("push: %w", err)
+		}
+		pushPerformed = true
+	}
 	var noteErr error
 	var notePushWarning string
-	provenance := "missing"
+	provenance = "missing"
 	// noteWriteWarning covers the failure one step earlier than notePushWarning:
 	// no note was written AT ALL, not even locally. Checks remain passed, but
 	// delivery reports degraded publication and stops any pending git push.
@@ -633,11 +646,10 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		return RunResult{}, err
 	}
 
-	res := r.result(run, "")
+	res = r.result(run, "")
 	res.GitCompletesPush = gitCompletes
 	res.AttestOnly = r.Settings.AttestOnly
 	res.Provenance = provenance
-	res.PushPerformed = !gitCompletes && !r.Settings.AttestOnly
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
 	}

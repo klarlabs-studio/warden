@@ -30,6 +30,9 @@ func TestRunner_PublicationStateMatchesArtifacts(t *testing.T) {
 					r.Settings.AttestOnly = mode == "attest-only"
 					res, err := r.Run(context.Background(), domain.PrePush)
 					if mode == "attest-only" && tc.writeErr != nil {
+						if res.Provenance != "missing" || res.PushPerformed || !res.AttestOnly {
+							t.Fatalf("lost publication state on error: %+v", res)
+						}
 						if !errors.Is(err, ErrAttestationNotWritten) {
 							t.Fatalf("error = %v", err)
 						}
