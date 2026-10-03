@@ -119,8 +119,11 @@ type Runner struct {
 
 // Settings carries run-invariant configuration.
 type Settings struct {
-	Version string
-	Remote  string
+	// ExpectedPushBranch and ExpectedPushTip pin Git's hook input across setup.
+	ExpectedPushBranch string
+	ExpectedPushTip    string
+	Version            string
+	Remote             string
 	// AttestOnly runs the full gate and writes the provenance note, but does not
 	// move or push the branch.
 	//
@@ -149,6 +152,9 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 		return RunResult{}, fmt.Errorf("current branch: %w", err)
 	}
 
+	if hook == domain.PrePush && r.Settings.ExpectedPushBranch != "" && branch != r.Settings.ExpectedPushBranch {
+		return RunResult{}, fmt.Errorf("%w: checked-out branch changed since Git prepared the push", ErrBranchMoved)
+	}
 	diff, err := r.diffForRisk(hook, branch, cfg.PR.Base)
 	if err != nil {
 		return RunResult{}, err
@@ -425,6 +431,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	seedTip, err := r.Git.HeadSHA()
 	if err != nil {
 		return RunResult{}, err
+	}
+	if r.Settings.ExpectedPushTip != "" && seedTip != r.Settings.ExpectedPushTip {
+		return RunResult{}, fmt.Errorf("%w: tip changed since Git prepared the push", ErrBranchMoved)
 	}
 	wt, err := r.Git.SeedWorktreeFromBranch(branch, resolved.MaterializeDeps)
 	if err != nil {

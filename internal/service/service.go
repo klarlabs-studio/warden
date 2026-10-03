@@ -524,3 +524,9 @@ func hookConfigFrom(selected []domain.Hook) domain.HookConfig {
 	}
 	return h
 }
+
+// SetPushTarget pins the branch and SHA supplied by Git's pre-push hook.
+func (s *Service) SetPushTarget(branch, tip string) {
+	s.runner.Settings.ExpectedPushBranch = branch
+	s.runner.Settings.ExpectedPushTip = tip
+}

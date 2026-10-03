@@ -156,6 +156,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	// pipes the ref list, whereas a manual `warden run pre-push` has an interactive
 	// stdin we must not block on — there we gate as before. A parse error or empty
 	// payload falls through to gating (fail safe toward enforcement).
+	var pushTargetBranch, pushTargetTip string
 	if hook == domain.PrePush && !isatty.IsTerminal(os.Stdin.Fd()) {
 		payload, err := io.ReadAll(io.LimitReader(os.Stdin, (1<<20)+1))
 		if err != nil {
@@ -184,6 +185,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 			if err := checkPushTargets(string(payload), branch, head); err != nil {
 				return fail(stderr, err)
 			}
+			pushTargetBranch, pushTargetTip = branch, head
 		}
 	}
 
@@ -205,6 +207,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	svc.SetAttestOnly(attestOnly)
+	svc.SetPushTarget(pushTargetBranch, pushTargetTip)
 
 	// A non-interactive pre-push still publishes to the attach socket, so another
 	// terminal can watch it with `warden attach`.
