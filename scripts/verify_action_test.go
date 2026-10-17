@@ -12,6 +12,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// These are deliberately repetitive public fingerprints for the mock verifier.
+const actionTestPin = "aaaaaaaaaaaaaaaa"
+
 func TestVerifyActionPinnedTrust(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX action")
@@ -56,10 +59,10 @@ func TestVerifyActionPinnedTrust(t *testing.T) {
 		{"missing pin", "", "0", false, false},
 		{"blank pin", " \t\n", "0", false, false},
 		{"empty list", " , ,\t", "0", false, false},
-		{"trusted attestation", "0123456789abcdef", "0", true, true},
-		{"multiple keys", "0123456789abcdef,fedcba9876543210", "0", true, true},
-		{"unverified", "0123456789abcdef", "1", true, false},
-		{"verifier error", "0123456789abcdef", "2", true, false},
+		{"trusted attestation", actionTestPin, "0", true, true},
+		{"multiple keys", actionTestPin + ",bbbbbbbbbbbbbbbb", "0", true, true},
+		{"unverified", actionTestPin, "1", true, false},
+		{"verifier error", actionTestPin, "2", true, false},
 		{"literal shell input", "$(touch injected);`touch injected`", "1", true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -72,7 +75,15 @@ func TestVerifyActionPinnedTrust(t *testing.T) {
 			commit := "abc$(touch injected)`touch injected`"
 			cmd := exec.Command("bash", "-e", "-c", check)
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GITHUB_ACTION_PATH="+filepath.Dir(repoFile(t, ".github/actions/warden-verify/action.yml")), "GITHUB_OUTPUT="+output, "WARDEN_COMMIT="+commit, "WARDEN_TRUSTED_KEYS="+tt.keys, "VERIFY_ARGS="+args, "VERIFY_STATUS="+tt.status)
+			cmd.Env = append(os.Environ(),
+				"PATH="+dir+":"+os.Getenv("PATH"),
+				"GITHUB_ACTION_PATH="+filepath.Dir(repoFile(t, ".github/actions/warden-verify/action.yml")),
+				"GITHUB_OUTPUT="+output,
+				"WARDEN_COMMIT="+commit,
+				"WARDEN_TRUSTED_KEYS="+tt.keys,
+				"VERIFY_ARGS="+args,
+				"VERIFY_STATUS="+tt.status,
+			)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("check: %v: %s", err, out)
 			}
@@ -117,8 +128,18 @@ func TestVerifyActionContainerRequirements(t *testing.T) {
 	}
 	argsFile := filepath.Join(dir, "args")
 	image := "sha256:" + strings.Repeat("a", 64)
+	requirements := filepath.Join(dir, "policy with spaces.json")
 	cmd := exec.Command("bash", repoFile(t, ".github/actions/warden-verify/verify.sh"))
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "GITHUB_OUTPUT="+filepath.Join(dir, "output"), "WARDEN_COMMIT=tip", "WARDEN_TRUSTED_KEYS=0123456789abcdef", "WARDEN_REQUIREMENTS=/protected/policy with spaces.json", "WARDEN_CONTAINER_STEPS=lint,test", "WARDEN_CONTAINER_IMAGE_ID="+image, "VERIFY_ARGS="+argsFile)
+	cmd.Env = append(os.Environ(),
+		"PATH="+dir+":"+os.Getenv("PATH"),
+		"GITHUB_OUTPUT="+filepath.Join(dir, "output"),
+		"WARDEN_COMMIT=tip",
+		"WARDEN_TRUSTED_KEYS="+actionTestPin,
+		"WARDEN_REQUIREMENTS="+requirements,
+		"WARDEN_CONTAINER_STEPS=lint,test",
+		"WARDEN_CONTAINER_IMAGE_ID="+image,
+		"VERIFY_ARGS="+argsFile,
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("script: %v %s", err, out)
 	}
@@ -126,7 +147,7 @@ func TestVerifyActionContainerRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"verify", "--commit", "tip", "--key", "0123456789abcdef", "--requirements", "/protected/policy with spaces.json", "--container-steps", "lint,test", "--container-image-id", image, "--quiet"}
+	want := []string{"verify", "--commit", "tip", "--key", actionTestPin, "--requirements", requirements, "--container-steps", "lint,test", "--container-image-id", image, "--quiet"}
 	if got := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments: %q want %q", got, want)
 	}
