@@ -34,6 +34,27 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(json.loads(connection.request.call_args.kwargs["body"]), {"state": "closed"})
         self.assertEqual(connection.close.call_count, 3)
 
+    def test_api_identifies_itself(self):
+        # GitHub answers a request without a User-Agent with 403 Forbidden,
+        # and http.client sends none of its own.
+        response = io.StringIO("[]")
+        response.status = 200
+        connection = Mock()
+        connection.getresponse.return_value = response
+        with patch.dict("os.environ", GH_TOKEN="fixture"), patch.object(cleanup, "HTTPSConnection", return_value=connection):
+            cleanup.api("repos/klarlabs-studio/warden/pulls?state=open")
+        self.assertTrue(connection.request.call_args.kwargs["headers"].get("User-Agent"))
+
+    def test_api_failure_names_what_github_said(self):
+        response = io.BytesIO(b'{"message": "Resource not accessible by integration"}')
+        response.status = 403
+        response.reason = "Forbidden"
+        connection = Mock()
+        connection.getresponse.return_value = response
+        with patch.dict("os.environ", GH_TOKEN="fixture"), patch.object(cleanup, "HTTPSConnection", return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, "403 Forbidden.*Resource not accessible by integration"):
+                cleanup.api("repos/klarlabs-studio/warden/pulls?state=open")
+
     def test_scope(self):
         newest = pr(10, "nox/remediate-200", "2026-10-03T00:00:00Z")
         older = pr(9, "nox/remediate-100", "2026-10-02T00:00:00Z")
