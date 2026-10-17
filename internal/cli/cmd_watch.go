@@ -2,27 +2,42 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
+	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/watch"
+	"go.klarlabs.de/warden/internal/service"
 )
 
 // pollInterval is how often watch samples the tree. Fast enough to feel live,
 // slow enough to coalesce a burst of editor saves.
 const pollInterval = 400 * time.Millisecond
 
-// cmdWatch handles `warden watch`: a continuous feedback loop that re-runs the
-// fast pre-commit step commands against the working tree whenever a file
-// changes. Unlike the gate, it runs in the live tree (so it reflects unsaved
-// edits) and never pushes — it is a dev-loop convenience, not the gate.
-func cmdWatch(_ []string, stdout, stderr io.Writer) int {
+// cmdWatch supports live-file feedback and an explicit staged mode that warms
+// exact local predictions in disposable container worktrees. Neither mode pushes.
+func cmdWatch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	staged := fs.Bool("staged", false, "precompute opted-in checks against the Git staging area")
+	once := fs.Bool("once", false, "with --staged, evaluate once and exit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || (*once && !*staged) {
+		_, _ = fmt.Fprintln(stderr, "warden: watch accepts --staged [--once]")
+		return 2
+	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		return fail(stderr, err)
@@ -36,13 +51,21 @@ func cmdWatch(_ []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
+	if *staged {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runStagedWatch(ctx, svc, dir, *once, stdout, stderr)
+	}
+	if cfg.Execution.ContainerEnabled() {
+		return fail(stderr, fmt.Errorf("watch runs in the live tree and does not support container execution; use warden run pre-commit for isolated container checks"))
+	}
 	cmds := watchCommands(cfg)
 	if len(cmds) == 0 {
 		_, _ = fmt.Fprintln(stderr, "warden: no pre-commit commands configured to watch; add commands + steps.pre_commit")
 		return 1
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	_, _ = fmt.Fprintf(stdout, "warden: watching %s (ctrl+c to stop) — %d check(s)\n", dir, len(cmds))
@@ -111,5 +134,82 @@ func runWatchChecks(ctx context.Context, w io.Writer, dir string, cmds []namedCo
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "  ✓ %s (%.1fs)\n", c.step, elapsed)
+	}
+}
+
+func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once bool, stdout, stderr io.Writer) int {
+	cfg, err := svc.Config()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if !cfg.Execution.ContainerEnabled() || len(cfg.PredictiveCache) == 0 {
+		return fail(stderr, fmt.Errorf("staged watch needs a container image and predictive_cache checks"))
+	}
+	public, _ := svc.SigningKey()
+	if public == "" {
+		return fail(stderr, fmt.Errorf("staged watch needs a local signing key"))
+	}
+	evaluate := func(ctx context.Context) error {
+		svc.SetObserver(&predictionReporter{ctx: ctx, w: stdout})
+		result, err := svc.PredictStaged(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			return err
+		}
+		if result.Outcome != domain.OutcomePassed {
+			return fmt.Errorf("staged checks %s: %s", result.Outcome, result.Message)
+		}
+		_, _ = fmt.Fprintln(stdout, "warden: staged checks passed; saved predictions expire after 10 minutes")
+		return nil
+	}
+	defer svc.SetObserver(nil)
+	if once {
+		if err := evaluate(ctx); err != nil {
+			return fail(stderr, err)
+		}
+		return 0
+	}
+	fingerprint := func(ctx context.Context) (string, error) {
+		index, err := watch.StagedFingerprint(ctx, dir)
+		if err != nil {
+			return "", err
+		}
+		cfg, err := svc.Config()
+		if err != nil {
+			return "", err
+		}
+		configDigest, err := domain.DigestJSON(cfg)
+		if err != nil {
+			return "", err
+		}
+		return index + configDigest, nil
+	}
+	_, _ = fmt.Fprintln(stdout, "warden: watching staged inputs (ctrl+c to stop); checks run in disposable container worktrees")
+	watch.RunStaged(ctx, pollInterval, fingerprint, evaluate, func(err error) {
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "warden:", err)
+		}
+	})
+	_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
+	return 0
+}
+
+type predictionReporter struct {
+	ctx context.Context
+	w   io.Writer
+	mu  sync.Mutex
+}
+
+func (r *predictionReporter) OnStep(event application.StepEvent) {
+	if event.Phase != application.StepFinished || r.ctx.Err() != nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", event.Result.Status, event.Result.Summary)
+	if event.Result.Status != domain.StepPass {
+		printFindings(r.w, event.Result.Findings)
 	}
 }

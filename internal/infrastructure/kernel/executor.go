@@ -96,6 +96,15 @@ func evidenceFor(res domain.StepResult) []axidomain.EvidenceRecord {
 			"fixed":  res.Fixed,
 		},
 	}}
+	if res.Environment != nil && res.Reuse == nil {
+		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.environment", res.Step), Source: string(res.Step), Value: *res.Environment})
+	}
+	if res.Reuse != nil {
+		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.reuse", res.Step), Source: string(res.Step), Value: *res.Reuse})
+	}
+	if res.Contract != nil && res.Reuse == nil {
+		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.contract", res.Step), Source: string(res.Step), Value: *res.Contract})
+	}
 	for _, f := range res.Findings {
 		records = append(records, axidomain.EvidenceRecord{
 			Kind:   fmt.Sprintf("%s.finding", res.Step),

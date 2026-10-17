@@ -16,8 +16,9 @@ import (
 // application.KernelFactory. It holds the registry of built-in step
 // implementations to bind into each run.
 type Factory struct {
-	registry application.Registry
-	cache    application.StepCache
+	registry    application.Registry
+	cache       application.StepCache
+	predictions application.PredictionCache
 }
 
 // NewFactory returns a Factory backed by the given built-in step registry.
@@ -32,6 +33,11 @@ func (f *Factory) WithCache(c application.StepCache) *Factory {
 	return f
 }
 
+func (f *Factory) WithPredictions(p application.PredictionCache) *Factory {
+	f.predictions = p
+	return f
+}
+
 // New builds a fresh kernel for one run and wraps it with a run-level evidence
 // ledger that hash-chains every step's evidence for the provenance note (§9).
 func (f *Factory) New(policy domain.ResolvedPolicy, sc application.StepContext, priors *[]domain.Finding, push application.PushFunc) (application.Kernel, error) {
@@ -39,6 +45,7 @@ func (f *Factory) New(policy domain.ResolvedPolicy, sc application.StepContext, 
 	if push != nil {
 		pf = PushFunc(push)
 	}
+	sc.Predictions = f.predictions
 	k, err := Build(f.registry, policy, sc, priors, pf, f.cache)
 	if err != nil {
 		return nil, err

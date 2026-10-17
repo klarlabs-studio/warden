@@ -21,6 +21,8 @@ type Config struct {
 
 	Hooks HookConfig `yaml:"hooks"`
 
+	Execution ExecutionConfig `yaml:"execution"`
+
 	// Commands maps a built-in shell-backed step to the command it runs.
 	Commands map[string]string `yaml:"commands"`
 
@@ -35,6 +37,9 @@ type Config struct {
 	// step (a cache hit). Only non-mutating steps are cacheable; correctness
 	// rests on declaring all of a step's inputs (like bazel/turbo).
 	Cache map[string][]string `yaml:"cache"`
+
+	// PredictiveCache opts specific read-only shell checks into exact staged-tree caching.
+	PredictiveCache []string `yaml:"predictive_cache"`
 
 	// SymlinkDeps opts out of dependency materialization. By default warden
 	// copies gitignored dependency directories (node_modules) into the
@@ -223,6 +228,14 @@ func isFingerprint(s string) bool {
 // is called by the config loader after parsing so an invalid name fails the
 // load rather than reaching exec.LookPath. Built-in names always pass.
 func (c Config) Validate() error {
+	if err := c.Execution.Validate(); err != nil {
+		return err
+	}
+	for _, name := range c.PredictiveCache {
+		if !StepName(name).Valid() {
+			return fmt.Errorf("invalid step name %q in predictive_cache", name)
+		}
+	}
 	for hook, names := range c.Steps {
 		for _, n := range names {
 			if !n.Valid() {

@@ -71,6 +71,9 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 	signer := resolveSigner(repo, configs)
 	if signer != nil {
 		runner.Signer = signer
+		if gitDir, err := repo.GitDir(); err == nil {
+			factory.WithPredictions(cache.OpenPredictions(gitDir, version, signer))
+		}
 	}
 	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, signer: signer, version: version, remote: DefaultRemote}, nil
 }
@@ -239,6 +242,11 @@ func (s *Service) Explain(hook domain.Hook, branch string, paths []string) (doma
 	resolved := policy.Resolve(cfg, policy.Input{Hook: hook, Branch: branch, Paths: paths, Risk: risk})
 	resolved.Commands = cfg.Commands
 	return resolved, nil
+}
+
+// PredictStaged warms only explicitly opted-in non-mutating staged checks.
+func (s *Service) PredictStaged(ctx context.Context) (application.RunResult, error) {
+	return s.runner.PredictStaged(ctx)
 }
 
 // Run drives a hook invocation end to end.

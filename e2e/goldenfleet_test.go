@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // The golden fleet.
@@ -666,5 +669,208 @@ func TestGoldenFleet_OtherBranchPushIsRefused(t *testing.T) {
 	}
 	if out, code := g.warden("verify", "--commit", badSHA); code == 0 {
 		t.Fatalf("unchecked branch gained a note: %s", out)
+	}
+}
+
+// This scenario has an independently known environment: the host dependency
+// marker exists only outside the disposable container tree, and the image is
+// preloaded by the caller. The note must describe the execution we observed.
+func TestGoldenFleet_ContainerEvidenceRequiresObservedExecution(t *testing.T) {
+	image := os.Getenv("WARDEN_CONTAINER_TEST_IMAGE")
+	if image == "" {
+		t.Skip("set WARDEN_CONTAINER_TEST_IMAGE to a preloaded Linux image")
+	}
+	runtimeName := os.Getenv("WARDEN_CONTAINER_TEST_RUNTIME")
+	if runtimeName == "" {
+		runtimeName = "docker"
+	}
+	g := newGoldenRepo(t)
+	g.adopt()
+	cfg := fmt.Sprintf(`hooks: { pre_push: true }
+execution: { image: %q, runtime: %q }
+steps: { pre_push: [lint, test] }
+commands:
+  lint: 'mkdir .exclusive-install && test ! -e node_modules/host-only && test "$(uname -s)" = Linux'
+  test: 'mkdir .exclusive-install && test ! -e node_modules/host-only && test "$(uname -s)" = Linux'
+rules: []
+`, image, runtimeName)
+	if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, ".gitignore"), []byte("node_modules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(g.dir, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, "node_modules", "host-only"), []byte("host"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", ".warden.yaml", ".gitignore")
+	g.git("commit", "--no-verify", "-m", "configure container checks")
+	if out, code := g.warden("run", "pre-push", "--attest-only"); code != 0 {
+		t.Fatalf("container gate: %d %s", code, out)
+	}
+	cmd := exec.Command("git", "notes", "--ref=warden", "show", "HEAD")
+	cmd.Dir = g.dir
+	data, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record domain.RunRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	env, ok := record.Environments[domain.StepLint]
+	if !ok || env.Runtime != runtimeName || env.Image != image || !domain.ValidContainerImageID(env.ImageID) || !record.VerifySignature() {
+		t.Fatalf("incorrect execution artifact: %+v", record)
+	}
+	head := g.revParse("HEAD")
+	if !record.Attests(head) {
+		t.Fatal("container evidence not bound to commit")
+	}
+	for _, tc := range []struct {
+		steps, id string
+		code      int
+	}{{"lint,test", env.ImageID, 0}, {"credentials", env.ImageID, 1}, {"lint", "sha256:" + strings.Repeat("b", 64), 1}} {
+		out, code := g.warden("verify", "--key", record.SignerFingerprint(), "--container-steps", tc.steps, "--container-image-id", tc.id)
+		if code != tc.code {
+			t.Fatalf("verify %s: %d want %d: %s", tc.steps, code, tc.code, out)
+		}
+	}
+	// Assert the emitted artifact, then exercise strict consumer requirements.
+	contract, ok := record.Contracts[domain.StepLint]
+	if !ok || contract.TreeSHA != g.revParse("HEAD^{tree}") || contract.Inputs == nil {
+		t.Fatalf("missing checked-tree contract: %+v", record.Contracts)
+	}
+	requirements := domain.ExecutionRequirements{Version: 1, Steps: map[domain.StepName]domain.StepRequirements{
+		domain.StepLint: {Command: `mkdir .exclusive-install && test ! -e node_modules/host-only && test "$(uname -s)" = Linux`, ConfigurationDigest: contract.ConfigurationDigest, ContextDigest: contract.ContextDigest, Inputs: contract.Inputs, ImageID: env.ImageID, ImageIDKind: env.ImageIDKind, Platform: env.Platform, Network: "none"},
+	}}
+	policyFile := filepath.Join(t.TempDir(), "requirements.json")
+	checkRequirements := func(want int) {
+		t.Helper()
+		data, err := json.Marshal(requirements)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(policyFile, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := g.warden("verify", "--key", record.SignerFingerprint(), "--requirements", policyFile); code != want {
+			t.Fatalf("requirements: %d want %d: %s", code, want, out)
+		}
+	}
+	checkRequirements(0)
+	expected := requirements.Steps[domain.StepLint]
+	expected.Command = "false"
+	requirements.Steps[domain.StepLint] = expected
+	checkRequirements(1)
+	// A normal note cannot satisfy container requirements by omission.
+	record.Environments = nil
+	payload, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := exec.Command("git", "notes", "--ref=warden", "add", "-f", "-F", "-", "HEAD")
+	note.Dir = g.dir
+	note.Stdin = strings.NewReader(string(payload))
+	if out, err := note.CombinedOutput(); err != nil {
+		t.Fatalf("replace note: %v %s", err, out)
+	}
+	if out, code := g.warden("verify", "--key", record.SignerFingerprint(), "--container-steps", "lint"); code == 0 {
+		t.Fatalf("stripped execution evidence accepted: %s", out)
+	}
+}
+
+func TestGoldenFleet_StagedPredictionIsLocalExactAndInvalidated(t *testing.T) {
+	image := os.Getenv("WARDEN_CONTAINER_TEST_IMAGE")
+	if image == "" {
+		t.Skip("set WARDEN_CONTAINER_TEST_IMAGE to a preloaded Linux image")
+	}
+	engine := os.Getenv("WARDEN_CONTAINER_TEST_RUNTIME")
+	if engine == "" {
+		engine = "docker"
+	}
+	g := newGoldenRepo(t)
+	keyDir := t.TempDir()
+	warden := func(args ...string) (string, int) {
+		return g.wardenEnv([]string{"WARDEN_CONFIG_DIR=" + keyDir}, args...)
+	}
+	cfg := fmt.Sprintf(`hooks: { pre_commit: true }
+execution: { image: %q, runtime: %q }
+predictive_cache: [test]
+steps: { pre_commit: [test], pre_push: [test] }
+commands: { test: 'test "$(cat sample)" = good' }
+rules: []
+notify: false
+`, image, engine)
+	if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, "sample"), []byte("initial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", ".warden.yaml", "sample")
+	g.git("commit", "--no-verify", "-m", "configure staged checks")
+	if err := os.WriteFile(filepath.Join(g.dir, "sample"), []byte("good"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", "sample")
+	// The live file disagrees: only the staged contents should be evaluated.
+	if err := os.WriteFile(filepath.Join(g.dir, "sample"), []byte("bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := warden("watch", "--staged", "--once"); code != 0 {
+		t.Fatalf("predict: %d %s", code, out)
+	}
+	entries, err := filepath.Glob(filepath.Join(g.dir, ".git", "warden", "predictions", "*.json"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("prediction artifact: %v %v", entries, err)
+	}
+	data, err := os.ReadFile(entries[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prediction domain.Prediction
+	if err := json.Unmarshal(data, &prediction); err != nil {
+		t.Fatal(err)
+	}
+	treeCommand := exec.Command("git", "write-tree")
+	treeCommand.Dir = g.dir
+	treeData, treeErr := treeCommand.Output()
+	if treeErr != nil {
+		t.Fatal(treeErr)
+	}
+	if !prediction.VerifySignature() || prediction.Contract.TreeSHA != strings.TrimSpace(string(treeData)) || prediction.Purpose != domain.PredictionPurpose {
+		t.Fatalf("incorrect signed artifact: %+v", prediction)
+	}
+	if out, code := warden("run", "pre-commit"); code != 0 || !strings.Contains(out, "matched signed staged prediction") {
+		t.Fatalf("reuse: %d %s", code, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(g.dir, "sample")); err != nil || string(got) != "bad" {
+		t.Fatal("live tree was changed")
+	}
+	// Cache reuse must not create commit-bound provenance.
+	note := exec.Command("git", "notes", "--ref=warden", "show", "HEAD")
+	note.Dir = g.dir
+	if err := note.Run(); err == nil {
+		t.Fatal("staged prediction claimed a commit attestation")
+	}
+	g.git("add", "sample")
+	if out, code := warden("run", "pre-commit"); code == 0 || strings.Contains(out, "matched signed staged prediction") {
+		t.Fatalf("restaged failing contents reused: %d %s", code, out)
+	}
+	// A modified cache artifact cannot authorize the old good tree either.
+	if err := os.WriteFile(filepath.Join(g.dir, "sample"), []byte("good"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", "sample")
+	prediction.Contract.CommandDigest = "tampered"
+	data, _ = json.Marshal(prediction)
+	if err := os.WriteFile(entries[0], data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := warden("run", "pre-commit"); code != 0 || strings.Contains(out, "matched signed staged prediction") {
+		t.Fatalf("tampered artifact reuse: %d %s", code, out)
 	}
 }

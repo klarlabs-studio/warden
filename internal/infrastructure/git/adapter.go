@@ -102,3 +102,15 @@ func (w worktreeAdapter) Clone(materializeDeps bool) (application.Worktree, erro
 func (a *Adapter) DetectDepDrift(worktreeDir string) []domain.DepDrift {
 	return DetectDepDrift(worktreeDir, a.repo.Dir)
 }
+
+// SeedDependencyFreeWorktree copies the adapter, so parallel clones inherit
+// the no-host-dependencies setting without mutating the shared repository.
+func (a *Adapter) SeedDependencyFreeWorktree(hook domain.Hook, branch string) (application.Worktree, error) {
+	repo := *a.repo
+	repo.skipDependencyExposure = true
+	clean := NewAdapter(&repo)
+	if hook == domain.PreCommit {
+		return clean.SeedWorktreeFromHead(false)
+	}
+	return clean.SeedWorktreeFromBranch(branch, false)
+}

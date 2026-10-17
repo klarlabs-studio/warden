@@ -520,6 +520,12 @@ func passLine(ran, prePush []domain.StepName) string {
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a
 // pass so the commit proceeds; a failure exits non-zero to abort the commit.
 func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, stderr io.Writer) int {
+	for _, step := range res.Policy.Steps {
+		if reuse, ok := res.ReusedSteps[step]; ok {
+			_, _ = fmt.Fprintf(stdout, "warden: %s cached — matched signed staged prediction from %s\n", step, reuse.RecordedAt.UTC().Format(time.RFC3339))
+		}
+	}
+
 	if res.Outcome != domain.OutcomePassed {
 		_, _ = fmt.Fprintf(stderr, "warden: %s\n", res.Message)
 		return exitForBlocker(res.Blocker)

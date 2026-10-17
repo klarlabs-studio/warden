@@ -419,7 +419,8 @@ and the friction is acceptable.
 They are complements, not alternatives:
 
 - **[provenance-skip](ci-provenance-skip.md)** (`warden-verify`) — a *speed*
-  optimization: a validated commit **skips** re-running checks. Never fails CI.
+  optimization: explicitly trusted commit provenance permits skipping equivalent
+  checks. Without a key pin or valid provenance, CI runs the checks.
 - **provenance-gate** (`warden-gate`) — an *enforcement* control: an un-gated
   commit **fails** a required check. This page.
 

@@ -109,7 +109,9 @@ func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree,
 	// those steps resolve their deps without a slow reinstall. Best-effort: a
 	// repo with no node_modules exposes nothing and steps that don't need it are
 	// unaffected.
-	wt.exposeGitignoredDeps(materializeDeps)
+	if !r.skipDependencyExposure {
+		wt.exposeGitignoredDeps(materializeDeps)
+	}
 	return wt, nil
 }
 

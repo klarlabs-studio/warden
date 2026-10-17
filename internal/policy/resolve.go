@@ -71,20 +71,24 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 	matches := matchingRules(cfg, in)
 
 	res := domain.ResolvedPolicy{
-		Hook:     in.Hook,
-		Agents:   map[domain.StepName]string{},
-		AutoFix:  map[domain.StepName]int{},
-		Commands: cfg.Commands,
-		Risk:     in.Risk,
+		Hook:      in.Hook,
+		Execution: cfg.Execution,
+		Agents:    map[domain.StepName]string{},
+		AutoFix:   map[domain.StepName]int{},
+		Commands:  cfg.Commands,
+		Risk:      in.Risk,
 		// Concurrent step execution is on unless explicitly disabled.
-		Parallel: cfg.Parallel == nil || *cfg.Parallel,
-		Timeouts: parseTimeouts(cfg.Timeouts),
-		Cache:    cacheGlobs(cfg.Cache),
+		Parallel:        cfg.Parallel == nil || *cfg.Parallel,
+		Timeouts:        parseTimeouts(cfg.Timeouts),
+		Cache:           cacheGlobs(cfg.Cache),
+		PredictiveCache: cfg.PredictiveCache,
 		// The security gate's posture is a whole-config setting, not something a
 		// per-branch rule overlays: "which findings fail a push" should not vary
 		// silently with the branch you happen to be on.
 		SecurityScan: cfg.SecurityScan,
 	}
+
+	res.ConfigurationDigest, _ = domain.DigestJSON(cfg)
 
 	res.Steps = resolveSteps(cfg, in.Hook, matches)
 	// Materialize gitignored deps by default; symlink_deps: true opts out.

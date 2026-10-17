@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -20,6 +21,9 @@ import (
 func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	requirementsFile := fs.String("requirements", "", "protected JSON execution requirements (single-commit only)")
+	containerSteps := fs.String("container-steps", "", "require trusted container execution for these comma-separated steps (single-commit only)")
+	containerImageID := fs.String("container-image-id", "", "require this inspected sha256 image ID for --container-steps")
 	commit := fs.String("commit", "HEAD", "commit to verify")
 	rangeSpec := fs.String("range", "", "gate every commit in a BASE..HEAD range (e.g. origin/main..HEAD); exits non-zero if any commit lacks trusted provenance")
 	requireSigned := fs.Bool("require-signed", false, "require each note to carry a signature that verifies (implied by --key)")
@@ -40,6 +44,42 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	requirementsSet := false
+	containerStepsSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "requirements" {
+			requirementsSet = true
+		}
+		if f.Name == "container-steps" {
+			containerStepsSet = true
+		}
+	})
+	var requiredContainerSteps []domain.StepName
+	for _, name := range splitList(*containerSteps) {
+		step := domain.StepName(name)
+		if !step.Valid() {
+			_, _ = fmt.Fprintln(stderr, "warden: invalid --container-steps name")
+			return 2
+		}
+		requiredContainerSteps = append(requiredContainerSteps, step)
+	}
+	if (containerStepsSet && len(requiredContainerSteps) == 0) || (*containerImageID != "" && (len(requiredContainerSteps) == 0 || !domain.ValidContainerImageID(*containerImageID))) || (*rangeSpec != "" && len(requiredContainerSteps) > 0) {
+		_, _ = fmt.Fprintln(stderr, "warden: --container-steps requires step names and single-commit verification; --container-image-id requires --container-steps and a sha256 image ID")
+		return 2
+	}
+	var requirements domain.ExecutionRequirements
+	if requirementsSet {
+		if *requirementsFile == "" || *rangeSpec != "" {
+			_, _ = fmt.Fprintln(stderr, "warden: --requirements needs a file and single-commit verification")
+			return 2
+		}
+		var err error
+		requirements, err = loadExecutionRequirements(*requirementsFile)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "warden: invalid requirements: %v\n", err)
+			return 2
+		}
+	}
 	svc, err := newService(autoApprover{})
 	if err != nil {
 		return fail(stderr, err)
@@ -58,11 +98,20 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
 	// roster, so a repo enforces trusted provenance without passing fingerprints.
 	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
-	res, err := svc.VerifyWithPolicy(*commit, policy, trusted...)
+	var res service.VerifyResult
+	if requirementsSet {
+		res, err = svc.VerifyRequirements(*commit, policy, requirements, trusted...)
+	} else {
+		res, err = svc.VerifyWithPolicy(*commit, policy, trusted...)
+	}
 	if err != nil {
 		return fail(stderr, err)
 	}
 
+	containerRefused := len(requiredContainerSteps) > 0 && (!res.Validated || !res.Trusted || res.External || res.Record == nil || !res.Record.ContainerChecks(requiredContainerSteps, *containerImageID))
+	if containerRefused {
+		res.Validated = false
+	}
 	if *requireSigned && !res.SignatureValid && !res.CarriedTrust {
 		res.Validated = false
 	}
@@ -70,9 +119,14 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 		if fromRoster {
 			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
 		}
-		if *requireSigned && !res.SignatureValid && !res.CarriedTrust {
+		switch {
+		case len(res.RequirementFailures) > 0:
+			_, _ = fmt.Fprintf(stdout, "unverified %s — %s; run the checks\n", short(res.SHA), strings.Join(res.RequirementFailures, "; "))
+		case containerRefused:
+			_, _ = fmt.Fprintf(stdout, "unverified %s — required trusted container execution evidence is missing or does not match; run the checks\n", short(res.SHA))
+		case *requireSigned && !res.SignatureValid && !res.CarriedTrust:
 			_, _ = fmt.Fprintf(stdout, "unverified %s — a valid signature is required\n", short(res.SHA))
-		} else {
+		default:
 			printVerify(stdout, res, len(trusted) > 0)
 		}
 	}
@@ -392,4 +446,78 @@ func externalPolicy(allow, require bool) (service.ExternalPolicy, error) {
 	default:
 		return service.ExternalReject, nil
 	}
+}
+
+// loadExecutionRequirements bounds policy input and rejects unknown fields and trailing JSON.
+func loadExecutionRequirements(path string) (domain.ExecutionRequirements, error) {
+	var result domain.ExecutionRequirements
+	f, err := os.Open(path)
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = f.Close() }()
+	const limit = 1 << 20
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return result, err
+	}
+	if len(data) > limit {
+		return result, fmt.Errorf("file exceeds 1 MiB")
+	}
+	if err := rejectDuplicateJSONKeys(json.NewDecoder(strings.NewReader(string(data)))); err != nil {
+		return result, err
+	}
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&result); err != nil {
+		return result, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return result, fmt.Errorf("expected a single JSON object")
+	}
+	return result, result.Validate()
+}
+
+// Reject ambiguous policy objects rather than accepting the last duplicate key.
+func rejectDuplicateJSONKeys(dec *json.Decoder) error {
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]bool)
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := key.(string)
+			if !ok {
+				return fmt.Errorf("invalid JSON object key")
+			}
+			if seen[name] {
+				return fmt.Errorf("duplicate JSON object key %q", name)
+			}
+			seen[name] = true
+			if err := rejectDuplicateJSONKeys(dec); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for dec.More() {
+			if err := rejectDuplicateJSONKeys(dec); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter")
+	}
+	_, err = dec.Token()
+	return err
 }

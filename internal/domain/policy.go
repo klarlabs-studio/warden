@@ -1,13 +1,19 @@
 package domain
 
-import "time"
+import (
+	"slices"
+	"strings"
+	"time"
+)
 
 // ResolvedPolicy is the effective configuration for one hook invocation, after
 // all matching rules have been stacked (§5.2). It is what the kernel layer
 // translates into axi-go Action registrations and budgets (§5.4), and what
 // `warden policy explain` renders.
 type ResolvedPolicy struct {
-	Hook Hook
+	Hook                Hook
+	Execution           ExecutionConfig
+	ConfigurationDigest string
 	// Steps is the final ordered step list for this run.
 	Steps []StepName
 	// Agents maps a step to its resolved coding-agent binary. Absent = default.
@@ -32,7 +38,8 @@ type ResolvedPolicy struct {
 	// Timeouts maps a step to its max run duration; zero means no limit.
 	Timeouts map[StepName]time.Duration
 	// Cache maps a step to its declared input path globs (see Config.Cache).
-	Cache map[StepName][]string
+	PredictiveCache []string
+	Cache           map[StepName][]string
 	// MaterializeDeps is true when this run includes a step that needs gitignored
 	// dependency dirs materialized as real files in the worktree rather than
 	// symlinked (see Config.MaterializeDeps). Resolved from the run's step set.
@@ -159,4 +166,9 @@ func (p ResolvedPolicy) AuthorizesFix() bool {
 		}
 	}
 	return false
+}
+
+// Predictable excludes native, scanner, agent and tree-writing semantics.
+func (p ResolvedPolicy) Predictable(s StepName) bool {
+	return p.Hook == PreCommit && p.Execution.ContainerEnabled() && (p.Execution.Network == "" || p.Execution.Network == "none") && s != StepSecurityScan && (s == StepLint || s == StepTest || !s.IsBuiltin()) && !p.WritesTree(s) && slices.Contains(p.PredictiveCache, string(s)) && strings.TrimSpace(p.Commands[string(s)]) != ""
 }

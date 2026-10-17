@@ -41,7 +41,8 @@ var ErrNotARepository = errors.New("not a git repository")
 
 // Repo is a handle to a git repository rooted at Dir.
 type Repo struct {
-	Dir string
+	Dir                    string
+	skipDependencyExposure bool
 }
 
 // Open finds the repository root containing path and returns a Repo. Resolving

@@ -12,6 +12,10 @@ import "maps"
 // mechanism (§5.2).
 func (c Config) OverlayOnto(base Config) Config {
 	out := base
+	if c.PredictiveCache != nil {
+		out.PredictiveCache = c.PredictiveCache
+	}
+	out.Execution = c.Execution.OverlayOnto(base.Execution)
 
 	if c.Agent != "" {
 		out.Agent = c.Agent

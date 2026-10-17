@@ -15,7 +15,11 @@ import (
 // built once per run from the resolved policy and worktree, then handed to each
 // step. Steps operate against WorktreeDir — never the user's live checkout.
 type StepContext struct {
-	Hook        domain.Hook
+	Predictions         PredictionCache
+	Hook                domain.Hook
+	ConfigurationDigest string
+	// Container is resolved once per run; nil means host execution.
+	Container   *ContainerExecution
 	WorktreeDir string
 	// WorktreeFor, when set, returns the worktree directory a specific step must
 	// run in, overriding WorktreeDir. It backs per-step worktree isolation: steps
@@ -85,3 +89,20 @@ type Step interface {
 // to assemble the actions for a run; an unknown built-in name is a
 // configuration error surfaced early.
 type Registry map[domain.StepName]Step
+
+// ContainerExecution carries the selected engine and inspected image identity.
+// Binary is the discovered CLI path; Environment is signed only for checks that
+// actually executed in this environment.
+type ContainerExecution struct {
+	// Reference is the canonical local image name used by Apple create; the
+	// created container is inspected before starting to reject tag movement.
+	Reference   string
+	Binary      string
+	Environment domain.ExecutionEnvironment
+}
+
+// PredictionCache holds recent signed local successes for exact staged inputs.
+type PredictionCache interface {
+	Lookup(domain.StepName, string, domain.ExecutionContract) *domain.ExecutionReuse
+	Record(domain.StepName, string, domain.ExecutionContract) bool
+}
