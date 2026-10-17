@@ -69,6 +69,10 @@ jobs:
     name: End-to-End
     runs-on: ubuntu-latest
     needs: [ci]
+    env:
+      WARDEN_CONTAINER_TEST_RUNTIME: docker
+      # A multi-platform OCI index; the Ubuntu runner selects Linux amd64.
+      WARDEN_CONTAINER_TEST_IMAGE: docker.io/library/alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Go
@@ -81,6 +85,12 @@ jobs:
           git config --global user.name ci
       - name: Test remediation cleanup scope
         run: python3 -m unittest discover -s .github/scripts
+      # Tests never pull images themselves. Preload the pinned fixture so the
+      # Docker boundary and golden-fleet scenarios execute instead of skipping.
+      - name: Load pinned container fixture
+        run: docker pull "$WARDEN_CONTAINER_TEST_IMAGE"
+      - name: Test Docker execution boundary
+        run: go test -race ./internal/infrastructure/steps -run '^TestContainerExecutionIntegration$' -count=1 -v
       # -count=1 is REQUIRED, not hygiene. These tests drive a separately built
       # binary, so the test package's own inputs never change when internal/**
       # does — Go replays a cached PASS and the suite silently stops running.
