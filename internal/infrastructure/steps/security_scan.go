@@ -50,6 +50,28 @@ func NewSecurityScanStep(name domain.StepName) SecurityScanStep {
 func (s SecurityScanStep) Name() domain.StepName { return s.name }
 
 func (s SecurityScanStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
+	// Container scans use strict command exit status. Reports on host temp
+	// paths cannot describe this environment, but configured version pins still
+	// apply and must be checked INSIDE the same selected image.
+	if sc.Container != nil {
+		command := strings.TrimSpace(sc.Commands[string(s.name)])
+		if scan, recognized := scanner.ParseCommand(command); recognized && sc.SecurityScan.VersionCheckEnabled() {
+			pin, found, err := scanner.DiscoverPin(ctx, sc.WorktreeDir, scan.Binary, sc.SecurityScan.PinFile)
+			if err != nil {
+				return s.containerVersionFailure(err.Error()), nil
+			}
+			if found {
+				output, err := runContainer(ctx, sc, sc.WorktreeDir, shellQuote(scan.Binary)+" version")
+				if err != nil || !scanner.SameVersion(string(output), pin.Version) {
+					return s.containerVersionFailure("scanner in selected image does not report pinned version " + pin.Version), nil
+				}
+			}
+		}
+		if sc.OnOutput != nil {
+			sc.OnOutput("warden: container security scan uses command exit status; host delta interpretation is disabled")
+		}
+		return s.shell.Run(ctx, sc)
+	}
 	command := strings.TrimSpace(sc.Commands[string(s.name)])
 	scan, recognized := scanner.ParseCommand(command)
 	if !recognized {
@@ -449,4 +471,8 @@ func writeBaseCache(ctx context.Context, dir, key string, fingerprints map[strin
 		return
 	}
 	_ = os.WriteFile(filepath.Join(cacheDir, key+".json"), data, 0o600)
+}
+
+func (s SecurityScanStep) containerVersionFailure(message string) domain.StepResult {
+	return domain.StepResult{Step: s.name, Status: domain.StepFail, Summary: string(s.name) + " could not verify container scanner version", Findings: []domain.Finding{{Severity: domain.SeverityHigh, Rule: "step/container-scanner-version", Message: message}}}
 }

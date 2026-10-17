@@ -1,0 +1,186 @@
+# Container execution
+
+Configured shell checks (`lint`, `test`, and custom `commands:` steps) can run
+inside ephemeral Linux containers while Warden continues to manage disposable
+Git worktrees and provenance on the host.
+
+```yaml
+execution:
+  mode: auto                   # default: host unless image is configured
+  runtime: auto                # Apple on supported Macs; Docker/Podman/nerdctl
+  image: local/warden-checks:dev # must already be pulled or built
+  platform: linux/arm64         # optional; linux/amd64 also supported
+  network: none                # default; bridge explicitly permits networking
+commands:
+  lint: npm ci --offline && npm run lint
+  test: npm ci --offline && npm test
+steps:
+  pre_commit: [lint]
+  pre_push: [lint, test]
+```
+
+The image must contain `/bin/sh`, `cat`, the required toolchains, and any
+packages or package caches the commands need. Warden overrides the image's
+entrypoint and runs the configured command in `/workspace`. Each check gets a
+fresh container; parallel checks have separate worktrees. Install dependencies
+in each check or bake an offline package cache into your image. Build images
+outside the hook. Warden never guesses an image, builds one, or starts an
+engine service automatically. Docker-compatible backends enforce `--pull=never`;
+Apple has different fetch behavior described below.
+
+| Setting | Result |
+|---|---|
+| No `execution` section | Existing host execution |
+| `image` configured, mode/runtime omitted | Discover a reachable engine with that image available locally |
+| `mode: container` | Require an image and a usable engine |
+| `runtime: docker`, `podman`, `nerdctl`, or `apple` | Require that engine; no switch to another engine |
+| `mode: host` | Explicit host override, even when an inherited image is configured |
+
+On Apple-silicon macOS, discovery tries Apple `container` first, then Docker,
+Podman, and nerdctl. Other hosts try Docker, Podman, then nerdctl. All probes
+have a ten-second bound per probe. An installed CLI whose engine is stopped is skipped in auto mode. If no engine can inspect
+the requested image, the gate fails. A configured container never silently
+falls back to host execution. Execution settings inherit through `extends:`
+field by field.
+
+## Apple container
+
+Select Apple's CLI explicitly with:
+
+```yaml
+execution:
+  runtime: apple
+  image: local/warden-checks:dev
+  platform: linux/arm64
+  network: none
+```
+
+This backend runs Linux guests using Apple's lightweight VM runtime on Apple
+silicon. It does not run macOS guests or validate Xcode-specific behavior.
+The initial adapter supports `linux/arm64`; it does not implicitly enable
+Rosetta or install translation support. The user must install the `container`
+CLI and start its system service beforehand.
+
+Apple uses different image-inspection JSON and lacks `--pull=never`. Warden
+requires the requested image and platform to be present during discovery, but
+the CLI can fetch kernel/init assets during creation and may fetch an image if
+its cached entry disappears. Container `network: none` restricts the workload,
+not the runtime's own fetches. Initialize Apple's runtime ahead of an offline
+hook run; this adapter cannot promise a fetch-free startup.
+
+To prevent a moved tag from authorizing the wrong checks, Warden creates a
+stopped container, verifies its image index, Linux platform, runtime handler,
+and network configuration, then starts it attached. Cleanup is explicit even
+after a successful check, and failure to delete the container fails the step.
+The shared worktree marker also verifies its bind mount. Apple's mount parser
+cannot represent worktree paths containing commas, equals signs, or newlines;
+Warden rejects them instead of interpreting a different mount.
+
+The parser is checked against Apple's `ImageResource` and container inspection
+schema at source revision `31e3a98e471e`. Unknown schemas fail closed. Live
+validation passed with Apple `container` 1.5.0 on macOS 27.0.1 (Apple silicon),
+using `docker.io/library/alpine:3.22`: the integration test observed Linux,
+verified worktree writes and environment isolation, and the golden-fleet test
+verified parallel worktree isolation and signed, commit-bound execution evidence.
+Controlled CLI tests also assert lifecycle ordering, mismatch rejection, and
+cleanup failures.
+
+## Evidence and verification
+
+Docker-compatible backends inspect the image, then run its immutable config
+image ID rather than its mutable tag. Apple creates a stopped container and
+checks its image index and platform before starting it. The signed RunRecord records the runtime name, requested
+image,
+resolved image ID, Linux architecture, network mode, Warden host OS, and Linux
+guest OS **per executed check**. `image_id_kind` distinguishes a Docker config
+digest from an Apple platform-manifest digest; Apple also records its image
+index digest.
+An unconfigured/skipped check does not receive container evidence. Existing
+notes keep their existing signature payload when no environment is recorded.
+Older verifiers that do not understand the new signed field reject the new
+signature; upgrade them before relying on container provenance.
+
+Require that specific checks ran in a container:
+
+```bash
+warden verify --key '<trusted-fingerprint>' --container-steps lint,test
+```
+
+To require the exact inspected image, also pass
+`--container-image-id sha256:<64-hex-characters>`. This is the digest in the
+record's `image_id`: a config digest for Docker-compatible engines or a platform
+manifest digest for Apple. It is not Apple's multi-platform index digest. These
+requirements apply to single-commit verification; `--range` does not accept them.
+The GitHub `warden-verify` action also accepts `container-steps` and
+`container-image-id` inputs. Select a released Warden version that includes
+these flags; an older binary rejects them and the action runs CI checks.
+Use an explicit trusted-key pin in protected CI configuration. Unsigned,
+untrusted, legacy, or mismatched execution evidence cannot satisfy the
+requirements. A note still must attest the exact requested commit.
+
+Choose a platform and a digest-pinned image when the team needs the same
+userspace across architectures. Without `platform`, Warden records the locally
+inspected architecture rather than claiming all machines ran the same one.
+An image controls userspace; it does not make host kernels, hardware, or
+external services identical.
+
+## Scope and isolation
+
+Only the disposable worktree is bind-mounted. Warden does not expose host
+`node_modules`, host build caches, credential directories, or the container
+engine socket. It forwards only the five explicit step inputs (`WARDEN_HOOK`,
+`WARDEN_BRANCH`, `WARDEN_CHANGED_FILES`, `WARDEN_FILES_TOUCHED`, and
+`WARDEN_LINES_CHANGED`), sets a temporary home and lint-cache path, and leaves
+other environment settings to the image. On Unix it uses the invoking UID/GID;
+Podman additionally uses `keep-id` user namespaces.
+
+Networking defaults to `none` and capabilities are dropped. Docker-compatible
+backends additionally set `no-new-privileges`; Apple exposes no equivalent CLI
+flag, so Warden does not claim it enforces that option. Cancellation attempts to
+remove the named container after
+terminating the client process. A marker check confirms that the engine mounted
+the actual worktree, including when the CLI selects a VM or remote context.
+The context must support accessing that path; a missing or incorrect mount
+fails the check.
+
+Native Git steps, credential inspection, coding-agent integrations, and
+`warden-step-*` subprocess plugins continue to execute on the host. Git's shared
+metadata is not mounted, so commands that require the worktree's external Git
+directory may need adjustment. Container execution is an environment boundary
+for configured commands, not a claim that the entire gate runs inside a
+security sandbox.
+
+Container security-scan commands use their exit status directly. Version pins
+are checked inside the selected image when scanner version
+checking is enabled. Host-side delta-report interpretation is disabled in this
+mode, so the scanner command must enforce the required severity policy.
+A nonzero exit still fails the gate.
+
+The existing step-result cache is disabled for container runs: it does not yet
+capture the full execution environment. `warden watch` rejects container
+configuration because it runs in the live tree; use the isolated gate commands.
+A future staged-index predictor must key results to the final staged tree,
+command/configuration, resolved image, platform, and dependencies, and discard
+stale work before it can authorize a commit. No latency reduction is promised
+without measurements.
+
+## Validation
+
+The default test suite exercises both CLI adapters, discovery, fail-closed
+selection, argument boundaries, cancellation, signatures, verification requirements, and clean
+worktree cloning with controlled engine CLIs. To exercise a real Docker engine
+without downloading an image:
+
+```bash
+WARDEN_CONTAINER_TEST_IMAGE=<preloaded-image> go test ./internal/infrastructure/steps -run TestContainerExecutionIntegration -count=1
+WARDEN_E2E=1 WARDEN_CONTAINER_TEST_IMAGE=<preloaded-image> go test ./e2e -run TestGoldenFleet_ContainerEvidenceRequiresObservedExecution -count=1
+```
+
+For a live Apple test, set `WARDEN_CONTAINER_TEST_RUNTIME=apple` alongside the
+same image variable in either command above. The image must already be available
+in Apple's image store.
+
+Runtime flag references: [Docker run](https://docs.docker.com/reference/cli/docker/container/run/),
+[Podman run](https://docs.podman.io/en/latest/markdown/podman-run.1.html),
+[Apple container](https://github.com/apple/container/blob/main/docs/command-reference.md), and
+[nerdctl commands](https://github.com/containerd/nerdctl/blob/main/docs/command-reference.md).

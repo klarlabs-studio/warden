@@ -115,9 +115,12 @@ func (b Blocker) Reason() string { return blockerReasons[b] }
 // StepResult is the normalized outcome of running one step, whether native or
 // subprocess-backed.
 type StepResult struct {
-	Step     StepName
-	Status   StepStatus
-	Findings []Finding
+	Environment *ExecutionEnvironment
+	Contract    *ExecutionContract
+	Reuse       *ExecutionReuse
+	Step        StepName
+	Status      StepStatus
+	Findings    []Finding
 	// Fixed reports whether the step mutated the worktree (auto-fix applied).
 	Fixed bool
 	// Summary is a short human line for TUI/CLI output.

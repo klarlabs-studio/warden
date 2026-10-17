@@ -50,6 +50,12 @@ func stepEffect(s domain.StepName, policy domain.ResolvedPolicy) axidomain.Effec
 // per-step agent/budget/effect selection be baked into the closures without any
 // cross-run state to reset.
 func Build(reg application.Registry, policy domain.ResolvedPolicy, sc application.StepContext, priors *[]domain.Finding, push PushFunc, cache application.StepCache) (*axi.Kernel, error) {
+	container, err := steps.ResolveContainer(policy.Execution)
+	if err != nil {
+		return nil, err
+	}
+	sc.Container = container
+
 	var actions []*axidomain.ActionDefinition
 	execs := map[axidomain.ActionExecutorRef]axidomain.ActionExecutor{}
 
@@ -67,6 +73,10 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		// custom step (and the built-in shell steps) always see them, regardless
 		// of what the caller seeded into sc.
 		stepSC.Commands = policy.Commands
+		if _, shell := step.(steps.ShellStep); !shell || !policy.Predictable(name) {
+			stepSC.Predictions = nil
+		}
+		stepSC.ConfigurationDigest = policy.ConfigurationDigest
 		stepSC.Agent = policy.AgentFor(name)
 		stepSC.AgentCommand = domain.ResolveAgentCommand(policy.AgentCommands, stepSC.Agent)
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
@@ -81,7 +91,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		// Wrap a cacheable, non-mutating step so an unchanged run is skipped. The
 		// command signature (shell + agent) is part of the key, so changing what a
 		// step runs busts its cache.
-		if cache != nil && policy.Cacheable(name) {
+		if cache != nil && sc.Container == nil && policy.Cacheable(name) {
 			cmdSig := policy.Commands[string(name)] + "\x00" + stepSC.AgentCommand
 			step = cachedStep{inner: step, cache: cache, globs: policy.CachePaths(name), command: cmdSig}
 		}

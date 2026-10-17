@@ -213,7 +213,9 @@ warden verify --key <fingerprint>  # exit 0 only if signed by a trusted key
 ```
 
 In CI this turns provenance-skip from "a warden ran here" into "a warden **I
-trust** ran here" — pass `key:` to the bundled `warden-verify` action. Notes
+trust** ran here" — pin `key:` in the protected workflow for the bundled
+`warden-verify` action. Without an explicit key pin, the action returns
+`validated=false` so CI runs its checks. Notes
 stay verifiable (chain + signature) without pinning; `--key` just adds the trust
 gate.
 
@@ -780,6 +782,25 @@ step runs busts it. Only non-mutating steps are cacheable, and correctness rests
 on declaring *all* of a step's inputs (same contract as bazel/turbo). A step's
 first cache line appears as `test (cached — inputs unchanged)`.
 
+### Predictive staged cache
+
+For deterministic, read-only container checks, opt in explicitly:
+
+```yaml
+predictive_cache: [lint, test]
+execution: { image: team-checks:local, runtime: auto, network: none }
+steps: { pre_commit: [lint, test] }
+```
+
+Run `warden watch --staged` in another terminal, or `warden watch --staged --once`
+for one evaluation. The watcher checks staged contents in disposable worktrees.
+Pre-commit reuses recent signed results only when the full staged tree, base HEAD,
+command, configuration, context and inspected container identity match. Results
+expire after 10 minutes; a miss runs the check normally. Reuse is reported as
+cached evidence. Pre-push runs fresh checks, and predictions publish no commit
+notes. See [predictive staged checks](docs/predictive-cache.md) for exclusions
+and invalidation details.
+
 ## Commands
 
 | Command | Description |
@@ -806,6 +827,7 @@ first cache line appears as `test (cached — inputs unchanged)`.
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
 | `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
+| `warden watch --staged [--once]` | warm opted-in staged container checks for local pre-commit reuse |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `policy-explain`, `steps`, `run-trigger`) |
@@ -1122,6 +1144,26 @@ commands:
 
 Warden says so in the failure message when it sees you haven't.
 
+### Container execution
+
+```yaml
+execution:
+  mode: auto
+  runtime: auto                 # apple, docker, podman, or nerdctl also accepted
+  image: local/warden-checks:dev # prebuilt or pulled outside the hook
+  platform: linux/arm64          # optional; linux/amd64 also accepted
+  network: none                 # bridge explicitly permits network access
+```
+
+Configure `execution.image` to run shell checks in ephemeral Linux containers.
+On Apple-silicon macOS, Warden discovers Apple `container` first; Docker,
+Podman, and nerdctl are also supported. `execution.runtime`
+pins an engine and `execution.mode: host` explicitly selects host execution.
+Container requests fail when unavailable, and signed provenance records the
+resolved image and platform for each executed check. See
+[container execution](docs/container-execution.md) for configuration, verification,
+and supported boundaries.
+
 ### Compiled languages: build-cache reuse
 
 A worktree contains **tracked files only** — that's what makes the isolation worth
@@ -1382,3 +1424,5 @@ is in the [CHANGELOG](CHANGELOG.md).
 ## License
 
 MIT © Felix Geelhaar
+
+For strict CI reuse, see [execution contracts](docs/execution-contracts.md): require trusted, commit-bound container observations matching protected consumer policy.

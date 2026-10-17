@@ -24,6 +24,7 @@ type fakeWorktree struct {
 	diffSince string
 	mu        sync.Mutex
 	clones    []*fakeWorktree // clones minted by Clone, for isolation assertions
+	cloneErr  error
 }
 
 func (w *fakeWorktree) Dir() string                 { return w.dir }
@@ -32,6 +33,9 @@ func (w *fakeWorktree) TrackedDirty() (bool, error) { return w.diffSince != "", 
 func (w *fakeWorktree) DiffSince() (string, error)  { return w.diffSince, nil }
 func (w *fakeWorktree) Remove() error               { w.removed = true; return nil }
 func (w *fakeWorktree) Clone(bool) (Worktree, error) {
+	if w.cloneErr != nil {
+		return nil, w.cloneErr
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	c := &fakeWorktree{dir: fmt.Sprintf("%s-clone%d", w.dir, len(w.clones)), headSHA: w.headSHA}
@@ -1500,5 +1504,35 @@ func TestRunner_SkipsThePublishWhenTheCommitCannotReachTheRemote(t *testing.T) {
 		return strings.Contains(w, "reachable")
 	}) {
 		t.Errorf("no warning explaining why the status is missing: %q", res.Warnings)
+	}
+}
+
+func TestRunner_ContainerBatchIsolatesDependencyInstalls(t *testing.T) {
+	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1"}
+	policy := domain.ResolvedPolicy{Steps: []domain.StepName{domain.StepLint, domain.StepTest}, Execution: domain.ExecutionConfig{Image: "checks:dev"}}
+	runner := &Runner{}
+	run := domain.NewRun("container-test", domain.PrePush, policy, "main")
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	if err := runner.runBatch(context.Background(), run, kernel, policy.Steps, wt, newWorktreeRegistry(), policy); err != nil {
+		t.Fatal(err)
+	}
+	if len(wt.clones) != 2 {
+		t.Fatalf("parallel container checks shared dependency install tree: %d clones", len(wt.clones))
+	}
+	for _, clone := range wt.clones {
+		if !clone.removed {
+			t.Fatal("container worktree not removed")
+		}
+	}
+}
+
+func TestRunner_ContainerIsolationFailureCannotShareTree(t *testing.T) {
+	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1", cloneErr: errors.New("disk unavailable")}
+	policy := domain.ResolvedPolicy{Steps: []domain.StepName{domain.StepLint, domain.StepTest}, Execution: domain.ExecutionConfig{Image: "checks:dev"}}
+	runner := &Runner{}
+	run := domain.NewRun("container-test", domain.PrePush, policy, "main")
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	if err := runner.runBatch(context.Background(), run, kernel, policy.Steps, wt, newWorktreeRegistry(), policy); err == nil {
+		t.Fatal("failed container isolation fell back to shared tree")
 	}
 }

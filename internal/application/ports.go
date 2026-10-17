@@ -270,3 +270,9 @@ func (m MultiObserver) OnStep(e StepEvent) {
 type Observer interface {
 	OnStep(StepEvent)
 }
+
+// DependencyFreeGit creates worktrees without exposing host-installed packages.
+// Container execution requires it, including on each parallel clone.
+type DependencyFreeGit interface {
+	SeedDependencyFreeWorktree(hook domain.Hook, branch string) (Worktree, error)
+}

@@ -52,11 +52,9 @@ var hostileVersions = []struct{ name, version string }{
 // the fix does not quietly break installing a real version.
 //
 // Deliberately versions that do not exist: the assertion is only that the guard
-// let them reach the download, and a tag that resolves would pull a real
-// multi-megabyte release and install it on every run. A 404 proves the same
-// thing in a fraction of the time. It also means a network outage cannot turn
-// these red — the run fails at the download either way, which is not the
-// failure these tests look for.
+// lets them reach the download. POSIX fixtures fail that download locally and
+// refuse a fallback build, so these tests neither contact the network nor start
+// toolchain telemetry processes inside the temporary HOME.
 var wellFormed = []string{"v99.99.99", "99.99.99", "v99.99.99-rc1", "v99.99.0-rc.1", "99.99.99+build.5"}
 
 func repoFile(t *testing.T, rel string) string {
@@ -76,8 +74,25 @@ func repoFile(t *testing.T, rel string) string {
 func runInstaller(t *testing.T, argv []string, version string) (string, error) {
 	t.Helper()
 	home := t.TempDir()
+	fixturePath := os.Getenv("PATH")
+	if posixInstaller(argv) {
+		bin := filepath.Join(home, "fixtures")
+		if err := os.Mkdir(bin, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for name, script := range map[string]string{
+			"curl": "#!/bin/sh\nprintf '%s\\n' 'fixture-download-attempt' >&2\nexit 22\n",
+			"go":   "#!/bin/sh\nexit 1\n",
+		} {
+			if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixturePath = bin + string(os.PathListSeparator) + fixturePath
+	}
 	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // fixed argv from the test table
 	cmd.Env = append(os.Environ(),
+		"PATH="+fixturePath,
 		"WARDEN_VERSION="+version,
 		"HOME="+home,
 		"WARDEN_BIN_DIR="+filepath.Join(home, "bin"),
@@ -99,7 +114,7 @@ func assertRefused(t *testing.T, argv []string, version string) {
 		t.Errorf("version %q was rejected, but not by the guard — got: %s", version, strings.TrimSpace(out))
 	}
 	// The guard runs before any download, so nothing should have been fetched.
-	if strings.Contains(out, "downloading warden") {
+	if strings.Contains(out, "downloading warden") || strings.Contains(out, "fixture-download-attempt") {
 		t.Errorf("version %q reached the download step: %s", version, strings.TrimSpace(out))
 	}
 }
@@ -110,9 +125,16 @@ func assertRefused(t *testing.T, argv []string, version string) {
 func assertPastGuard(t *testing.T, argv []string, version string) {
 	t.Helper()
 	out, _ := runInstaller(t, argv, version)
+	if posixInstaller(argv) && !strings.Contains(out, "fixture-download-attempt") {
+		t.Errorf("version %q never reached the download fixture: %s", version, strings.TrimSpace(out))
+	}
 	if strings.Contains(out, "refusing version") {
 		t.Errorf("guard rejected the well-formed tag %q: %s", version, strings.TrimSpace(out))
 	}
+}
+
+func posixInstaller(argv []string) bool {
+	return len(argv) > 0 && (argv[0] == "sh" || argv[0] == "bash")
 }
 
 func TestInstallShRefusesHostileVersion(t *testing.T) {

@@ -96,3 +96,6 @@ func sortManifests(m []domain.DependencyManifest) {
 		}
 	}
 }
+
+// IsDependencyManifest identifies the manifest names Warden knows how to record.
+func IsDependencyManifest(name string) bool { _, ok := lockfiles[name]; return ok }

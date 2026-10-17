@@ -2,6 +2,9 @@ package kernel
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/application"
@@ -79,5 +82,33 @@ func TestCachedStep_NoFingerprintAlwaysRuns(t *testing.T) {
 	}
 	if len(cache.recorded) != 0 {
 		t.Error("without a fingerprint nothing is recorded")
+	}
+}
+
+func TestContainerRunCannotReuseHostStepCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake engine uses POSIX shell")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\nif [ \"$1\" = info ]; then exit 0; fi\nprintf '%s\\n' '[{\"Id\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Os\":\"linux\",\"Architecture\":\"arm64\"}]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	inner := &fakeStep{name: domain.StepTest, status: domain.StepPass}
+	cache := &fakeCache{fp: "same-inputs", seen: true}
+	policy := policyFor(domain.StepTest)
+	policy.Execution = domain.ExecutionConfig{Image: "checks:dev"}
+	policy.Cache = map[domain.StepName][]string{domain.StepTest: {"**"}}
+	factory := newFactory(inner).WithCache(cache)
+	kernel, err := factory.New(policy, application.StepContext{}, new([]domain.Finding), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kernel.Execute(context.Background(), domain.StepTest); err != nil {
+		t.Fatal(err)
+	}
+	if !inner.ran || len(cache.recorded) != 0 {
+		t.Fatal("container run reused or populated host cache")
 	}
 }

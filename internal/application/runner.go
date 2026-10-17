@@ -44,10 +44,11 @@ func short12(sha string) string {
 // the domain Run aggregate plus delivery-specific extras (the pre-commit fix
 // patch). The domain owns the outcome; this is just its read model.
 type RunResult struct {
-	Outcome  domain.Outcome
-	Hook     domain.Hook
-	Policy   domain.ResolvedPolicy
-	Findings []domain.Finding
+	ReusedSteps map[domain.StepName]domain.ExecutionReuse
+	Outcome     domain.Outcome
+	Hook        domain.Hook
+	Policy      domain.ResolvedPolicy
+	Findings    []domain.Finding
 	// Record is the provenance note written on a passing pre-push run.
 	Record *domain.RunRecord
 	// PR is the pull request opened or found after a passing push, if enabled.
@@ -143,6 +144,14 @@ type Settings struct {
 
 // Run executes the pipeline for hook against the repository.
 func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
+	return r.run(ctx, hook, false)
+}
+
+func (r *Runner) PredictStaged(ctx context.Context) (RunResult, error) {
+	return r.run(ctx, domain.PreCommit, true)
+}
+
+func (r *Runner) run(ctx context.Context, hook domain.Hook, predictOnly bool) (RunResult, error) {
 	cfg, err := r.Configs.Load()
 	if err != nil {
 		return RunResult{}, err
@@ -165,6 +174,18 @@ func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
 	resolved.Commands = cfg.Commands
 	resolved.AgentCommands = cfg.AgentCommands
 
+	if predictOnly {
+		var selected []domain.StepName
+		for _, step := range resolved.Steps {
+			if resolved.Predictable(step) {
+				selected = append(selected, step)
+			}
+		}
+		if len(selected) == 0 {
+			return RunResult{}, fmt.Errorf("no eligible predictive_cache checks: configure read-only container shell checks in steps.pre_commit")
+		}
+		resolved.Steps = selected
+	}
 	switch hook {
 	case domain.PreCommit:
 		return r.runPreCommit(ctx, resolved, branch, diff)
@@ -258,7 +279,7 @@ func (r *Runner) firstPushBase(prBase string) (string, error) {
 // runPreCommit runs the fast local subset in a worktree seeded from HEAD plus
 // staged changes, then reports any fixes to re-apply to the real index (§4.2).
 func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolicy, branch string, diff domain.DiffStats) (RunResult, error) {
-	wt, err := r.Git.SeedWorktreeFromHead(resolved.MaterializeDeps)
+	wt, err := r.seedWorktree(domain.PreCommit, branch, resolved)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
@@ -435,7 +456,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if r.Settings.ExpectedPushTip != "" && seedTip != r.Settings.ExpectedPushTip {
 		return RunResult{}, fmt.Errorf("%w: tip changed since Git prepared the push", ErrBranchMoved)
 	}
-	wt, err := r.Git.SeedWorktreeFromBranch(branch, resolved.MaterializeDeps)
+	wt, err := r.seedWorktree(domain.PrePush, branch, resolved)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("seed worktree: %w", err)
 	}
@@ -794,6 +815,8 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 	// clone failure is best-effort: the writer falls back to the canonical
 	// worktree. All clones are torn down and the registry cleared after the batch,
 	// discarding the steps' side-effects.
+	// Container checks also install platform-specific untracked dependencies, so
+	// isolate every parallel check and fail if that isolation cannot be created.
 	if wt != nil {
 		var clones []Worktree
 		defer func() {
@@ -803,11 +826,14 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 			reg.reset()
 		}()
 		for _, step := range batch {
-			if !resolved.WritesTree(step) {
-				continue // read-only: share the canonical worktree, no clone
+			if !resolved.WritesTree(step) && !resolved.Execution.ContainerEnabled() {
+				continue // host read-only: share the canonical worktree, no clone
 			}
 			clone, err := wt.Clone(resolved.MaterializeDeps)
 			if err != nil {
+				if resolved.Execution.ContainerEnabled() {
+					return fmt.Errorf("isolate container step %s: %w", step, err)
+				}
 				continue // best-effort; this step uses the canonical worktree
 			}
 			clones = append(clones, clone)
@@ -829,11 +855,11 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 	// stop before recording into an already-terminal run — otherwise a second
 	// failing/any step in the same parallel batch surfaces the opaque
 	// "record step X: run is already terminal" instead of the real failure.
-	for _, out := range outcomes {
+	for i := range outcomes {
 		if run.IsTerminal() {
 			break
 		}
-		if err := run.RecordStep(out.Result); err != nil {
+		if err := run.RecordStep(outcomes[i].Result); err != nil {
 			return err
 		}
 	}
@@ -1000,6 +1026,8 @@ func (r *Runner) buildRecord(kernel Kernel, run *domain.Run) (*domain.RunRecord,
 		WardenVersion:     r.Settings.Version,
 		Agent:             run.Policy().Agents,
 		StepsRun:          run.Policy().Steps,
+		Environments:      run.ExecutionEnvironments(),
+		Contracts:         run.ExecutionContracts(),
 		MatchedRules:      run.Policy().MatchedRules,
 		EvidenceChainRoot: root,
 		Evidence:          entries,
@@ -1058,14 +1086,15 @@ func pushedMessage(sha, remote, branch string, gitCompletes, attestOnly bool) st
 // result projects the aggregate into the application's output DTO.
 func (r *Runner) result(run *domain.Run, patch string) RunResult {
 	return RunResult{
-		Outcome:  run.Outcome(),
-		Hook:     run.Hook(),
-		Policy:   run.Policy(),
-		Findings: run.Findings(),
-		Record:   run.Record(),
-		FixPatch: patch,
-		Message:  run.Message(),
-		Blocker:  run.Blocker(),
+		ReusedSteps: run.ExecutionReuses(),
+		Outcome:     run.Outcome(),
+		Hook:        run.Hook(),
+		Policy:      run.Policy(),
+		Findings:    run.Findings(),
+		Record:      run.Record(),
+		FixPatch:    patch,
+		Message:     run.Message(),
+		Blocker:     run.Blocker(),
 	}
 }
 
@@ -1086,4 +1115,18 @@ func (r *Runner) newID() string {
 // autoApproval is the decision for a clean run no rule flagged for review.
 func autoApproval() Decision {
 	return Decision{Approved: true, Principal: "warden-auto", Rationale: "clean run, no rule required approval"}
+}
+
+func (r *Runner) seedWorktree(hook domain.Hook, branch string, p domain.ResolvedPolicy) (Worktree, error) {
+	if p.Execution.ContainerEnabled() {
+		git, ok := r.Git.(DependencyFreeGit)
+		if !ok {
+			return nil, fmt.Errorf("git adapter cannot create dependency-free container worktrees")
+		}
+		return git.SeedDependencyFreeWorktree(hook, branch)
+	}
+	if hook == domain.PreCommit {
+		return r.Git.SeedWorktreeFromHead(p.MaterializeDeps)
+	}
+	return r.Git.SeedWorktreeFromBranch(branch, p.MaterializeDeps)
 }

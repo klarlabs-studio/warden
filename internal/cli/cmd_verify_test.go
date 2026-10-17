@@ -325,3 +325,60 @@ func TestCmdVerifyRange_RosterFromBase(t *testing.T) {
 		t.Errorf("expected an untrusted-signer reason, got:\n%s", out.String())
 	}
 }
+
+func TestVerifyContainerRequirements(t *testing.T) {
+	repoWithConfig(t, "")
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "sha256:" + strings.Repeat("a", 64)
+	record := domain.RunRecord{RunID: "container-run", CommitSHA: head, StepsRun: []domain.StepName{domain.StepTest}, EvidenceChainRoot: "root", Evidence: []domain.EvidenceEntry{{Hash: "root"}}, PublicKey: base64.StdEncoding.EncodeToString(pub), Environments: map[domain.StepName]domain.ExecutionEnvironment{domain.StepTest: {Runtime: "podman", Image: "checks:dev", ImageID: id, Platform: "linux/arm64", Network: "none"}}}
+	payload, err := record.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	if err := svc.Repo().WriteNote(head, record); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"trusted", []string{"--key", record.SignerFingerprint(), "--container-steps", "test", "--container-image-id", id}, 0},
+		{"no trust", []string{"--container-steps", "test"}, 1},
+		{"missing step", []string{"--key", record.SignerFingerprint(), "--container-steps", "lint"}, 1},
+		{"wrong image", []string{"--key", record.SignerFingerprint(), "--container-steps", "test", "--container-image-id", "sha256:" + strings.Repeat("b", 64)}, 1},
+		{"invalid step", []string{"--container-steps", "../test"}, 2},
+		{"empty list", []string{"--container-steps", ","}, 2},
+		{"explicit empty requirement", []string{"--container-steps", ""}, 2},
+		{"image without steps", []string{"--container-image-id", id}, 2},
+		{"invalid image", []string{"--container-steps", "test", "--container-image-id", "tag"}, 2},
+		{"range unsupported", []string{"--range", "HEAD~1..HEAD", "--container-steps", "test"}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := cmdVerify(tc.args, &out, &errb); code != tc.want {
+				t.Fatalf("exit %d want %d: %s %s", code, tc.want, out.String(), errb.String())
+			}
+		})
+	}
+}
+
+func TestWatchRefusesContainerConfiguration(t *testing.T) {
+	repoWithConfig(t, "execution:\n  image: checks:dev\n")
+	var out, errb bytes.Buffer
+	if code := cmdWatch(nil, &out, &errb); code != 1 || !strings.Contains(errb.String(), "does not support container execution") {
+		t.Fatalf("watch: %d %s %s", code, out.String(), errb.String())
+	}
+}

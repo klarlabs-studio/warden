@@ -9,9 +9,10 @@ import (
 
 // VerifyResult is the outcome of checking one commit's provenance.
 type VerifyResult struct {
-	SHA       string
-	Validated bool // a warden note exists and its evidence chain is intact
-	Record    *domain.RunRecord
+	RequirementFailures []string
+	SHA                 string
+	Validated           bool // a warden note exists and its evidence chain is intact
+	Record              *domain.RunRecord
 	// Signed reports whether the note carries a signature; SignatureValid whether
 	// that signature verifies against its embedded key; Signer is the signer's
 	// fingerprint. Trusted is true when the caller pinned trusted keys and the

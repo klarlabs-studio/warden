@@ -106,6 +106,7 @@ Usage:
   warden why [commit]                         explain what the gate did for a commit (from its note)
   warden recipes [name]                        list / print paste-able check recipes (gitleaks, semgrep, …)
   warden watch                                 re-run the fast checks on save (dev feedback loop)
+  warden watch --staged [--once]                precompute opted-in staged container checks
   warden attach                                watch a running gate live from another terminal
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio

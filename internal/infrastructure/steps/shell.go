@@ -45,8 +45,38 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		}, nil
 	}
 
+	contract, captureErr := captureExecutionContract(ctx, sc, command)
+	if captureErr != nil && sc.OnOutput != nil {
+		sc.OnOutput("warden: execution contract unavailable: " + captureErr.Error())
+	}
+	var base string
+	if sc.Predictions != nil && sc.Hook == domain.PreCommit && contract != nil && ctx.Err() == nil {
+		if value, err := contractGit(ctx, sc.WorktreeDir, "rev-parse", "HEAD"); err == nil {
+			base = strings.TrimSpace(string(value))
+		}
+		if domain.ValidTreeSHA(base) {
+			if reuse := sc.Predictions.Lookup(s.name, base, *contract); reuse != nil && ctx.Err() == nil {
+				return domain.StepResult{Step: s.name, Status: domain.StepPass, Reuse: reuse, Summary: string(s.name) + " (cached — staged prediction matched)"}, nil
+			}
+		}
+	}
 	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
-	return s.resultFor(ctx, sc, out, err, contended), nil
+	res := s.resultFor(ctx, sc, out, err, contended)
+	if sc.Container != nil {
+		env := sc.Container.Environment
+		res.Environment = &env
+	}
+	if res.Status == domain.StepPass {
+		res.Contract = finishExecutionContract(ctx, sc, contract)
+		if sc.Predictions != nil && res.Contract != nil && domain.ValidTreeSHA(base) && !res.Fixed && len(res.Findings) == 0 && ctx.Err() == nil {
+			if sc.Predictions.Record(s.name, base, *res.Contract) {
+				res.Summary += "; staged prediction saved"
+			} else {
+				res.Summary += "; prediction could not be saved"
+			}
+		}
+	}
+	return res, nil
 }
 
 // exitDescription renders how a command ended, for a message that has nothing
@@ -237,14 +267,15 @@ func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, c
 	for attempt := 0; ; attempt++ {
 		// Run through the shell so configured commands may use pipes and globs,
 		// matching how a developer would run them.
-		cmd := exec.CommandContext(ctx, "sh", "-c", command)
-		cmd.Dir = dir
-		cmd.Env = stepEnv(sc)
-		// Run in its own process group so a timeout/cancel kills the command's
-		// children (go test, tsc, …), not just the wrapping shell.
-		proc.Isolate(cmd)
-
-		out, err = runCaptured(cmd, sc)
+		if sc.Container != nil {
+			out, err = runContainer(ctx, sc, dir, command)
+		} else {
+			cmd := exec.CommandContext(ctx, "sh", "-c", command)
+			cmd.Dir = dir
+			cmd.Env = stepEnv(sc)
+			proc.Isolate(cmd)
+			out, err = runCaptured(cmd, sc)
+		}
 		if err == nil || !isContention(string(out)) {
 			return out, err, false
 		}
@@ -294,14 +325,18 @@ func stepEnv(sc application.StepContext) []string {
 	// worktree, so a gated push does not recompile the world every time. See
 	// buildcache.go for why this is a redirection rather than a copy.
 	env = append(env, buildCacheEnv(sc.BuildCacheDir, sc.WorktreeDir, env)...)
-	env = append(env,
-		"WARDEN_HOOK="+sc.Hook.ConfigKey(),
-		"WARDEN_BRANCH="+sc.Branch,
-		"WARDEN_CHANGED_FILES="+strings.Join(sc.Diff.Paths, "\n"),
-		"WARDEN_FILES_TOUCHED="+strconv.Itoa(sc.Diff.FilesTouched),
-		"WARDEN_LINES_CHANGED="+strconv.Itoa(sc.Diff.LinesChanged),
-	)
+	env = append(env, stepInputs(sc)...)
 	return env
+}
+
+func stepInputs(sc application.StepContext) []string {
+	return []string{
+		"WARDEN_HOOK=" + sc.Hook.ConfigKey(),
+		"WARDEN_BRANCH=" + sc.Branch,
+		"WARDEN_CHANGED_FILES=" + strings.Join(sc.Diff.Paths, "\n"),
+		"WARDEN_FILES_TOUCHED=" + strconv.Itoa(sc.Diff.FilesTouched),
+		"WARDEN_LINES_CHANGED=" + strconv.Itoa(sc.Diff.LinesChanged),
+	}
 }
 
 // loadCaveat renders the machine's state for a FAILED step, or "" when there is

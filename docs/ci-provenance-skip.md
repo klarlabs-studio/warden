@@ -1,12 +1,14 @@
 # CI provenance-skip
 
-Warden writes a hash-chained validation note (`refs/notes/warden`) for every
-commit it gates. CI can trust that note and **skip re-running the checks warden
-already ran** — turning a 10-minute CI round-trip into a few seconds for
-already-validated commits, and cutting CI minutes.
+Warden writes hash-chained validation notes (`refs/notes/warden`) for validated
+commit tips. CI can verify a note against a pinned signer and **skip equivalent
+checks** when the team has established that local validation covers the CI job.
 
 The `warden-verify` action reports whether a commit is validated; gate your
-expensive jobs on its output.
+expensive jobs on its output. Keep both the key pin and the action implementation
+under protected control. For untrusted pull requests, reference the action at a
+reviewed full commit SHA rather than executing its copy from the candidate
+checkout. The local action below is suitable for a trusted checkout.
 
 ```yaml
 # .github/workflows/ci.yml
@@ -23,6 +25,8 @@ jobs:
       # binary, so this works in any repo — including one with no root go.mod.
       - id: warden
         uses: ./.github/actions/warden-verify # or klarlabs-studio/warden/.github/actions/warden-verify@v0 (see gate doc on pinning)
+        with:
+          key: "<trusted-signer-fingerprint>" # pin on the protected branch
 
   test:
     needs: gate
@@ -36,7 +40,14 @@ jobs:
 
 A validated commit skips the `test` job entirely; an unvalidated one (pushed
 with `--no-verify` or from a machine without warden) runs the checks as usual —
-so the gate never *weakens* CI, it only *fast-paths* what warden already proved.
+provided the skipped jobs are equivalent to the checks recorded locally.
+A trusted signature establishes who attested the commit; it does not establish
+that local commands, toolchain, dependencies, or environment match a CI job.
+Keep environment-specific and additional checks running in CI.
+
+The action returns `validated=false` when `key` is omitted, blank, or contains
+only separators. This intentionally changes the earlier unsigned-skip behavior:
+existing callers must pin a trusted key before they can skip jobs again.
 
 Locally, the same primitive is one command:
 

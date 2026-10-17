@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"maps"
 )
 
 // Outcome classifies how a run ended. Pending is the live state; the rest are
@@ -198,4 +199,50 @@ func (r *Run) addFindings(fs []Finding) {
 		r.findingKeys[key] = true
 		r.findings = append(r.findings, f)
 	}
+}
+
+// ExecutionEnvironments reports only environments observed by executed steps.
+func (r *Run) ExecutionEnvironments() map[StepName]ExecutionEnvironment {
+	var out map[StepName]ExecutionEnvironment
+	for _, res := range r.results {
+		if res.Environment != nil && res.Reuse == nil {
+			if out == nil {
+				out = make(map[StepName]ExecutionEnvironment)
+			}
+			out[res.Step] = *res.Environment
+		}
+	}
+	return out
+}
+
+// ExecutionContracts includes only actual, passing command observations.
+func (r *Run) ExecutionContracts() map[StepName]ExecutionContract {
+	var out map[StepName]ExecutionContract
+	for i := range r.results {
+		res := &r.results[i]
+		if res.Status == StepPass && res.Contract != nil && res.Reuse == nil {
+			if out == nil {
+				out = make(map[StepName]ExecutionContract)
+			}
+			contractCopy := *res.Contract
+			contractCopy.Inputs = maps.Clone(res.Contract.Inputs)
+			out[res.Step] = contractCopy
+		}
+	}
+	return out
+}
+
+// ExecutionReuses makes cached local evidence visible to delivery surfaces.
+func (r *Run) ExecutionReuses() map[StepName]ExecutionReuse {
+	var out map[StepName]ExecutionReuse
+	for i := range r.results {
+		res := &r.results[i]
+		if res.Reuse != nil {
+			if out == nil {
+				out = make(map[StepName]ExecutionReuse)
+			}
+			out[res.Step] = *res.Reuse
+		}
+	}
+	return out
 }

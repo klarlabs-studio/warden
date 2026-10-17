@@ -78,12 +78,15 @@ type RunRecord struct {
 	// span it pushed. Without the span, `verify --range` demands per-commit
 	// provenance the gate never produces, so a perfectly ordinary
 	// commit-commit-commit-push reads as two unverified commits forever (#86).
-	CoversFrom        string              `json:"covers_from,omitempty"`
-	Agent             map[StepName]string `json:"agent"`
-	StepsRun          []StepName          `json:"steps_run"`
-	MatchedRules      []string            `json:"matched_rules"`
-	EvidenceChainRoot string              `json:"evidence_chain_root"`
-	Evidence          []EvidenceEntry     `json:"evidence"`
+	CoversFrom string              `json:"covers_from,omitempty"`
+	Agent      map[StepName]string `json:"agent"`
+	StepsRun   []StepName          `json:"steps_run"`
+	// Environments is signed and present only for observed container checks.
+	Environments      map[StepName]ExecutionEnvironment `json:"environments,omitempty"`
+	Contracts         map[StepName]ExecutionContract    `json:"contracts,omitempty"`
+	MatchedRules      []string                          `json:"matched_rules"`
+	EvidenceChainRoot string                            `json:"evidence_chain_root"`
+	Evidence          []EvidenceEntry                   `json:"evidence"`
 	// Dependencies is the SBOM: the dependency lockfiles present at validation,
 	// each content-digested. Being part of the record, it is covered by the
 	// evidence chain and the signature — a signed statement of exactly which
