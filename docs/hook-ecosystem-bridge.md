@@ -29,7 +29,7 @@ The command keeps the original script and uses `sh -e`, with repository-local
 Node binaries on PATH. A missing script or an unavailable command fails the
 step. `HUSKY=0` disables Husky's own launcher but does not disable this explicit
 Warden command. Personal Husky startup files are not loaded. Configure required
-runtime initialization in the command or provide a container image instead.
+runtime initialization in the command.
 This generated bridge requires host execution: it reads the disposable Git
 index, and the current container adapter does not expose host Git metadata.
 Container commands can run standalone checks, but a Git-index bridge for
@@ -52,10 +52,18 @@ installs its shims in `.git/hooks`. Check the effective value and its origin:
 git config --show-origin --get core.hooksPath
 ```
 
-After `warden init`, deliberately select Warden's hook directory when ready to
+Warden checks Git's effective hook directory before `init` or hook enablement.
+If another directory is selected, it refuses before installing shims or
+recording an adoption point. `warden status` reports the hooks as inactive,
+even if managed shims remain in the default directory. It does not change
+hook ownership automatically.
+
+Before `warden init`, deliberately select Warden's hook directory when ready to
 switch gate ownership. For a normal checkout this can be set locally with
-`git config --local core.hooksPath .git/hooks`. Linked worktrees need a path
-appropriate to their Git directory. Re-running Husky's installation or a
+`git config --local core.hooksPath .git/hooks`. Linked worktrees share the
+common Git directory's hooks; Warden installs there rather than beside a
+worktree's private index and HEAD. Use an appropriate shared path if explicitly
+selecting a directory for linked worktrees. Re-running Husky's installation or a
 package `prepare` script may change this setting again; check it after installs.
 
 This switch affects every Git hook. Only pre-commit is bridged automatically.
