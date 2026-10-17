@@ -10,7 +10,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 def api(path, *, paginate=False, method="GET", data=None):
     token = os.environ["GH_TOKEN"]
     headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-               "X-GitHub-Api-Version": "2022-11-28"}
+               "X-GitHub-Api-Version": "2022-11-28",
+               # GitHub refuses requests without one (403), and http.client,
+               # unlike urllib, sends none.
+               "User-Agent": "warden-remediation-cleanup"}
     payload = json.dumps(data).encode() if data is not None else None
     if payload is not None:
         headers["Content-Type"] = "application/json"
@@ -30,7 +33,8 @@ def api(path, *, paginate=False, method="GET", data=None):
             connection.request(method, "/" + endpoint, body=payload, headers=headers)
             response = connection.getresponse()
             if not 200 <= response.status < 300:
-                raise RuntimeError(f"GitHub API failed: {response.status} {response.reason}")
+                detail = response.read(2048).decode("utf-8", "replace").strip()
+                raise RuntimeError(f"GitHub API failed: {response.status} {response.reason}: {detail}")
             result = json.load(response)
         finally:
             connection.close()
