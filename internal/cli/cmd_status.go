@@ -31,10 +31,20 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	conflict, err := svc.HookPathConflict()
+	if err != nil {
+		return fail(stderr, err)
+	}
 	pins, _ := svc.HookPins() // diagnostic only; a nil map just omits the pin
+	if conflict != "" {
+		pins = nil // an inactive shim's pin is not the version Git will invoke
+	}
 	_, _ = fmt.Fprintln(stdout, "hooks:")
 	for _, h := range domain.AllHooks {
 		state := "not installed"
+		if conflict != "" {
+			state = "inactive (Git selects another hook directory)"
+		}
 		if installed[h] {
 			state = "armed"
 			if v := pins[h]; v != "" {
@@ -42,6 +52,9 @@ func cmdStatus(stdout, stderr io.Writer) int {
 			}
 		}
 		_, _ = fmt.Fprintf(stdout, "  %-11s %s\n", h, state)
+	}
+	if conflict != "" {
+		_, _ = fmt.Fprintf(stdout, "\nnote: %s\n", conflict)
 	}
 	if line := pinSkewLine(pins, Version); line != "" {
 		_, _ = fmt.Fprintf(stdout, "\n%s\n", line)

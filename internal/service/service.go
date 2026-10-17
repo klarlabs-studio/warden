@@ -332,7 +332,7 @@ func (r InitResult) Adopted() bool { return r.Previous != "" }
 // green. Moving the point is now a deliberate act, and the caller is
 // handed the numbers to say what it cost.
 func (s *Service) Init(selected []domain.Hook, reAdopt bool) (InitResult, error) {
-	gitDir, err := s.repo.GitDir()
+	gitDir, err := s.hooksGitDir(len(selected) > 0)
 	if err != nil {
 		return InitResult{}, err
 	}
@@ -383,7 +383,7 @@ func (s *Service) Init(selected []domain.Hook, reAdopt bool) (InitResult, error)
 // SetHook enables or disables a single hook after init, updating both the
 // installed shim and the recorded selection in .warden.yaml.
 func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
-	gitDir, err := s.repo.GitDir()
+	gitDir, err := s.hooksGitDir(enabled)
 	if err != nil {
 		return err
 	}
@@ -421,16 +421,22 @@ func (s *Service) SetHook(hook domain.Hook, enabled bool) error {
 // SetHook returned an error, the caller skipped its "repinned X -> Y" line, and
 // the pin had moved with nothing said about it.
 func (s *Service) RepinHook(hook domain.Hook) error {
-	gitDir, err := s.repo.GitDir()
+	gitDir, err := s.hooksGitDir(true)
 	if err != nil {
 		return err
 	}
 	return hooks.Install(gitDir, []domain.Hook{hook}, s.version)
 }
 
-// InstalledHooks reports which hooks currently have a managed shim.
+// InstalledHooks reports managed shims in Git's active hook directory. A shim
+// hidden by core.hooksPath is not evidence that the gate is armed.
 func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
-	gitDir, err := s.repo.GitDir()
+	if conflict, err := s.HookPathConflict(); err != nil {
+		return nil, err
+	} else if conflict != "" {
+		return map[domain.Hook]bool{}, nil
+	}
+	gitDir, err := s.hooksGitDir(false)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +448,7 @@ func (s *Service) InstalledHooks() (map[domain.Hook]bool, error) {
 // is skew a status surface should name rather than leave to be discovered in a
 // provenance note after the fact.
 func (s *Service) HookPins() (map[domain.Hook]string, error) {
-	gitDir, err := s.repo.GitDir()
+	gitDir, err := s.hooksGitDir(false)
 	if err != nil {
 		return nil, err
 	}

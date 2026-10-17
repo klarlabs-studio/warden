@@ -49,11 +49,11 @@ func Detect(root string) (domain.Config, []string, error) {
 	c.fromPreCommit(root)
 	c.fromLefthook(root)
 	c.fromWorkflows(root)
+	c.fromHusky(root)
 
 	if len(c.commands) == 0 {
-		return domain.Config{}, []string{
-			"no lint/test/security commands detected in Makefile, package.json, .pre-commit-config.yaml, lefthook, or GitHub workflows — nothing imported",
-		}, nil
+		return domain.Config{}, append(c.notes,
+			"no commands detected in Makefile, package.json, .pre-commit-config.yaml, .husky, lefthook, or GitHub workflows — nothing imported"), nil
 	}
 
 	// pre-push mirrors the default sequence but trimmed to the steps we can
@@ -73,6 +73,17 @@ func Detect(root string) (domain.Config, []string, error) {
 			domain.PrePush.ConfigKey():   prePush,
 		},
 		Risk: domain.RiskConfig(domain.DefaultRiskThresholds()),
+	}
+	if _, ok := c.commands[string(stepHuskyPreCommit)]; ok {
+		// Keep the hook independent of inferred lint/test commands: a package
+		// script must not silently replace part of the existing hook policy.
+		if _, lint := c.commands["lint"]; !lint {
+			cfg.Steps[domain.PreCommit.ConfigKey()] = nil
+		}
+		cfg.Steps[domain.PreCommit.ConfigKey()] = append(cfg.Steps[domain.PreCommit.ConfigKey()], stepHuskyPreCommit)
+		// Arbitrary hooks may format files or update the index. Treat them as
+		// writers rather than assuming they are safe to run concurrently.
+		cfg.Writes = append(cfg.Writes, string(stepHuskyPreCommit))
 	}
 	return cfg, c.notes, nil
 }
