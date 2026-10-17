@@ -133,9 +133,13 @@ the integrity model and the signature-verification follow-up.
 
 ```bash
 cd your-repo
-warden import --write   # reads your Makefile / package.json / .pre-commit-config.yaml / lefthook / CI
+warden import --write   # reads your Makefile / package.json / .pre-commit-config.yaml / .husky / lefthook / CI
 warden init             # installs hooks + records the adoption point
 ```
+
+Existing Husky pre-commit scripts can run as isolated writer steps. See the
+[hook ecosystem bridge](docs/hook-ecosystem-bridge.md) for supported hooks and
+the required Git hook-path migration.
 
 `warden init` alone also works — it auto-detects the language (Go, Rust, JS/TS,
 Python) and pre-fills sensible lint/test commands.
@@ -811,7 +815,7 @@ and invalidation details.
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
-| `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / lefthook / CI |
+| `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / `.husky` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b] [--ci]` | audit which commits since adoption carry a validation note (`--ci`: exit 3 on drift, so CI can tell drift from a doctor that could not run) |
 | `warden fleet status [--root d] [PATH...]` | gate coverage and **bypass rate** across many repos |
