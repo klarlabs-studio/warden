@@ -153,9 +153,9 @@ type StepResult struct {
 	Agent string
 	// AgentBoundary is what warden observed about an agent step's execution
 	// boundary under a profile that enforces one (isolation, tree guard,
-	// environment); nil otherwise. Like Outcome it is not part of the signed
-	// RunRecord or the evidence chain today; it is the observation a record
-	// field can carry.
+	// environment); nil otherwise. It is not part of the evidence chain; a
+	// profiled run's signed record carries what it observed of an agent that
+	// ran (see Run.StepOutcomes and StepObservation).
 	AgentBoundary *AgentBoundaryObservation
 }
 

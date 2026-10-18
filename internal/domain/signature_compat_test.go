@@ -302,3 +302,78 @@ func TestSigningPayload_ProfiledNoteFailsAPreProfileWarden(t *testing.T) {
 		})
 	}
 }
+
+// preBoundaryVerify verifies a note the way a warden does whose StepObservation
+// has only outcome and agent (the first release that signed step outcomes).
+func preBoundaryVerify(t *testing.T, note []byte) bool {
+	t.Helper()
+	type oldObservation struct {
+		Outcome StepOutcome `json:"outcome"`
+		Agent   string      `json:"agent,omitempty"`
+	}
+	rt := reflect.TypeOf(RunRecord{})
+	fields := make([]reflect.StructField, 0, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		typ := f.Type
+		if f.Name == "StepOutcomes" {
+			typ = reflect.TypeOf(map[StepName]oldObservation{})
+		}
+		fields = append(fields, reflect.StructField{Name: f.Name, Type: typ, Tag: f.Tag})
+	}
+	old := reflect.New(reflect.StructOf(fields))
+	if err := json.Unmarshal(note, old.Interface()); err != nil {
+		t.Fatal(err)
+	}
+	v := old.Elem()
+	sig := v.FieldByName("Signature").String()
+	pub := v.FieldByName("PublicKey").String()
+	v.FieldByName("Signature").SetString("")
+	v.FieldByName("CarriedOriginal").Set(reflect.Zero(v.FieldByName("CarriedOriginal").Type()))
+	payload, err := json.Marshal(old.Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verifyEd25519Signature(pub, sig, payload)
+}
+
+// The agent boundary observations are inside the signature: a note without
+// them verifies for a warden that predates them, and a note with any of them
+// fails for it and fails when the observation is edited.
+func TestSigningPayload_AgentBoundaryObservationsAreSigned(t *testing.T) {
+	yes, no := true, false
+	plain := sampleRecord()
+	plain.StepOutcomes = map[StepName]StepObservation{StepReview: {Outcome: StepExecuted, Agent: "claude"}}
+	if !preBoundaryVerify(t, signedNote(t, plain)) {
+		t.Fatal("a note without boundary observations must verify for a pre-boundary warden")
+	}
+	for name, obs := range map[string]StepObservation{
+		"isolated":        {Outcome: StepExecuted, Agent: "claude", Isolated: &yes},
+		"tree_unchanged":  {Outcome: StepExecuted, Agent: "claude", Isolated: &yes, TreeUnchanged: &no},
+		"env_allowlisted": {Outcome: StepExecuted, Agent: "claude", EnvAllowlisted: &yes},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := sampleRecord()
+			rec.StepOutcomes = map[StepName]StepObservation{StepReview: obs}
+			note := signedNote(t, rec)
+			if !strings.Contains(string(note), `"`+name+`":`) {
+				t.Fatalf("the note must carry %s: %s", name, note)
+			}
+			var current RunRecord
+			if err := json.Unmarshal(note, &current); err != nil {
+				t.Fatal(err)
+			}
+			if !current.VerifySignature() {
+				t.Fatal("precondition: the current warden verifies its own note")
+			}
+			if preBoundaryVerify(t, note) {
+				t.Errorf("a pre-boundary warden verified a note carrying %s; it must fail closed", name)
+			}
+			stripped := current
+			stripped.StepOutcomes = map[StepName]StepObservation{StepReview: {Outcome: StepExecuted, Agent: "claude"}}
+			if stripped.VerifySignature() {
+				t.Errorf("stripping %s must break the signature", name)
+			}
+		})
+	}
+}

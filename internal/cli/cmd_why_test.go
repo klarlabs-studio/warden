@@ -221,6 +221,7 @@ func TestCmdWhy_RendersProfileObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.NewProfileRef(p)
+	yes := true
 	rec := domain.RunRecord{
 		RunID:             "run_p",
 		StepsRun:          []domain.StepName{"lint", "review", "test"},
@@ -229,7 +230,7 @@ func TestCmdWhy_RendersProfileObservations(t *testing.T) {
 		Profile:           &ref,
 		StepOutcomes: map[domain.StepName]domain.StepObservation{
 			"lint":   {Outcome: domain.StepCached},
-			"review": {Outcome: domain.StepExecuted, Agent: "claude"},
+			"review": {Outcome: domain.StepExecuted, Agent: "claude", Isolated: &yes, TreeUnchanged: &yes, EnvAllowlisted: &yes},
 			"extra":  {Outcome: domain.StepPredicted},
 		},
 		Approval: &domain.ApprovalRef{Required: true, Channel: domain.ApprovalTTY, Principal: "warden-cli"},
@@ -242,7 +243,7 @@ func TestCmdWhy_RendersProfileObservations(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"outcomes:      lint cached, review executed (agent=claude), test not observed, extra predicted",
+		"outcomes:      lint cached, review executed (agent=claude, isolated, tree unchanged, env allowlisted), test not observed, extra predicted",
 		"profile:       strict@1 (definition matches this warden's)",
 		"approval:      required, answered via tty (warden-cli)",
 	} {
@@ -267,5 +268,21 @@ func TestWhyProfileAndApprovalStates(t *testing.T) {
 	}
 	if got := whyApproval(domain.ApprovalRef{Required: true, Channel: domain.ApprovalAuto}); got != "required, answered via auto" {
 		t.Errorf("approval = %q", got)
+	}
+}
+
+func TestWhyObservationDetail(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		obs  domain.StepObservation
+		want string
+	}{
+		{domain.StepObservation{Outcome: domain.StepExecuted}, ""},
+		{domain.StepObservation{Agent: "codex", Isolated: &yes, TreeUnchanged: &no}, "agent=codex, isolated, tree changed"},
+		{domain.StepObservation{Agent: "claude", EnvAllowlisted: &yes}, "agent=claude, env allowlisted"},
+	} {
+		if got := whyObservationDetail(tc.obs); got != tc.want {
+			t.Errorf("whyObservationDetail(%+v) = %q, want %q", tc.obs, got, tc.want)
+		}
 	}
 }

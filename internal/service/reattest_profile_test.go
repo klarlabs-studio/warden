@@ -18,9 +18,12 @@ func profiledRecord(t *testing.T, sha, runID string) domain.RunRecord {
 	ref := domain.NewProfileRef(p)
 	rec := attestRecord(sha, runID)
 	rec.Profile = &ref
+	isolated, unchanged := true, true
 	rec.StepOutcomes = map[domain.StepName]domain.StepObservation{
 		domain.StepLint:   {Outcome: domain.StepExecuted},
 		domain.StepReview: {Outcome: domain.StepSkipped},
+		// An agent step with its boundary observations, which are carried too.
+		domain.StepIntent: {Outcome: domain.StepExecuted, Agent: "claude", Isolated: &isolated, TreeUnchanged: &unchanged},
 	}
 	rec.Approval = &domain.ApprovalRef{Required: true, Channel: domain.ApprovalTTY, Principal: "warden-cli"}
 	return rec
@@ -61,6 +64,9 @@ func TestService_ReattestCarriesProfileObservationsByteForByte(t *testing.T) {
 	if err != nil || rec == nil {
 		t.Fatalf("no note on b: %v", err)
 	}
+	if !bytes.Contains(profileFieldsJSON(t, rec), []byte(`"isolated":true,"tree_unchanged":true`)) {
+		t.Fatalf("the re-attestation dropped the agent boundary: %s", profileFieldsJSON(t, rec))
+	}
 	if got, want := profileFieldsJSON(t, rec), profileFieldsJSON(t, &src); !bytes.Equal(got, want) {
 		t.Errorf("re-attestation altered the observations:\n got %s\nwant %s", got, want)
 	}
@@ -76,6 +82,14 @@ func TestService_ReattestCarriesProfileObservationsByteForByte(t *testing.T) {
 		"profile stripped": func(r *domain.RunRecord) { r.Profile = nil },
 		"outcome upgraded": func(r *domain.RunRecord) {
 			r.StepOutcomes = map[domain.StepName]domain.StepObservation{domain.StepLint: {Outcome: domain.StepExecuted}, domain.StepReview: {Outcome: domain.StepExecuted}}
+		},
+		"agent boundary stripped": func(r *domain.RunRecord) {
+			obs := map[domain.StepName]domain.StepObservation{}
+			for k, v := range r.StepOutcomes {
+				v.Isolated, v.TreeUnchanged, v.EnvAllowlisted = nil, nil, nil
+				obs[k] = v
+			}
+			r.StepOutcomes = obs
 		},
 		"approval relabelled":   func(r *domain.RunRecord) { r.Approval = &domain.ApprovalRef{Channel: domain.ApprovalNone} },
 		"observations stripped": func(r *domain.RunRecord) { r.Profile, r.StepOutcomes, r.Approval = nil, nil, nil },

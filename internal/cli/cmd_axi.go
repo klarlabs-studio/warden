@@ -408,7 +408,15 @@ func addProfileObservations(out map[string]any, rec *domain.RunRecord) {
 		obs := make([]any, 0, len(names))
 		for _, s := range names {
 			o := rec.StepOutcomes[domain.StepName(s)]
-			obs = append(obs, map[string]any{"step": s, "outcome": string(o.Outcome), "agent": o.Agent})
+			entry := map[string]any{"step": s, "outcome": string(o.Outcome), "agent": o.Agent}
+			// Boundary observations appear only when the note records them, so
+			// an absent key never reads as an observed false.
+			for key, v := range map[string]*bool{"isolated": o.Isolated, "tree_unchanged": o.TreeUnchanged, "env_allowlisted": o.EnvAllowlisted} {
+				if v != nil {
+					entry[key] = *v
+				}
+			}
+			obs = append(obs, entry)
 		}
 		out["recorded_outcomes"] = obs
 	}
