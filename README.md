@@ -773,7 +773,8 @@ checked against the merged config, so a config that falls short fails to load
 and names the field and file. A child cannot name a lower profile than it
 inherits. `warden policy explain` shows the profile, its digest and each floor.
 The key needs warden 0.36.0 or later on every machine and CI runner that reads
-the config. [Compliance profiles](docs/agent-profiles.md) lists what each level
+the config. Profiles are a preview: the levels gain floors as later releases
+land, until the release that signs the profile into notes freezes `@1`. [Compliance profiles](docs/agent-profiles.md) lists what each level
 enforces in this release and what comes later;
 [ADR 0007](docs/adr/0007-agent-compliance-profiles.md) is the design.
 

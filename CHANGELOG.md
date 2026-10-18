@@ -30,7 +30,9 @@ All notable changes to warden are documented here. The format follows
   `profile:` loads, resolves and writes notes exactly as before. Older wardens
   reject the key, so upgrade every reader to this release before committing
   it. Agent isolation, the agent environment, approval, signed profile records
-  and `verify --min-profile` come in later releases. See
+  and `verify --min-profile` come in later releases. Profiles are a preview
+  until then: the levels gain floors as those parts land, and `@1` freezes in
+  the release that first signs the profile into notes. See
   [Compliance profiles](docs/agent-profiles.md) and
   [ADR 0007](docs/adr/0007-agent-compliance-profiles.md).
 - **An unknown config key says it may need a newer warden.** A config written

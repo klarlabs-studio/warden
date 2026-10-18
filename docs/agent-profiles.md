@@ -11,6 +11,14 @@ The decision record is [ADR 0007](adr/0007-agent-compliance-profiles.md). This
 page covers what you can rely on **in the current release**. Several parts of
 the design land in later releases, and this page says so wherever that applies.
 
+> **Preview.** Until warden records the profile in signed notes, the
+> definitions are not frozen: `standard@1` and `strict@1` gain floors as the
+> later parts land, so a repository that adopts a level now will get a
+> stricter gate on some upgrades. Each addition is listed in the changelog.
+> The release that first signs the profile into notes freezes `@1` and its
+> digest; from then on a stricter level ships as `@2` and is never adopted
+> automatically.
+
 ## Before you add the key: upgrade every reader first
 
 warden refuses a config that contains a key it does not know. A warden older
