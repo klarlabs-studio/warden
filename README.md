@@ -223,6 +223,12 @@ trust** ran here" — pin `key:` in the protected workflow for the bundled
 stay verifiable (chain + signature) without pinning; `--key` just adds the trust
 gate.
 
+On GitLab, the same check is a CI/CD component, `templates/verify.yml`. It
+installs a cosign-verified warden, fetches the notes into GitLab's shallow
+clone, and publishes the verdict as a dotenv artifact. Later jobs use it to skip
+checks, or the pipeline fails on it. See [GitLab CI](docs/gitlab-ci.md). It is
+not yet listed in the GitLab CI/CD Catalog.
+
 Rather than pass fingerprints on every call, commit a **trusted-signer roster**
 to `.warden.yaml` — a bare `warden verify` / `--range` then requires a trusted
 signer automatically, and it inherits through `extends:` so an org names its

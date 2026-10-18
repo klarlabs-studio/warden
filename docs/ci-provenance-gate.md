@@ -329,6 +329,15 @@ chain, SBOM, signer, and verification status. It is a read-only projection —
 warden attests *source* provenance (reviewed/tested under policy), which is why
 the predicate is warden's own and not `slsa.dev/provenance` (build provenance).
 
+## GitLab
+
+There is no GitLab port of `warden-gate` (the range gate) yet. The
+`templates/verify.yml` component checks one commit. With
+`on-unverified: fail` it fails the pipeline unless that commit carries trusted
+provenance. See [GitLab CI](gitlab-ci.md), including why enforcement needs a
+pipeline definition the merge request cannot edit. On a GitLab server you
+control, the pre-receive hook below gates every pushed commit.
+
 ## Self-hosted: a pre-receive gate
 
 Where you control the Git server (Gitea, GitLab, a bare repo), enforce the same

@@ -89,6 +89,12 @@ jobs:
       # Docker boundary and golden-fleet scenarios execute instead of skipping.
       - name: Load pinned container fixture
         run: docker pull "$WARDEN_CONTAINER_TEST_IMAGE"
+      # The GitLab component's install chain against the real release its
+      # input defaults to: pinned cosign digest, keyless signature over
+      # checksums.txt, archive digest. Needs the network, so it is opt-in and
+      # runs here rather than in every `go test ./...`.
+      - name: Test GitLab component install chain
+        run: WARDEN_GITLAB_INSTALL_NETWORK=1 go test ./scripts -run '^TestGitLabTemplate_InstallRealRelease$' -count=1 -v
       - name: Test Docker execution boundary
         run: go test -race ./internal/infrastructure/steps -run '^TestContainerExecutionIntegration$' -count=1 -v
       # -count=1 is REQUIRED, not hygiene. These tests drive a separately built
