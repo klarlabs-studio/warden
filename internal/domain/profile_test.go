@@ -20,8 +20,8 @@ import (
 // Once a note can carry a digest, that window closes for good.
 const (
 	goldenPermissive1 = "sha256:85ae44054d6db52f954f7b575905d58dcabff4793fc52452f3030f1f13bca09d"
-	goldenStandard1   = "sha256:d811bbbd747d1dd31aeafeff045770ba8bcd7460c2c1cc461408f216e2b97126"
-	goldenStrict1     = "sha256:f49db7433c9cb96227c911266a456d8dce2d989e8559dbff1ce67140242c11ed"
+	goldenStandard1   = "sha256:2e8d45308adf4c55d9ea918f35673f42b3e1223dc569766dd82bb6bd8937aeb9"
+	goldenStrict1     = "sha256:cbae9fa176a91ebf147f1eb1e180f0c6b91dcfc1ab30555ab83f8de8bef895eb"
 )
 
 func mustProfile(t *testing.T, s string) ComplianceProfile {
@@ -252,6 +252,23 @@ func TestComplianceProfile_EachFloor(t *testing.T) {
 		{"standard: signing not required", "standard", func(c *Config) {
 			c.Signing.Required = false
 		}, "signing-required signing.required"},
+		{"strict: a custom top-level agent", "strict", func(c *Config) {
+			c.Agent = "my-agent"
+		}, "bundled-agents agent"},
+		{"strict: agent auto is not a preset", "strict", func(c *Config) {
+			c.Agent = "auto"
+		}, "bundled-agents agent"},
+		{"strict: a rule assigns a custom agent", "strict", func(c *Config) {
+			c.Rules = []Rule{{Then: Then{Agent: map[StepName]string{StepReview: "faux"}}}}
+		}, "bundled-agents rules[0].then.agent.review"},
+		{"strict: a bundled agent with its command overridden is allowed", "strict", func(c *Config) {
+			c.Agent = "codex"
+			c.AgentCommands = map[string]string{"codex": "my-codex-wrapper {prompt}"}
+		}, ""},
+		{"standard: a custom agent is allowed", "standard", func(c *Config) {
+			c.Agent = "my-agent"
+			c.Rules = []Rule{{Then: Then{Agent: map[StepName]string{StepReview: "faux"}}}}
+		}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -268,6 +285,43 @@ func TestComplianceProfile_EachFloor(t *testing.T) {
 				t.Errorf("violations = %v, want [%s]", got, tc.want)
 			}
 		})
+	}
+}
+
+// What each level enforces around agent steps at run time (ADR 0007 §3).
+func TestComplianceProfile_AgentBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		profile                  string
+		require, isolate, envAll bool
+	}{
+		{"permissive", false, false, false},
+		{"standard", true, true, false},
+		{"strict", true, true, true},
+	} {
+		b := mustProfile(t, tc.profile).AgentBoundary()
+		if b.RequireExecution != tc.require || b.Isolate != tc.isolate || b.EnvAllowlist != tc.envAll {
+			t.Errorf("%s: boundary %+v", tc.profile, b)
+		}
+		if b.Profile != tc.profile+"@1" {
+			t.Errorf("%s: boundary names %q", tc.profile, b.Profile)
+		}
+	}
+}
+
+func TestResolvedPolicy_AgentBoundaryFor(t *testing.T) {
+	strict := ResolvedPolicy{Profile: &ResolvedProfile{Name: "strict@1"}, Agents: map[StepName]string{"audit": "claude"}}
+	for _, s := range []StepName{StepReview, StepIntent, StepDocument, "audit"} {
+		if b := strict.AgentBoundaryFor(s); !b.Isolate || !b.EnvAllowlist || !b.RequireExecution {
+			t.Errorf("strict %s: %+v", s, b)
+		}
+	}
+	if b := strict.AgentBoundaryFor(StepLint); b.Active() {
+		t.Errorf("lint is not an agent step: %+v", b)
+	}
+	for _, p := range []ResolvedPolicy{{}, {Profile: &ResolvedProfile{Name: "permissive@1"}}} {
+		if b := p.AgentBoundaryFor(StepReview); b.Active() || b != (AgentBoundary{}) {
+			t.Errorf("profile %+v must enforce nothing: %+v", p.Profile, b)
+		}
 	}
 }
 
