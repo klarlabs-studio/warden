@@ -92,6 +92,21 @@ All notable changes to warden are documented here. The format follows
   outcome is kept out of the record and the evidence chain. A skipped pass is
   also no longer written to the step cache, where the next run would have
   replayed it as "cached".
+- **Path rules see renamed and oddly named files.** The changed-path set came
+  from `git diff` in its default form, which reports a moved file as
+  `old/{a => b}/f` (or, for staged changes, only its new name) and C-quotes a
+  path with non-ASCII characters. Neither is a path, so a `match.paths` rule
+  for the directory a file moved out of, or for a file with an accented name,
+  did not fire, and `WARDEN_CHANGED_FILES` listed strings no step could open.
+  Changed paths are now read NUL-separated with rename detection off: a rename
+  lists both the old and the new path, and every name arrives as written.
+- **The signed SBOM lists only what the commit contains.** Dependency
+  lockfiles were found by walking the validation worktree, so a lockfile a
+  check generated and nobody committed, or a committed one a check rewrote,
+  went into the note's signed `dependencies` as if the commit carried it.
+  Lockfiles are now read from the attested commit's tree, with each digest
+  taken over the committed content. Symlinked lockfiles are no longer listed,
+  since the commit holds a link rather than the file.
 
 
 ## [0.35.0] - 2026-10-18
