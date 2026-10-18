@@ -89,6 +89,11 @@ type profileDefinition struct {
 	// satisfying the approval gate: a run started there that needs approval
 	// ends needs_approval instead of being auto-approved.
 	NoAgentSurfaceApproval bool `json:"no_agent_surface_approval,omitempty"`
+	// TraceForDeclaredAgents fails a run whose attested commits or gating
+	// environment declare a coding agent (see authorship.go) unless an Agent
+	// Trace was notarized into the record. The absence of a declaration
+	// relaxes nothing.
+	TraceForDeclaredAgents bool `json:"trace_for_declared_agents,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -123,6 +128,7 @@ var builtinProfiles = map[string]profileDefinition{
 		AgentTimeoutRequired:   true,
 		SigningRequired:        true,
 		NoAgentSurfaceApproval: true,
+		TraceForDeclaredAgents: true,
 	},
 }
 
@@ -193,6 +199,12 @@ func (p ComplianceProfile) Lowers(other ComplianceProfile) bool {
 // that asked for a run cannot also be the human that approves it.
 func (p ComplianceProfile) AgentSurfaceMayApprove() bool {
 	return !p.def.NoAgentSurfaceApproval
+}
+
+// RequiresTraceForDeclaredAgents reports whether a run that declares a coding
+// agent must carry a notarized Agent Trace (strict@1).
+func (p ComplianceProfile) RequiresTraceForDeclaredAgents() bool {
+	return p.def.TraceForDeclaredAgents
 }
 
 // RequiredSteps returns the steps the profile requires for a hook.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -74,6 +75,9 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 	}
 	if rec.Approval != nil {
 		_, _ = fmt.Fprintf(stdout, "approval:      %s\n", whyApproval(*rec.Approval))
+	}
+	if rec.Profile != nil {
+		_, _ = fmt.Fprintf(stdout, "authorship:    %s\n", whyAuthorship(rec.Authorship))
 	}
 
 	if len(rec.MatchedRules) > 0 {
@@ -172,6 +176,22 @@ func whyApproval(a domain.ApprovalRef) string {
 		s += " (" + a.Principal + ")"
 	}
 	return s
+}
+
+// whyAuthorship renders the signed agent declarations of a profiled note. No
+// declaration is stated as exactly that, never as human authorship.
+func whyAuthorship(a *domain.AuthorshipSignals) string {
+	if !a.Declared() {
+		return "no agent declaration observed (this does not say a person wrote it)"
+	}
+	var parts []string
+	for _, t := range a.Trailers {
+		parts = append(parts, shortSHA(t.Commit)+" carries "+strconv.Quote(t.Trailer))
+	}
+	for _, m := range a.EnvMarkers {
+		parts = append(parts, "gated under "+m.Name+" ("+m.Agent+")")
+	}
+	return "agent declared: " + strings.Join(parts, "; ")
 }
 
 func chainState(intact bool) string {

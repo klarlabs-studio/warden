@@ -121,6 +121,9 @@ type Runner struct {
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
 	NewID func() string
+	// Environ is the gating process's environment, read for agent harness
+	// markers under a profile (see authorship.go). Nil means os.Environ.
+	Environ func() []string
 }
 
 // Settings carries run-invariant configuration.
@@ -469,6 +472,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 
 	sc := r.withStream(StepContext{Hook: domain.PrePush, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base})
 	run := r.newRun(domain.PrePush, resolved, branch)
+	if err := r.preflightAuthorship(resolved, branch, seedTip, cfg, wt.Dir()); err != nil {
+		return RunResult{}, err
+	}
 
 	// spanBase is the commit this push starts from, captured BEFORE the push
 	// moves the remote-tracking ref. It becomes the record's CoversFrom, so the
@@ -596,6 +602,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// editable as the trace it vouches for.
 	if traceErr := r.notarizeAgentTrace(record, cfg, sc.WorktreeDir); traceErr != nil {
 		return r.result(run, ""), traceErr
+	}
+	// Bind the observed agent declarations next to the trace they may require,
+	// inside the signature for the same reason.
+	if err := r.bindAuthorship(record, resolved, cfg); err != nil {
+		return r.result(run, ""), err
 	}
 	// Signing degrades silently by design (see sign), which is why the reason is
 	// captured and surfaced rather than discarded. A repo that never learns its
