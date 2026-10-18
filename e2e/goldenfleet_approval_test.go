@@ -1,11 +1,14 @@
 package e2e
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // approvalConfig is a pre-push policy whose rule requires approval on main and
@@ -110,6 +113,114 @@ func TestGoldenFleet_AgentSurfaceStillAutoApprovesWithoutProfile(t *testing.T) {
 			}
 			if !hasWardenNotes(g.dir) {
 				t.Errorf("the approved run wrote no note: %s", out)
+			}
+		})
+	}
+}
+
+// pushUnderPTY runs `git push origin main` inside a pseudo-terminal made by
+// script(1) and types answer at the terminal once the approval prompt shows.
+// git's own output goes to push.log, so the pty transcript holds only what was
+// written to the terminal itself. The answer waits for the prompt because
+// script(1) forwards an early end of input as ^D, which would read as a decline.
+func (g *goldenRepo) pushUnderPTY(answer string) (transcript, log string) {
+	g.t.Helper()
+	if _, err := exec.LookPath("script"); err != nil {
+		g.t.Skip("script(1) not available to provide a pty")
+	}
+	logPath := filepath.Join(g.t.TempDir(), "push.log")
+	inner := "git push origin main >'" + logPath + "' 2>&1"
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" || strings.HasSuffix(runtime.GOOS, "bsd") {
+		cmd = exec.Command("script", "-q", "/dev/null", "sh", "-c", inner)
+	} else {
+		cmd = exec.Command("script", "-qec", inner, "/dev/null")
+	}
+	cmd.Dir = g.dir
+	cmd.Env = append(hookEnv(), "WARDEN_CONFIG_DIR="+g.t.TempDir())
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		g.t.Fatal(err)
+	}
+	var seen strings.Builder
+	buf := make([]byte, 4096)
+	deadline := time.Now().Add(2 * time.Minute)
+	for !strings.Contains(seen.String(), "approve? [y/N]") && time.Now().Before(deadline) {
+		n, rerr := stdout.Read(buf)
+		seen.Write(buf[:n])
+		if rerr != nil {
+			break
+		}
+	}
+	if strings.Contains(seen.String(), "approve? [y/N]") {
+		_, _ = io.WriteString(stdin, answer)
+	}
+	rest, _ := io.ReadAll(stdout)
+	seen.Write(rest)
+	_ = stdin.Close()
+	_ = cmd.Wait()
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		g.t.Fatalf("git push left no log (pty transcript: %s): %v", seen.String(), err)
+	}
+	return seen.String(), string(raw)
+}
+
+// installPushHook makes `git push` run the binary under test, as an adopted
+// repo's hook does.
+func (g *goldenRepo) installPushHook() {
+	g.t.Helper()
+	hook := "#!/bin/sh\nexec '" + strings.ReplaceAll(wardenBin, "'", "'\\''") + "' run pre-push\n"
+	if err := os.WriteFile(filepath.Join(g.dir, ".git", "hooks", "pre-push"), []byte(hook), 0o755); err != nil {
+		g.t.Fatal(err)
+	}
+}
+
+// With the agent surface closed under a profile, a person approves by running
+// `git push` from a terminal. git hands the hook its ref list on stdin, so
+// warden must ask on the controlling terminal: the prompt appears on the pty,
+// not in git's output, "y" pushes and "n" leaves the remote alone.
+func TestGoldenFleet_GitPushAsksOnTheControllingTerminal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no controlling-terminal prompt on windows")
+	}
+	for _, c := range []struct {
+		answer string
+		pushed bool
+	}{{"y\n", true}, {"n\n", false}} {
+		t.Run(strings.TrimSpace(c.answer), func(t *testing.T) {
+			g := newGoldenRepo(t)
+			before := g.commitApprovalConfig("standard")
+			g.installPushHook()
+			// A plain policy: no rewrite, so after approval git completes the push.
+			cfg := strings.Replace(approvalConfig("standard"), ", amender]", "]", 1)
+			if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(cfg), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			g.git("commit", "--no-verify", "-am", "no rewrite")
+			head := g.revParse("HEAD")
+
+			transcript, log := g.pushUnderPTY(c.answer)
+			if !strings.Contains(transcript, "approve? [y/N]") {
+				t.Fatalf("the prompt must appear on the terminal:\ntranscript: %s\nlog: %s", transcript, log)
+			}
+			if strings.Contains(log, "approve? [y/N]") {
+				t.Errorf("the prompt leaked into git's output: %s", log)
+			}
+			got := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main"))
+			switch {
+			case c.pushed && got != head:
+				t.Errorf("an approved push must reach the remote: main=%s want %s\n%s\ntranscript: %q", got, head, log, transcript)
+			case !c.pushed && got != before:
+				t.Errorf("a declined push moved the remote %s -> %s\n%s", before, got, log)
 			}
 		})
 	}

@@ -28,9 +28,9 @@ func TestAgentSurfaceApprover(t *testing.T) {
 	}{
 		{"no profile", nil, domain.PrePush, true, ""},
 		{"permissive", profileRef("permissive@1"), domain.PrePush, true, ""},
-		{"standard", profileRef("standard@1"), domain.PrePush, false, "`git push` or `warden run pre-push`"},
-		{"strict", profileRef("strict@1"), domain.PrePush, false, "`git push` or `warden run pre-push`"},
-		{"strict pre-commit", profileRef("strict@1"), domain.PreCommit, false, "`warden run pre-commit`"},
+		{"standard", profileRef("standard@1"), domain.PrePush, false, "run `git push` from an interactive terminal"},
+		{"strict", profileRef("strict@1"), domain.PrePush, false, "run `git push` from an interactive terminal"},
+		{"strict pre-commit", profileRef("strict@1"), domain.PreCommit, false, "run `git commit` from an interactive terminal"},
 		{"unreadable profile fails closed", profileRef("strict@9"), domain.PrePush, false, "strict@9"},
 	}
 	for _, c := range cases {

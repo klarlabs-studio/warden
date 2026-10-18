@@ -190,7 +190,7 @@ const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATEL
 	"gate. Under profile standard or strict it cannot: a run that needs approval (a rule's " +
 	"require_approval, or a high-severity finding) ends with summary.outcome=needs_approval, " +
 	"nothing pushed and no note written, and summary.message says how a person approves it " +
-	"(run the gate from an interactive terminal). Do not retry it from here. " +
+	"(run `git push` from an interactive terminal). Do not retry it from here. " +
 	"The read-only tools are always available."
 
 // NewServer builds an MCP server exposing Warden's operation set as typed tools:

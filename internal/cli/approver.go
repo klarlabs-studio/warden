@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 
@@ -16,46 +17,108 @@ import (
 
 // terminalApprover resolves the run's approval gate interactively. Clean runs
 // never reach it (the runner auto-passes those); it is consulted only when a
-// rule required approval or a step flagged findings. On a non-interactive
-// stream it declines, so a gate that demands human sign-off is never silently
-// waved through in CI — the operator must approve at a terminal or via an agent
-// surface.
+// rule required approval or a step flagged findings.
+//
+// It asks on stdin/stdout when stdin is a terminal (`warden run` typed by
+// hand). Under `git push` stdin is git's ref list, so it asks on the
+// controlling terminal instead, as git hooks conventionally do. With neither
+// (CI, launchd, a process spawned without a terminal) it declines, so a gate
+// that demands sign-off is never silently waved through.
+//
+// A terminal answering is all this establishes. An agent that drives a pty can
+// answer too; ADR 0007 records that limit.
 type terminalApprover struct {
 	in  io.Reader
 	out io.Writer
 	tty bool
+	// openTTY opens the controlling terminal; nil, or an error, means there is
+	// none. Injected so tests need no real terminal.
+	openTTY func() (io.ReadWriteCloser, error)
+	// ttyTimeout bounds how long the controlling-terminal prompt waits. A
+	// process with a controlling terminal nobody is watching must not hang the
+	// push forever; no answer is a decline.
+	ttyTimeout time.Duration
 }
+
+// controllingTTYTimeout is how long a `git push` waits at the approval prompt.
+const controllingTTYTimeout = 5 * time.Minute
 
 func newTerminalApprover(in io.Reader, out io.Writer) terminalApprover {
-	return terminalApprover{in: in, out: out, tty: isatty.IsTerminal(os.Stdin.Fd())}
+	return terminalApprover{
+		in:         in,
+		out:        out,
+		tty:        isatty.IsTerminal(os.Stdin.Fd()),
+		openTTY:    openControllingTTY,
+		ttyTimeout: controllingTTYTimeout,
+	}
 }
 
-func (a terminalApprover) Approve(_ context.Context, req application.ApprovalRequest) (application.Decision, error) {
-	_, _ = fmt.Fprintf(a.out, "\nwarden: %s on %s needs approval (risk=%s)\n", req.Hook, req.Branch, req.Risk)
+func (a terminalApprover) Approve(ctx context.Context, req application.ApprovalRequest) (application.Decision, error) {
+	if a.tty {
+		return ask(ctx, a.in, a.out, req, 0, "interactive terminal decision"), nil
+	}
+	if a.openTTY != nil {
+		if t, err := a.openTTY(); err == nil {
+			defer func() { _ = t.Close() }()
+			return ask(ctx, t, t, req, a.ttyTimeout, "controlling terminal decision"), nil
+		}
+	}
+	describeApproval(a.out, req)
+	hint := "Approve by running `git push` from an interactive terminal, or via `warden axi`."
+	if !agentSurfaceMayApprove(req.Profile) {
+		hint = "Approve by running `git push` from an interactive terminal."
+	}
+	_, _ = fmt.Fprintln(a.out, "  non-interactive stream and no terminal to ask; declining. "+hint)
+	return application.Decision{Approved: false, Principal: "warden-cli", Rationale: "no tty"}, nil
+}
+
+// describeApproval writes what the gate is asking about.
+func describeApproval(w io.Writer, req application.ApprovalRequest) {
+	_, _ = fmt.Fprintf(w, "\nwarden: %s on %s needs approval (risk=%s)\n", req.Hook, req.Branch, req.Risk)
 	for _, f := range req.Findings {
 		loc := f.File
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
-		_, _ = fmt.Fprintf(a.out, "  [%s] %s %s\n", f.Severity, loc, f.Message)
+		_, _ = fmt.Fprintf(w, "  [%s] %s %s\n", f.Severity, loc, f.Message)
 	}
-	if !a.tty {
-		hint := "Approve at a terminal or via `warden axi`."
-		if !agentSurfaceMayApprove(req.Profile) {
-			hint = "Approve at an interactive terminal."
+}
+
+// ask prompts on w and reads one answer from r. Only "y" approves. A timeout
+// (when positive), a cancelled run, or a read error declines.
+func ask(ctx context.Context, r io.Reader, w io.Writer, req application.ApprovalRequest, timeout time.Duration, rationale string) application.Decision {
+	describeApproval(w, req)
+	_, _ = fmt.Fprint(w, "  approve? [y/N] ")
+	answer := make(chan string, 1)
+	go func() {
+		line, _ := bufio.NewReader(r).ReadString('\n')
+		answer <- line
+	}()
+	var expired <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		expired = timer.C
+	}
+	declined := application.Decision{Approved: false, Principal: "warden-cli"}
+	select {
+	case line := <-answer:
+		return application.Decision{
+			Approved:  strings.EqualFold(strings.TrimSpace(line), "y"),
+			Principal: "warden-cli",
+			Rationale: rationale,
+			// Either path is a terminal answering: stdin, or the controlling
+			// terminal under git push. Neither proves a person did.
+			Channel: domain.ApprovalTTY,
 		}
-		_, _ = fmt.Fprintln(a.out, "  non-interactive stream; declining. "+hint)
-		return application.Decision{Approved: false, Principal: "warden-cli", Rationale: "no tty"}, nil
+	case <-expired:
+		_, _ = fmt.Fprintln(w, "\n  no answer; declining.")
+		declined.Rationale = "no answer at the terminal"
+		return declined
+	case <-ctx.Done():
+		declined.Rationale = "run cancelled at the approval prompt"
+		return declined
 	}
-	_, _ = fmt.Fprint(a.out, "  approve? [y/N] ")
-	line, _ := bufio.NewReader(a.in).ReadString('\n')
-	yes := strings.EqualFold(strings.TrimSpace(line), "y")
-	return application.Decision{
-		Approved:  yes,
-		Principal: "warden-cli",
-		Rationale: "interactive terminal decision",
-		Channel:   domain.ApprovalTTY,
-	}, nil
 }
 
 // agentSurfacePrincipal names the agent surfaces (MCP, axi) on a decision they
@@ -99,11 +162,11 @@ func agentSurfaceMayApprove(profile *domain.ResolvedProfile) bool {
 // agentApprovalRequired is the message an agent reads when its run stopped at
 // the approval gate: what happened, what did not, and how a person approves.
 func agentApprovalRequired(req application.ApprovalRequest) string {
-	how := fmt.Sprintf("`warden run %s`", req.Hook)
-	if req.Hook == domain.PrePush {
-		how = "`git push` or `warden run pre-push`"
+	how := "`git push`"
+	if req.Hook == domain.PreCommit {
+		how = "`git commit`"
 	}
 	return fmt.Sprintf(
-		"needs human approval: profile %s does not let an agent surface (MCP, axi) approve its own run, so nothing was pushed and no note was written. A person must approve: run the gate from an interactive terminal (%s) and answer the approval prompt",
+		"needs human approval: profile %s does not let an agent surface (MCP, axi) approve its own run, so nothing was pushed and no note was written. A person must approve: run %s from an interactive terminal and answer the approval prompt",
 		req.Profile.Name, how)
 }
