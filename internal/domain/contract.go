@@ -14,6 +14,13 @@ import (
 
 const ExecutionContractVersion = 1
 
+// ExecutionRequirementsV2 is the requirements format that adds a minimum
+// compliance profile (ADR 0007). Version 1 files keep their exact meaning.
+// A warden that predates version 2 rejects such a file (its version check and
+// DisallowUnknownFields both refuse it), so a consumer pinned to an older
+// release fails safe: verification is refused and CI runs its checks.
+const ExecutionRequirementsV2 = 2
+
 // ExecutionContract contains observations from one fresh command execution.
 // Inputs are tracked manifest contents, not installed-package attestations.
 // Digests avoid publishing command text and contextual environment values.
@@ -31,7 +38,26 @@ type ExecutionContract struct {
 // being evaluated. Every field in a required step is an exact expectation.
 type ExecutionRequirements struct {
 	Version int                           `json:"version"`
+	Profile *ProfileRequirement           `json:"profile,omitempty"`
 	Steps   map[StepName]StepRequirements `json:"steps"`
+}
+
+// ProfileRequirement is the version 2 profile clause: the note must conform to
+// at least Min, recomputed from its signed observations (see
+// service.Conformance), never accepted on the strength of the recorded name.
+type ProfileRequirement struct {
+	// Min is a profile name ("strict") or name@version ("strict@1").
+	Min string `json:"min"`
+}
+
+// MinProfile returns the minimum profile a version 2 file demands, or false
+// when it demands none.
+func (r ExecutionRequirements) MinProfile() (ComplianceProfile, bool) {
+	if r.Profile == nil {
+		return ComplianceProfile{}, false
+	}
+	p, err := ParseComplianceProfile(r.Profile.Min)
+	return p, err == nil
 }
 
 type StepRequirements struct {
@@ -64,8 +90,25 @@ var gitTreeID = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 func ValidTreeSHA(sha string) bool { return gitTreeID.MatchString(sha) }
 
 func (r ExecutionRequirements) Validate() error {
-	if r.Version != ExecutionContractVersion || len(r.Steps) == 0 {
-		return fmt.Errorf("requirements must use version 1 and name at least one step")
+	switch r.Version {
+	case ExecutionContractVersion:
+		if len(r.Steps) == 0 {
+			return fmt.Errorf("requirements must use version 1 and name at least one step")
+		}
+		if r.Profile != nil {
+			return fmt.Errorf("requirements version 1 cannot name a profile; use version 2")
+		}
+	case ExecutionRequirementsV2:
+		if r.Profile == nil && len(r.Steps) == 0 {
+			return fmt.Errorf("requirements version 2 must name a profile, at least one step, or both")
+		}
+		if r.Profile != nil {
+			if _, err := ParseComplianceProfile(r.Profile.Min); err != nil {
+				return fmt.Errorf("requirements profile.min: %w", err)
+			}
+		}
+	default:
+		return fmt.Errorf("requirements must use version 1 or 2")
 	}
 	for name, step := range r.Steps {
 		if !name.Valid() || strings.TrimSpace(step.Command) == "" {
@@ -81,7 +124,7 @@ func (r ExecutionRequirements) Validate() error {
 			return fmt.Errorf("requirements for %s need a supported Linux platform", name)
 		}
 		if step.Network != "none" {
-			return fmt.Errorf("requirements version 1 requires network none")
+			return fmt.Errorf("requirements version %d requires network none", r.Version)
 		}
 		if step.Inputs == nil {
 			return fmt.Errorf("requirements for %s must explicitly provide inputs ({} when empty)", name)
