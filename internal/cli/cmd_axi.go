@@ -83,6 +83,7 @@ func axiVerify(f facade, args []string, stdout, stderr io.Writer) int {
 		out["run_id"] = rec.Record.RunID
 		out["steps"] = stepStrings(rec.Record.StepsRun)
 		out["warden_version"] = rec.Record.WardenVersion
+		addProfileObservations(out, rec.Record)
 	}
 	if code := emitTOON(stdout, stderr, out); code != 0 {
 		return code
@@ -390,6 +391,34 @@ func anyStrings(ss []string) []any {
 
 // stepOutcomeMaps renders the non-executed steps as uniform rows for TOON, in a
 // stable (sorted) order so the output does not churn between identical runs.
+// addProfileObservations adds a profiled note's signed profile, per-step
+// observations and approval record to an axi verify result. A note without a
+// profile carries none of them, and none of the keys appears.
+func addProfileObservations(out map[string]any, rec *domain.RunRecord) {
+	if rec.Profile != nil {
+		out["profile"] = rec.Profile.String()
+		out["profile_digest"] = rec.Profile.Digest
+	}
+	if rec.StepOutcomes != nil {
+		names := make([]string, 0, len(rec.StepOutcomes))
+		for s := range rec.StepOutcomes {
+			names = append(names, string(s))
+		}
+		sort.Strings(names)
+		obs := make([]any, 0, len(names))
+		for _, s := range names {
+			o := rec.StepOutcomes[domain.StepName(s)]
+			obs = append(obs, map[string]any{"step": s, "outcome": string(o.Outcome), "agent": o.Agent})
+		}
+		out["recorded_outcomes"] = obs
+	}
+	if a := rec.Approval; a != nil {
+		out["approval_required"] = a.Required
+		out["approval_channel"] = string(a.Channel)
+		out["approval_principal"] = a.Principal
+	}
+}
+
 func stepOutcomeMaps(notes map[domain.StepName]domain.OutcomeNote) []any {
 	names := make([]string, 0, len(notes))
 	for s := range notes {

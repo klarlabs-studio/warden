@@ -37,11 +37,15 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	command := sc.Commands[s.cmdKey]
 	if strings.TrimSpace(command) == "" {
 		// No command configured: the step is a no-op pass rather than a hard
-		// failure, so a repo can adopt Warden before wiring every command.
+		// failure, so a repo can adopt Warden before wiring every command. It is
+		// marked SKIPPED: nothing examined the change, and a profiled run's
+		// signed record must not state that this step executed.
 		return domain.StepResult{
-			Step:    s.name,
-			Status:  domain.StepPass,
-			Summary: string(s.name) + ": no command configured, skipped",
+			Step:          s.name,
+			Status:        domain.StepPass,
+			Outcome:       domain.StepSkipped,
+			OutcomeReason: "no command configured",
+			Summary:       string(s.name) + ": no command configured, skipped",
 		}, nil
 	}
 

@@ -23,7 +23,12 @@ func (RebaseStep) Name() domain.StepName { return domain.StepRebase }
 func (RebaseStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
 	base, why := resolveIntegrationBase(ctx, sc)
 	if base == "" {
-		return domain.StepResult{Step: domain.StepRebase, Status: domain.StepPass, Summary: "rebase: " + why + ", skipped"}, nil
+		// Nothing to rebase onto, so nothing was done: SKIPPED, not executed.
+		return domain.StepResult{
+			Step: domain.StepRebase, Status: domain.StepPass,
+			Outcome: domain.StepSkipped, OutcomeReason: why,
+			Summary: "rebase: " + why + ", skipped",
+		}, nil
 	}
 
 	if out, err := gitOut(ctx, sc.WorktreeDir, "rebase", base); err != nil {

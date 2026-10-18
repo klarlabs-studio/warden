@@ -248,6 +248,27 @@ func (r *Run) ExecutionReuses() map[StepName]ExecutionReuse {
 	return out
 }
 
+// StepOutcomes reports what was observed of every step folded into the run,
+// for the signed record of a profiled run. Unlike StepNotes it lists executed
+// steps too, and keeps a prediction apart from a host cache hit. A step that
+// never reached the run (the push gate, a step after a failure) is absent:
+// nothing was observed of it.
+func (r *Run) StepOutcomes() map[StepName]StepObservation {
+	var out map[StepName]StepObservation
+	for i := range r.results {
+		res := &r.results[i]
+		if out == nil {
+			out = make(map[StepName]StepObservation)
+		}
+		obs := StepObservation{Outcome: res.ObservedOutcome()}
+		if obs.Outcome == StepExecuted {
+			obs.Agent = res.Agent
+		}
+		out[res.Step] = obs
+	}
+	return out
+}
+
 // StepNotes reports the steps that passed through the run WITHOUT executing —
 // cached or skipped — with why. A step absent from the map executed. Delivery
 // surfaces use it so a skipped review is never presented as a review that ran;

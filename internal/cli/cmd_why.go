@@ -5,8 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/service"
 )
 
@@ -58,8 +60,20 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 	// no agent was configured, is recorded exactly like one that executed. Say
 	// so rather than let "steps run" vouch for a review nobody performed. The
 	// live run output (and axi/MCP results) name skipped and cached steps.
-	if len(rec.StepsRun) > 0 {
+	//
+	// A profiled run's note does record them, signed, and then they are shown
+	// instead of the caveat.
+	switch {
+	case rec.StepOutcomes != nil:
+		_, _ = fmt.Fprintf(stdout, "outcomes:      %s\n", whyOutcomes(rec))
+	case len(rec.StepsRun) > 0:
 		_, _ = fmt.Fprintln(stdout, whyOutcomesCaveat)
+	}
+	if rec.Profile != nil {
+		_, _ = fmt.Fprintf(stdout, "profile:       %s\n", whyProfile(*rec.Profile))
+	}
+	if rec.Approval != nil {
+		_, _ = fmt.Fprintf(stdout, "approval:      %s\n", whyApproval(*rec.Approval))
 	}
 
 	if len(rec.MatchedRules) > 0 {
@@ -96,6 +110,69 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 // whyOutcomesCaveat qualifies the step list read from a note, which does not
 // record whether a step executed, was cached, or was skipped.
 const whyOutcomesCaveat = "outcomes:      not recorded in the note — a cached step, or an agent step skipped for want of an agent, is listed like one that executed"
+
+// whyOutcomes renders the signed per-step observations in the order the steps
+// were planned. A planned step with no observation is said to be unobserved
+// rather than left out, so the list cannot read as complete when it is not.
+func whyOutcomes(rec *domain.RunRecord) string {
+	var parts []string
+	seen := map[domain.StepName]bool{}
+	render := func(s domain.StepName) {
+		seen[s] = true
+		obs, ok := rec.StepOutcomes[s]
+		if !ok {
+			parts = append(parts, string(s)+" not observed")
+			return
+		}
+		part := string(s) + " " + string(obs.Outcome)
+		if obs.Agent != "" {
+			part += " (agent=" + obs.Agent + ")"
+		}
+		parts = append(parts, part)
+	}
+	for _, s := range rec.StepsRun {
+		render(s)
+	}
+	extra := make([]domain.StepName, 0, len(rec.StepOutcomes))
+	for s := range rec.StepOutcomes {
+		if !seen[s] {
+			extra = append(extra, s)
+		}
+	}
+	slices.Sort(extra)
+	for _, s := range extra {
+		render(s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// whyProfile renders the recorded profile and whether its digest matches this
+// warden's own definition of that version. The name alone is a claim; the
+// digest comparison is what a reader can actually check.
+func whyProfile(ref domain.ProfileRef) string {
+	p, err := domain.ParseComplianceProfile(ref.String())
+	switch {
+	case err != nil:
+		return ref.String() + " (unknown to this warden)"
+	case p.Digest() != ref.Digest:
+		return ref.String() + " (definition DIFFERS from this warden's)"
+	default:
+		return ref.String() + " (definition matches this warden's)"
+	}
+}
+
+// whyApproval renders the approval gate's record. A tty or tui channel means an
+// interactive surface answered; it is not proof a person did.
+func whyApproval(a domain.ApprovalRef) string {
+	if !a.Required {
+		return "not required"
+	}
+	s := "required, answered via " + string(a.Channel)
+	if a.Principal != "" {
+		s += " (" + a.Principal + ")"
+	}
+	return s
+}
 
 func chainState(intact bool) string {
 	if intact {

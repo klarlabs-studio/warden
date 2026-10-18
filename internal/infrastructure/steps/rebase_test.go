@@ -54,6 +54,10 @@ func TestRebaseStepNoUpstream(t *testing.T) {
 	if !strings.Contains(res.Summary, "no integration base") {
 		t.Errorf("summary = %q, want it to say there is no integration base", res.Summary)
 	}
+	// Nothing was rebased, so the step did not execute.
+	if res.Outcome != domain.StepSkipped || !strings.Contains(res.OutcomeReason, "no integration base") {
+		t.Errorf("a rebase with no base must be marked skipped, got %q (%q)", res.Outcome, res.OutcomeReason)
+	}
 }
 
 func TestRebaseStepCleanRebase(t *testing.T) {

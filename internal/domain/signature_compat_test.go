@@ -3,6 +3,8 @@ package domain
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -174,5 +176,129 @@ func TestRootFlattensReattestationChains(t *testing.T) {
 	}
 	if got := original.Root(); got.CommitSHA != "aaaa" {
 		t.Errorf("a plain record is its own root, got %q", got.CommitSHA)
+	}
+}
+
+// preProfileVerify verifies a note the way a warden from before the profile
+// fields does: it decodes into a struct that has every RunRecord field EXCEPT
+// profile, step_outcomes and approval — built by reflection from RunRecord
+// itself, so it cannot drift from the real struct in any other way — recomputes
+// the signing payload from that, and checks the ed25519 signature over it.
+func preProfileVerify(t *testing.T, note []byte) bool {
+	t.Helper()
+	newFields := map[string]bool{"Profile": true, "StepOutcomes": true, "Approval": true}
+	rt := reflect.TypeOf(RunRecord{})
+	var fields []reflect.StructField
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		if newFields[f.Name] {
+			continue
+		}
+		fields = append(fields, reflect.StructField{Name: f.Name, Type: f.Type, Tag: f.Tag})
+	}
+	if len(fields) != rt.NumField()-len(newFields) {
+		t.Fatalf("RunRecord no longer has all of %v; update this test", newFields)
+	}
+	old := reflect.New(reflect.StructOf(fields))
+	if err := json.Unmarshal(note, old.Interface()); err != nil {
+		t.Fatal(err)
+	}
+	v := old.Elem()
+	sig := v.FieldByName("Signature").String()
+	pub := v.FieldByName("PublicKey").String()
+	// What SigningPayload does: clear the signature and the carried original.
+	v.FieldByName("Signature").SetString("")
+	v.FieldByName("CarriedOriginal").Set(reflect.Zero(v.FieldByName("CarriedOriginal").Type()))
+	payload, err := json.Marshal(old.Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verifyEd25519Signature(pub, sig, payload)
+}
+
+// signedNote signs rec with a fresh key and returns the note bytes as written.
+func signedNote(t *testing.T, rec RunRecord) []byte {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.PublicKey = b64(pub)
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Signature = b64(ed25519.Sign(priv, payload))
+	note, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return note
+}
+
+func sampleRecord() RunRecord {
+	return RunRecord{
+		RunID:             "run-1",
+		CommitSHA:         "abc123",
+		Agent:             map[StepName]string{},
+		StepsRun:          []StepName{StepLint, StepReview},
+		Evidence:          []EvidenceEntry{{Kind: "lint.pass", Hash: "h1"}},
+		EvidenceChainRoot: "h1",
+	}
+}
+
+// The profile fields are emitted only under a profile, and a note without them
+// must verify for a warden that has never heard of them. If someone drops an
+// omitempty or gives one a non-zero default, every unprofiled note in every repo
+// stops verifying for pinned older verifiers at once.
+func TestSigningPayload_UnprofiledNoteVerifiesForAPreProfileWarden(t *testing.T) {
+	rec := sampleRecord()
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"profile", "step_outcomes", "approval"} {
+		if strings.Contains(string(payload), key) {
+			t.Fatalf("an unprofiled payload must not mention %q: %s", key, payload)
+		}
+	}
+	if !preProfileVerify(t, signedNote(t, rec)) {
+		t.Fatal("an unprofiled note must verify for a warden that predates the profile fields")
+	}
+}
+
+// A profiled note must FAIL for a pinned older verifier, field by field: the
+// older warden drops what it does not know, recomputes a different payload and
+// rejects the signature. Failing closed is the point — it never accepts a
+// record whose profile claims it cannot read.
+func TestSigningPayload_ProfiledNoteFailsAPreProfileWarden(t *testing.T) {
+	p, err := ParseComplianceProfile("strict")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := NewProfileRef(p)
+	cases := map[string]func(*RunRecord){
+		"profile": func(r *RunRecord) { r.Profile = &ref },
+		"step_outcomes": func(r *RunRecord) {
+			r.StepOutcomes = map[StepName]StepObservation{StepReview: {Outcome: StepSkipped}}
+		},
+		"approval": func(r *RunRecord) { r.Approval = &ApprovalRef{Channel: ApprovalNone} },
+	}
+	for name, set := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := sampleRecord()
+			set(&rec)
+			note := signedNote(t, rec)
+			var current RunRecord
+			if err := json.Unmarshal(note, &current); err != nil {
+				t.Fatal(err)
+			}
+			if !current.VerifySignature() {
+				t.Fatal("precondition: the current warden must verify its own profiled note")
+			}
+			if preProfileVerify(t, note) {
+				t.Errorf("a pre-profile warden verified a note carrying %s; it must fail closed", name)
+			}
+		})
 	}
 }

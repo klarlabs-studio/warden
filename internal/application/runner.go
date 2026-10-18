@@ -551,7 +551,8 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		return r.result(run, ""), nil
 	}
 
-	if err := r.resolvePushGate(ctx, run, kernel); err != nil {
+	approval, err := r.resolvePushGate(ctx, run, kernel)
+	if err != nil {
 		return RunResult{}, err
 	}
 	if run.IsTerminal() { // rejected or aborted at the gate
@@ -559,7 +560,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 
 	// Provenance: verify the run-level evidence chain and write the note.
-	record, err := r.buildRecord(kernel, run)
+	record, err := r.buildRecord(kernel, run, approval)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -898,19 +899,25 @@ func (r *Runner) withStream(sc StepContext) StepContext {
 // pause: the aggregate decides whether a human is needed, the approver answers,
 // and a push failure aborts the run. On success the push executor has already
 // performed the real push.
-func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Kernel) error {
+//
+// The returned ApprovalRef records how the gate was answered, for the signed
+// record of a profiled run. It is meaningful only when the error is nil and
+// the run is not terminal.
+func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Kernel) (domain.ApprovalRef, error) {
+	// No decision was required unless an approver is consulted below.
+	approval := domain.ApprovalRef{Channel: domain.ApprovalNone}
 	// A run cancelled before the gate (Ctrl-C / SIGTERM) must never fall through
 	// to the auto-approval path and push. Abort cleanly instead of pushing.
 	if err := ctx.Err(); err != nil {
-		return run.Abort("run cancelled before push")
+		return approval, run.Abort("run cancelled before push")
 	}
 
 	gate, err := kernel.Execute(ctx, domain.StepPush)
 	if err != nil {
-		return err
+		return approval, err
 	}
 	if !gate.NeedsApproval {
-		return nil
+		return approval, nil
 	}
 
 	decision := autoApproval()
@@ -919,12 +926,13 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 			Hook: run.Hook(), Branch: run.Branch(), Steps: run.Policy().Steps, Findings: run.Findings(), Risk: run.Policy().Risk,
 		})
 		if err != nil {
-			return err
+			return approval, err
 		}
+		approval = decision.approvalRef()
 	}
 	if !decision.Approved {
 		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)
-		return run.Reject("approval declined")
+		return approval, run.Reject("approval declined")
 	}
 
 	// Re-check cancellation right before the irreversible push: on the
@@ -933,7 +941,7 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 	// otherwise still push. Reject the pending gate and abort.
 	if err := ctx.Err(); err != nil {
 		_, _ = kernel.Reject(ctx, gate.SessionID, "warden-cancelled", "run cancelled before push")
-		return run.Abort("run cancelled before push")
+		return approval, run.Abort("run cancelled before push")
 	}
 
 	if _, err := kernel.Approve(ctx, gate.SessionID, decision.Principal, decision.Rationale); err != nil {
@@ -941,11 +949,11 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 		// branch-moved is matched by substring as well as errors.Is. Either way
 		// a failed push aborts — never a successful gate.
 		if errors.Is(err, ErrBranchMoved) || strings.Contains(err.Error(), ErrBranchMoved.Error()) {
-			return run.Abort("branch changed mid-run; re-push")
+			return approval, run.Abort("branch changed mid-run; re-push")
 		}
-		return run.Abort("push failed: " + err.Error())
+		return approval, run.Abort("push failed: " + err.Error())
 	}
-	return nil
+	return approval, nil
 }
 
 // notarizeAgentTrace binds a digest of the repo's Agent Trace record into the
@@ -1019,12 +1027,18 @@ func (r *Runner) sign(record *domain.RunRecord) (reason string) {
 }
 
 // buildRecord finalizes the evidence chain into a provenance RunRecord (§9).
-func (r *Runner) buildRecord(kernel Kernel, run *domain.Run) (*domain.RunRecord, error) {
+//
+// Under a compliance profile the record also carries the profile, the observed
+// step outcomes and the approval gate's answer, all inside the signed payload
+// (ADR 0007). Without a profile none of them is set, so the note is
+// byte-identical to one written before they existed and older verifiers keep
+// verifying it.
+func (r *Runner) buildRecord(kernel Kernel, run *domain.Run, approval domain.ApprovalRef) (*domain.RunRecord, error) {
 	root, entries, err := kernel.Finalize()
 	if err != nil {
 		return nil, fmt.Errorf("verify evidence chain: %w", err)
 	}
-	return &domain.RunRecord{
+	rec := &domain.RunRecord{
 		RunID:             string(run.ID()),
 		Timestamp:         r.now().UTC().Format(time.RFC3339),
 		WardenVersion:     r.Settings.Version,
@@ -1035,7 +1049,39 @@ func (r *Runner) buildRecord(kernel Kernel, run *domain.Run) (*domain.RunRecord,
 		MatchedRules:      run.Policy().MatchedRules,
 		EvidenceChainRoot: root,
 		Evidence:          entries,
-	}, nil
+	}
+	if err := attachProfileObservations(rec, run, approval); err != nil {
+		return nil, err
+	}
+	return rec, nil
+}
+
+// attachProfileObservations adds the profile-gated fields to rec when the run's
+// policy was resolved under a profile, and leaves rec untouched otherwise.
+//
+// The profile is re-parsed rather than copied from the resolved policy so the
+// recorded digest is always this binary's built-in definition: a verifier
+// comparing it with its own table then compares like with like.
+func attachProfileObservations(rec *domain.RunRecord, run *domain.Run, approval domain.ApprovalRef) error {
+	resolved := run.Policy().Profile
+	if resolved == nil {
+		return nil
+	}
+	p, err := domain.ParseComplianceProfile(resolved.Name)
+	if err != nil {
+		// The loader already accepted this profile; failing here means the
+		// policy names a profile this binary cannot describe. Writing a record
+		// without it would silently drop the claim the repo asked for.
+		return fmt.Errorf("record compliance profile: %w", err)
+	}
+	ref := domain.NewProfileRef(p)
+	rec.Profile = &ref
+	rec.StepOutcomes = run.StepOutcomes()
+	if approval.Channel == "" {
+		approval.Channel = domain.ApprovalNone
+	}
+	rec.Approval = &approval
+	return nil
 }
 
 // newRun mints a run aggregate with a fresh identity.

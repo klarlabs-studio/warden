@@ -6,6 +6,34 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Profiled notes record what happened, signed.** A note listed the steps the
+  policy planned, so a review skipped for want of an agent, or a test served
+  from the cache, read in the record exactly like one that ran, and a verifier
+  had no way to tell. Under a `profile:`, the note now also carries the
+  profile (name, version and the digest of the built-in definition), each
+  step's observed outcome (`executed`, `cached`, `predicted` for a matching
+  staged prediction, or `skipped`) with the agent warden invoked, and how the
+  approval gate was answered (`tty`, `tui`, `auto`, or `none` when no decision
+  was needed). All three are inside the signature and say only what warden
+  observed; nothing about agent isolation is recorded, because agent steps are
+  not isolated yet. `warden why`, MCP `verify` and `warden axi verify` show
+  them, and `warden reattest` carries them unchanged. A repository without
+  `profile:` writes exactly the note it wrote before. A warden older than this
+  release reports a profiled note's signature as invalid, so a verifier that
+  pins a key rejects it: upgrade verifiers before adopting a profile.
+
+### Fixed
+
+- **A shell step with no command, and a rebase with nothing to rebase onto, say
+  they were skipped.** Both passed without doing anything and were reported as
+  steps that ran, for example `gate passed (lint, test)` when no test command
+  was configured. They are now marked skipped with the reason, like an agent
+  step with no agent, in the run output and on every surface that shows step
+  outcomes. The verdict is unchanged, and an unprofiled note is unchanged. A
+  skipped shell step is no longer written to the step cache.
+
 ## [0.36.0] - 2026-10-19
 
 A minor release. `extends:` now applies settings a child config used to have

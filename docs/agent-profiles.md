@@ -121,6 +121,31 @@ policy's `Profile` field, and `warden axi policy-explain` includes the profile,
 its digest and any unmet floors. Without a profile, all three read exactly as
 they did before.
 
+## What the signed note records
+
+Starting with the first release after 0.36.0, every note the gate writes under
+a profile carries three more fields, all inside the signed payload:
+
+- `profile`: the level, its version and the digest of the definition the
+  writing warden had built in.
+- `step_outcomes`: for each step that ran through the gate, whether it was
+  `executed`, `cached` (the host input cache), `predicted` (a matching staged
+  prediction) or `skipped` (nothing was configured to perform it), and the
+  agent warden invoked when an agent executed it.
+- `approval`: whether the approval gate needed a decision, and if so the
+  channel that answered it (`tty`, `tui` or `auto`) and the name the approver
+  gave itself. `none` means no decision was needed.
+
+They state only what warden observed. Nothing is recorded about isolation of
+agent steps, because agent steps are not isolated yet. `warden why`, MCP
+`verify` and `warden axi verify` show the three fields.
+
+A note written without a profile has none of them and is byte for byte what it
+was before. A warden older than this feature that meets a profiled note drops
+the fields it does not know, computes a different payload and reports the
+signature as invalid. A verifier that pins a key therefore rejects a profiled
+note it cannot read, so upgrade verifiers before adopting a profile.
+
 ## Not yet enforced
 
 These parts of the design need runtime or verifier work that later releases
@@ -132,8 +157,7 @@ add. In this release a profile does **not**:
 - reduce the environment an agent step sees;
 - refuse a custom agent under strict;
 - stop the MCP and axi surfaces from satisfying `require_approval`;
-- record the profile, step outcomes, approval channel or authorship signals in
-  the signed note;
+- record agent isolation or authorship signals in the signed note;
 - give CI a way to demand a minimum profile (`verify --min-profile`, the range
   gate, the action inputs);
 - refuse host cache hits or predictions for required steps.

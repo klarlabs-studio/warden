@@ -194,11 +194,11 @@ func (m model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "y":
-		m.resp <- application.Decision{Approved: true, Principal: "warden-tui", Rationale: "approved in TUI"}
+		m.resp <- application.Decision{Approved: true, Principal: "warden-tui", Rationale: "approved in TUI", Channel: domain.ApprovalTUI}
 		m.phase = phaseRunning
 		return m, m.listen()
 	case "n":
-		m.resp <- application.Decision{Approved: false, Principal: "warden-tui", Rationale: "declined in TUI"}
+		m.resp <- application.Decision{Approved: false, Principal: "warden-tui", Rationale: "declined in TUI", Channel: domain.ApprovalTUI}
 		m.phase = phaseRunning
 		return m, m.listen()
 	}

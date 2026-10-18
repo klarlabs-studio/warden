@@ -140,6 +140,11 @@ type StepResult struct {
 	// they are read only by delivery surfaces.
 	Outcome       StepOutcome
 	OutcomeReason string
+	// Agent is the coding agent the step invoked, set only by a step that
+	// actually ran one. Empty for a skipped or cached agent step and for every
+	// non-agent step. Like Outcome it is not part of the evidence chain; a
+	// profiled run's signed record reads it (see Run.StepOutcomes).
+	Agent string
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See

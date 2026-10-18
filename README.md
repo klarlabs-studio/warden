@@ -921,7 +921,8 @@ must not be treated as one.
 
 Each step's `outcome` says whether it did its work: `executed`, `cached` (an
 identical earlier pass was reused) or `skipped` (an agent step with no agent
-configured), with `outcome_reason` saying why. It is not a verdict — `status` is —
+configured, a shell step with no command, a rebase with nothing to rebase onto),
+with `outcome_reason` saying why. It is not a verdict — `status` is —
 but a `pass` that was `skipped` examined nothing. The final summary's
 `step_outcomes` (and `step_outcomes` in `warden axi run-trigger`) lists the steps
 that passed without executing.

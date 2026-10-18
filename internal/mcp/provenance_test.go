@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -280,5 +281,39 @@ func TestProvenanceTools_DoNotConsultTheRunGate(t *testing.T) {
 	}
 	if _, err := handleVerifyRange(f, VerifyRangeInput{Base: "origin/main"}); err != nil {
 		t.Errorf("verify_range must answer under a refusing gate: %v", err)
+	}
+}
+
+// A profiled note's signed observations reach the agent as recorded; an
+// unprofiled note's output has none of the keys, so existing consumers see
+// exactly what they saw before.
+func TestHandleVerify_ProjectsProfileObservations(t *testing.T) {
+	ref := domain.ProfileRef{Name: "strict", Version: 1, Digest: "d"}
+	obs := map[domain.StepName]domain.StepObservation{domain.StepReview: {Outcome: domain.StepSkipped}}
+	appr := &domain.ApprovalRef{Required: true, Channel: domain.ApprovalAuto, Principal: "warden-auto"}
+	f := &fakeFacade{verify: ProvenanceRecord{Validated: true, Record: &domain.RunRecord{
+		RunID: "run-1", Profile: &ref, StepOutcomes: obs, Approval: appr,
+	}}}
+	out, err := handleVerify(f, VerifyInput{Commit: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Profile == nil || *out.Profile != ref || out.StepOutcomes[domain.StepReview].Outcome != domain.StepSkipped || out.Approval != appr {
+		t.Errorf("profile observations not projected: %+v", out)
+	}
+
+	f = &fakeFacade{verify: ProvenanceRecord{Validated: true, Record: &domain.RunRecord{RunID: "run-2"}}}
+	out, err = handleVerify(f, VerifyInput{Commit: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"profile", "step_outcomes", "approval"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("unprofiled verify output carries %q: %s", key, raw)
+		}
 	}
 }

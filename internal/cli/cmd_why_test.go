@@ -210,3 +210,62 @@ func TestWhySignature(t *testing.T) {
 		}
 	}
 }
+
+// A profiled note records outcomes, signed, so `why` shows them instead of the
+// caveat — including a planned step nothing was observed for — along with the
+// profile (and whether this warden's definition matches it) and the approval.
+func TestCmdWhy_RendersProfileObservations(t *testing.T) {
+	repoWithConfig(t, "")
+	p, err := domain.ParseComplianceProfile("strict")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.NewProfileRef(p)
+	rec := domain.RunRecord{
+		RunID:             "run_p",
+		StepsRun:          []domain.StepName{"lint", "review", "test"},
+		EvidenceChainRoot: "h0",
+		Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
+		Profile:           &ref,
+		StepOutcomes: map[domain.StepName]domain.StepObservation{
+			"lint":   {Outcome: domain.StepCached},
+			"review": {Outcome: domain.StepExecuted, Agent: "claude"},
+			"extra":  {Outcome: domain.StepPredicted},
+		},
+		Approval: &domain.ApprovalRef{Required: true, Channel: domain.ApprovalTTY, Principal: "warden-cli"},
+	}
+	head := noteOnHead(t, rec)
+
+	var out, errb bytes.Buffer
+	if code := cmdWhy([]string{head}, &out, &errb); code != 0 {
+		t.Fatalf("code = %d, want 0; err=%q", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"outcomes:      lint cached, review executed (agent=claude), test not observed, extra predicted",
+		"profile:       strict@1 (definition matches this warden's)",
+		"approval:      required, answered via tty (warden-cli)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, whyOutcomesCaveat) {
+		t.Errorf("a note that records outcomes must not carry the not-recorded caveat:\n%s", got)
+	}
+}
+
+func TestWhyProfileAndApprovalStates(t *testing.T) {
+	if got := whyProfile(domain.ProfileRef{Name: "strict", Version: 1, Digest: "forked"}); !strings.Contains(got, "DIFFERS") {
+		t.Errorf("a digest that does not match the built-in must say so: %q", got)
+	}
+	if got := whyProfile(domain.ProfileRef{Name: "strict", Version: 9}); !strings.Contains(got, "unknown to this warden") {
+		t.Errorf("an unknown version must say so: %q", got)
+	}
+	if got := whyApproval(domain.ApprovalRef{Channel: domain.ApprovalNone}); got != "not required" {
+		t.Errorf("approval = %q", got)
+	}
+	if got := whyApproval(domain.ApprovalRef{Required: true, Channel: domain.ApprovalAuto}); got != "required, answered via auto" {
+		t.Errorf("approval = %q", got)
+	}
+}

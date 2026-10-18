@@ -184,6 +184,9 @@ func (g *fakeGit) PushAnchor(_, sha string) error {
 // mirroring how the real axi-backed kernel resolves the write-external gate.
 type fakeKernel struct {
 	outcomes map[domain.StepName]domain.StepStatus
+	// results, when it has an entry for a step, is returned verbatim instead
+	// of a bare result built from outcomes.
+	results  map[domain.StepName]domain.StepResult
 	push     PushFunc
 	approved bool
 	execErr  error
@@ -195,6 +198,9 @@ func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutco
 	}
 	if step == domain.StepPush {
 		return StepOutcome{NeedsApproval: true, SessionID: "s1"}, nil
+	}
+	if res, ok := k.results[step]; ok {
+		return StepOutcome{Result: res}, nil
 	}
 	status := k.outcomes[step]
 	if status == "" {
