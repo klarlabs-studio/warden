@@ -158,7 +158,8 @@ they did before.
 ## What the signed note records
 
 Starting with the first release after 0.36.0, every note the gate writes under
-a profile carries three more fields, all inside the signed payload:
+a profile carries three more fields, all inside the signed payload (and a
+fourth, `authorship`, described below):
 
 - `profile`: the level, its version and the digest of the definition the
   writing warden had built in.
@@ -173,6 +174,58 @@ a profile carries three more fields, all inside the signed payload:
 They state only what warden observed. Nothing is recorded about isolation of
 agent steps, because agent steps are not isolated yet. `warden why`, MCP
 `verify` and `warden axi verify` show the three fields.
+
+### Agent declarations
+
+A profiled note also carries `authorship` when warden saw an agent declare
+itself. Two kinds of declaration are read, at gate time:
+
+- **Commit trailers** on the commits the note attests: everything in
+  `(covers_from, commit_sha]`, merge commits included, or the tip alone when
+  the note claims no span. git's own trailer parser decides what a trailer is,
+  so a `Co-Authored-By:` line in the middle of a message body does not count.
+- **Environment markers** in the environment of the warden process that runs
+  the gate, which an agent harness sets for the commands it starts.
+
+Each match is recorded with the commit (for a trailer) or the variable name
+(for a marker) and the tool that documents it. No variable value and nothing
+else from the environment is written. When nothing matches, the field is left
+out.
+
+The tables are built in and cannot be configured in `@1`. Each entry comes
+from the tool's own documentation:
+
+| Signal | Tool | Matches | Source |
+|---|---|---|---|
+| Trailer | Claude Code | `Co-Authored-By` whose value ends in `<noreply@anthropic.com>` (any display name, any key case) | [attribution.commit](https://code.claude.com/docs/en/settings-reference#attribution-commit) |
+| Trailer | Claude Code | `Claude-Session`, any value | [attribution.sessionUrl](https://code.claude.com/docs/en/settings-reference#attribution-sessionurl) |
+| Marker | Claude Code | `CLAUDE_CODE_CHILD_SESSION=1` | [environment variables](https://code.claude.com/docs/en/env-vars) |
+| Marker | Claude Code | `CLAUDE_CODE_REMOTE=true` (cloud sessions) | [environment variables](https://code.claude.com/docs/en/env-vars) |
+| Marker | Gemini CLI | `GEMINI_CLI=1` | [shell tool](https://geminicli.com/docs/tools/shell) |
+
+`CLAUDECODE` is not in the table: Claude Code's documentation says IDE
+extensions also set it in their integrated terminals, so it would mark a person
+pushing from such a terminal. Codex, Cursor and Aider are not in the table
+either, because their documentation does not state a marker or the exact
+trailer text. A tool that is missing only means its declarations are not seen.
+
+These are declarations, not authorship. A trailer can be typed by a person or
+switched off in the agent's settings, and a marker says what started the
+process, not who wanted the push. warden never records or reports a change as
+written by a person because nothing was declared.
+
+**Under strict**, a declaration requires an Agent Trace: when the attested
+commits or the gate's environment declare an agent and no trace was notarized
+into the note (`agent_trace.path`, see the Agent Trace docs), the run fails
+with exit 1, names the declaration and says how to configure the trace.
+Nothing is pushed or noted. The check is made before any step runs, so a
+refused push costs nothing, and again on the attested span before signing.
+Declarations only tighten the gate: a change that declares nothing gets every
+other strict check, so hiding a declaration removes only the trace requirement.
+Below strict, declarations are recorded and require nothing.
+
+`warden why` prints an `authorship:` line for every profiled note, and MCP
+`verify` and `warden axi verify` return the field.
 
 A note written without a profile has none of them and is byte for byte what it
 was before. A warden older than this feature that meets a profiled note drops
@@ -190,7 +243,7 @@ add. In this release a profile does **not**:
 - run agent steps in a clone with a guard on the canonical tree and HEAD;
 - reduce the environment an agent step sees;
 - refuse a custom agent under strict;
-- record agent isolation or authorship signals in the signed note;
+- record agent isolation in the signed note;
 - give CI a way to demand a minimum profile (`verify --min-profile`, the range
   gate, the action inputs);
 - refuse host cache hits or predictions for required steps.
@@ -206,7 +259,9 @@ Even with every part in place, strict@1 does not prove:
 - that an agent's reasoning was correct (agent steps produce advisory findings);
 - that agent steps had no network (they run on the host);
 - that an approval came from a person (`tty` means a terminal answered);
-- that a commit without agent signals was written by a person.
+- that a commit without agent signals was written by a person, or that a
+  commit with one was written by an agent (a declaration is a claim, and the
+  tables only know the tools listed above).
 
 ## Adopting a profile
 

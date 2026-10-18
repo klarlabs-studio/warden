@@ -24,6 +24,23 @@ All notable changes to warden are documented here. The format follows
   release reports a profiled note's signature as invalid, so a verifier that
   pins a key rejects it: upgrade verifiers before adopting a profile.
 
+- **Agent declarations are bound into profiled notes, and strict requires an
+  Agent Trace for them** (preview). An agent's own declaration that it took
+  part, the `Co-Authored-By` trailer Claude Code writes or the marker a harness
+  sets for the commands it starts, never reached the record, so strict could
+  not ask more of an agent-written change than of any other. Under a
+  `profile:`, the note now lists, signed, each matching trailer on the
+  attested commits (the pushed span, merges included) and each matching
+  marker in the gate's environment, from a built-in table of entries the
+  tools document: Claude Code's trailers and `CLAUDE_CODE_CHILD_SESSION` /
+  `CLAUDE_CODE_REMOTE`, and Gemini CLI's `GEMINI_CLI`. Under `strict`, a
+  declared agent with no notarized Agent Trace fails the push with exit 1,
+  before any step runs, and nothing is published; `strict@1`'s digest
+  changes accordingly. Declarations only tighten: nothing is recorded when
+  none matched, and no surface ever reports a change as written by a person.
+  `warden why` shows an `authorship:` line on profiled notes. A repository
+  without `profile:` writes exactly the note it wrote before.
+
 ### Changed
 
 - **Under a compliance profile, an agent can no longer approve its own run.**

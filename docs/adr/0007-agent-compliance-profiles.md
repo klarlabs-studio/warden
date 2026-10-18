@@ -139,7 +139,8 @@ authorship signals.
 - That agent steps had no network. They run on the host; see §3.
 - That an approval came from a human. `tty` means "a terminal answered", and an
   agent can drive a pty.
-- That a commit without signals was written by a human.
+- That a commit without signals was written by a human, or that a commit with
+  one was written by an agent. A signal is a declaration.
 
 ### 3. Execution boundaries for agent steps
 
@@ -170,6 +171,14 @@ declarations*:
 | Agent Trace record | Its digest at gate time | That its contents are true |
 | Committer or author identity (`*[bot]`) | Free text | Anything; shown, never relied on |
 | Signer key | Which key signed | Whether a person or an agent held it |
+
+In @1 the tables hold only entries a tool documents itself (Claude Code's
+`Co-Authored-By` address and `Claude-Session` trailer, its
+`CLAUDE_CODE_CHILD_SESSION` and `CLAUDE_CODE_REMOTE` markers, and Gemini CLI's
+`GEMINI_CLI`); a tool with no documented marker or trailer has no entry, and
+`docs/agent-profiles.md` lists the sources. When the note claims no span, only
+the tip's trailers are read. Nothing is recorded when nothing matches: no
+field ever states that a person wrote a commit.
 
 **Signals only tighten.** A declared agent adds requirements (strict requires an
 Agent Trace). The absence of signals never relaxes anything: strict@1's core
