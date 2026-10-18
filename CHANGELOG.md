@@ -24,6 +24,24 @@ All notable changes to warden are documented here. The format follows
   release reports a profiled note's signature as invalid, so a verifier that
   pins a key rejects it: upgrade verifiers before adopting a profile.
 
+### Changed
+
+- **Under a compliance profile, an agent can no longer approve its own run.**
+  The MCP `run_trigger` tool and `warden axi run-trigger` answered the approval
+  gate themselves, as `warden-auto`, because no person sits at a prompt there.
+  So a rule with `require_approval: true` was met by the same agent that
+  started the run: the branch was pushed and noted as if someone had approved
+  it. Under `standard` and `strict` these surfaces no longer answer the gate. A
+  run they start that needs approval (a rule's `require_approval`, or a
+  high-severity finding) ends with the new outcome `needs_approval`, pushes
+  nothing and writes no note, and its message tells the agent that a person
+  must approve it from an interactive terminal (`git push` or
+  `warden run pre-push`). `axi run-trigger` reports the outcome in its output,
+  as it does for a failed run; the CLI hook path exits 1. `permissive` and
+  repositories without a profile still auto-approve on these surfaces. This
+  extends `standard@1` and `strict@1` while the definitions are still in
+  preview, so their digests change.
+
 ### Fixed
 
 - **A shell step with no command, and a rebase with nothing to rebase onto, say
