@@ -39,9 +39,10 @@ const (
 	clauseContainer = "required shell steps %s ran in a recorded Linux container"
 	clauseNetwork   = "required shell steps %s ran with network none"
 	clauseApproval  = "a required approval was answered by a terminal or the TUI, not auto-approved"
+	clauseIsolation = "every agent step that ran was isolated in a clone with the tree guard reporting no change"
+	clauseAgentEnv  = "every agent step that ran saw only the allowlisted environment"
 
 	// Clauses strict@1 defines that the signed record cannot support yet.
-	deferredIsolation  = "agent steps ran isolated with the canonical tree unchanged (not in the signed record yet)"
 	deferredAuthorship = "a declared agent commit carries a notarized Agent Trace (authorship is not in the signed record yet)"
 )
 
@@ -63,7 +64,7 @@ const (
 func Conformance(minimum domain.ComplianceProfile, res VerifyResult) ConformanceReport {
 	rep := ConformanceReport{Min: minimum.String(), Checked: []string{clauseTrusted}}
 	if minimum.Level() >= domain.ProfileStrict {
-		rep.Deferred = []string{deferredIsolation, deferredAuthorship}
+		rep.Deferred = []string{deferredAuthorship}
 	}
 	rec := res.Record
 	if !res.Validated || !res.Trusted || res.External || rec == nil {
@@ -80,6 +81,7 @@ func Conformance(minimum domain.ComplianceProfile, res VerifyResult) Conformance
 	if minimum.RequiresContainer() || minimum.RequiresNetworkNone() {
 		checkEnvironments(&rep, minimum, rec)
 	}
+	checkAgentBoundaries(&rep, minimum, rec)
 	// The definitions that withhold approval from the agent surface are the
 	// ones whose notes must show a required approval was not auto-approved.
 	if !minimum.AgentSurfaceMayApprove() {
@@ -179,6 +181,61 @@ func checkEnvironments(rep *ConformanceReport, minimum domain.ComplianceProfile,
 			}
 		}
 	}
+}
+
+// checkAgentBoundaries requires, for every agent step the record says ran, the
+// boundary observations minimum's definition enforces at run time: isolation
+// with an unchanged tree where it isolates agents, and the allowlisted
+// environment where it scrubs it. An absent observation fails like a false
+// one: the record only carries what warden saw, so absence means nobody saw it.
+func checkAgentBoundaries(rep *ConformanceReport, minimum domain.ComplianceProfile, rec *domain.RunRecord) {
+	b := minimum.AgentBoundary()
+	if !b.Isolate && !b.EnvAllowlist {
+		return
+	}
+	if b.Isolate {
+		rep.Checked = append(rep.Checked, clauseIsolation)
+	}
+	if b.EnvAllowlist {
+		rep.Checked = append(rep.Checked, clauseAgentEnv)
+	}
+	for _, s := range sortedSteps(rec.StepOutcomes) {
+		obs := rec.StepOutcomes[s]
+		if obs.Outcome != domain.StepExecuted || !ranAnAgent(rec, s, obs) {
+			continue
+		}
+		if b.Isolate {
+			switch {
+			case !observedTrue(obs.Isolated):
+				rep.fail(clauseIsolation, fmt.Sprintf("%s has no isolation observation", s))
+			case obs.TreeUnchanged == nil:
+				rep.fail(clauseIsolation, fmt.Sprintf("%s has no tree guard observation", s))
+			case !*obs.TreeUnchanged:
+				rep.fail(clauseIsolation, fmt.Sprintf("%s changed the tree", s))
+			}
+		}
+		if b.EnvAllowlist && !observedTrue(obs.EnvAllowlisted) {
+			rep.fail(clauseAgentEnv, fmt.Sprintf("%s has no allowlisted-environment observation", s))
+		}
+	}
+}
+
+// ranAnAgent reports whether an executed step was run by an agent: the record
+// names the agent it invoked, the step is a built-in agent step, or the policy
+// assigned it an agent. Erring toward "agent" only adds requirements.
+func ranAnAgent(rec *domain.RunRecord, s domain.StepName, obs domain.StepObservation) bool {
+	return obs.Agent != "" || s.IsAgentStep() || rec.Agent[s] != ""
+}
+
+func observedTrue(b *bool) bool { return b != nil && *b }
+
+func sortedSteps(m map[domain.StepName]domain.StepObservation) []domain.StepName {
+	out := make([]domain.StepName, 0, len(m))
+	for s := range m {
+		out = append(out, s)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // checkApproval refuses an auto-approved gate wherever a decision was

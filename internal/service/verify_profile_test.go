@@ -21,7 +21,8 @@ func mustProfile(t *testing.T, s string) domain.ComplianceProfile {
 
 // strictConformingRecord is a record that meets every clause strict@1 can be
 // checked against in this release: each required step executed, each required
-// shell step in a recorded Linux container with network none, no approval
+// shell step in a recorded Linux container with network none, the review agent
+// isolated with an unchanged tree and the allowlisted environment, no approval
 // needed.
 func strictConformingRecord(t *testing.T, head string) domain.RunRecord {
 	t.Helper()
@@ -42,10 +43,20 @@ func strictConformingRecord(t *testing.T, head string) domain.RunRecord {
 			domain.StepLint:         {Outcome: domain.StepExecuted},
 			domain.StepTest:         {Outcome: domain.StepExecuted},
 			domain.StepSecurityScan: {Outcome: domain.StepExecuted},
-			domain.StepReview:       {Outcome: domain.StepExecuted, Agent: "claude"},
+			domain.StepReview:       {Outcome: domain.StepExecuted, Agent: "claude", Isolated: yes(), TreeUnchanged: yes(), EnvAllowlisted: yes()},
 		},
 		Approval: &domain.ApprovalRef{Channel: domain.ApprovalNone},
 	}
+}
+
+func yes() *bool { b := true; return &b }
+func no() *bool  { b := false; return &b }
+
+// editReview rewrites the review's observation in place.
+func editReview(r *domain.RunRecord, edit func(*domain.StepObservation)) {
+	o := r.StepOutcomes[domain.StepReview]
+	edit(&o)
+	r.StepOutcomes[domain.StepReview] = o
 }
 
 // Every case writes a really signed note and verifies it through
@@ -140,6 +151,60 @@ func TestConformanceAgainstSignedRecords(t *testing.T) {
 				delete(r.Environments, domain.StepSecurityScan)
 			},
 			wantFail: "security-scan has no complete container execution record",
+		},
+		{
+			name: "agent step without an isolation observation fails standard", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.Isolated, o.TreeUnchanged = nil, nil })
+			},
+			wantFail: "review has no isolation observation",
+		},
+		{
+			name: "isolated agent step without a tree guard observation fails", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.TreeUnchanged = nil })
+			},
+			wantFail: "review has no tree guard observation",
+		},
+		{
+			name: "agent step that changed the tree fails", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.TreeUnchanged = no() })
+			},
+			wantFail: "review changed the tree",
+		},
+		{
+			name: "agent step without the allowlisted environment fails strict", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.EnvAllowlisted = nil })
+			},
+			wantFail: "review has no allowlisted-environment observation",
+		},
+		{
+			name: "the allowlisted environment is not a standard clause", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.EnvAllowlisted = nil })
+			},
+		},
+		{
+			name: "isolation is not a permissive clause", min: "permissive",
+			mutate: func(r *domain.RunRecord) {
+				editReview(r, func(o *domain.StepObservation) { o.Isolated, o.TreeUnchanged, o.EnvAllowlisted = nil, nil, nil })
+			},
+		},
+		{
+			name: "a cached agent step ran no agent, so needs no boundary", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				r.StepOutcomes[domain.StepDocument] = domain.StepObservation{Outcome: domain.StepCached}
+			},
+		},
+		{
+			name: "a step the policy handed an agent needs a boundary even unnamed", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				r.Agent = map[domain.StepName]string{"docs": "claude"}
+				r.StepOutcomes["docs"] = domain.StepObservation{Outcome: domain.StepExecuted}
+			},
+			wantFail: "docs has no isolation observation",
 		},
 		{
 			name: "auto approval where required fails standard", min: "standard",
@@ -271,8 +336,8 @@ func TestConformanceChecksNetworkThatContainerChecksIgnores(t *testing.T) {
 }
 
 // A report never lists a clause as checked that it did not evaluate: strict's
-// isolation and authorship clauses have no signed observations yet, so they
-// are reported as deferred and are absent from Checked.
+// authorship clause has no signed observation yet, so it is reported as
+// deferred and is absent from Checked.
 func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
 	rec := strictConformingRecord(t, "abc")
 	res := VerifyResult{Validated: true, Trusted: true, Record: &rec}
@@ -281,8 +346,8 @@ func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
 	if !strict.OK() {
 		t.Fatalf("baseline must conform: %v", strict.Failures)
 	}
-	if len(strict.Deferred) != 2 {
-		t.Fatalf("strict must defer isolation and authorship, got %q", strict.Deferred)
+	if len(strict.Deferred) != 1 || !strings.Contains(strict.Deferred[0], "Agent Trace") {
+		t.Fatalf("strict must defer only authorship, got %q", strict.Deferred)
 	}
 	for _, d := range strict.Deferred {
 		if slices.Contains(strict.Checked, d) {
@@ -290,15 +355,17 @@ func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
 		}
 	}
 	joined := strings.Join(strict.Checked, "\n")
-	for _, want := range []string{"network none", "Linux container", "executed", "not auto-approved", "built-in definition", "ranks at least strict@1"} {
+	for _, want := range []string{"network none", "Linux container", "executed", "not auto-approved", "built-in definition", "ranks at least strict@1", "isolated in a clone", "allowlisted environment"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("strict checked clauses lack %q:\n%s", want, joined)
 		}
 	}
 
 	standard := Conformance(mustProfile(t, "standard"), res)
-	if len(standard.Deferred) != 0 || strings.Contains(strings.Join(standard.Checked, "\n"), "network") {
-		t.Errorf("standard must check no container clause and defer nothing: %+v", standard)
+	standardChecked := strings.Join(standard.Checked, "\n")
+	if len(standard.Deferred) != 0 || strings.Contains(standardChecked, "network") ||
+		strings.Contains(standardChecked, "allowlisted") || !strings.Contains(standardChecked, "isolated in a clone") {
+		t.Errorf("standard checks isolation but no container or environment clause, and defers nothing: %+v", standard)
 	}
 
 	// An untrusted result evaluates the trust clause alone.
