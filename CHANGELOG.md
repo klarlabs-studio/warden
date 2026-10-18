@@ -51,6 +51,31 @@ All notable changes to warden are documented here. The format follows
   invoking user on the host, with capabilities still dropped. Podman uses
   `keep-id` only when rootless. An engine whose mode cannot be read is not
   selected. (#286)
+- **`warden watch` checks edits saved during a run.** The live loop ran the
+  checks and only then took the tree's fingerprint, so a file saved while a
+  check was running became the new baseline and was never checked; the last
+  result on screen described a tree that no longer existed. Live mode now
+  uses the staged watcher's loop: a snapshot is checked once two samples
+  agree, a change mid-run cancels the stale run (printed as superseded) and
+  checks the new tree. The tree is compared by content, so a check that
+  rewrites a file with identical bytes does not retrigger itself, and
+  directories holding a `.git` file (nested linked worktrees, submodules) are
+  no longer walked.
+- **`warden watch --staged` retries when the machine, not the change, fails.**
+  A stopped container engine, or a step that could not run because of a held
+  lock or a missing toolchain, was recorded as that snapshot's result, so
+  starting Docker changed nothing until the index changed. Such runs now
+  report `blocked` and are retried with backoff (5 s doubling to 60 s), and
+  `--once` exits 78 or 75 for them like `warden run`.
+- **Nothing staged means nothing to check.** After a commit the staged watcher
+  ran a full container evaluation of an empty diff. It now prints "nothing
+  staged; no checks run" and waits.
+- **The watcher stays out of Git's way.** Every Git process it starts carries
+  `GIT_OPTIONAL_LOCKS=0`, so a background check never takes `index.lock` from
+  a concurrent `git commit`. Staged polling stats the index, `HEAD`, the
+  current ref and `.warden.yaml`, and re-reads the index and configuration
+  only when one changed (and at least every 5 s), instead of reading the whole
+  index and starting three Git processes every 400 ms.
 
 
 ## [0.35.0] - 2026-10-18

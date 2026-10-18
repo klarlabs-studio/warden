@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -97,6 +98,8 @@ func TestResolveContainer(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if _, err := ResolveContainer(domain.ExecutionConfig{Image: "checks:dev"}); err == nil {
 		t.Fatal("missing engines fell back to host")
+	} else if !errors.Is(err, application.ErrContainerUnavailable) {
+		t.Fatalf("unavailable engines must be recognizable as the machine, not the change: %v", err)
 	}
 }
 

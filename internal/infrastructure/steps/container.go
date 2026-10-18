@@ -62,7 +62,7 @@ func ResolveContainer(cfg domain.ExecutionConfig) (*application.ContainerExecuti
 		}
 		return selected, nil
 	}
-	return nil, fmt.Errorf("container execution unavailable (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", strings.Join(problems, "; "))
+	return nil, fmt.Errorf("%w (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", application.ErrContainerUnavailable, strings.Join(problems, "; "))
 }
 
 func containerProbe(bin string, args ...string) ([]byte, error) {
