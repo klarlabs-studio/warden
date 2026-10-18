@@ -83,6 +83,7 @@ candidate commit can edit `.gitlab-ci.yml`.
 | `requirements` | `''` | Path to a protected JSON [execution-requirements](execution-contracts.md) file. Use a File-type CI/CD variable (`$WARDEN_REQUIREMENTS`). A path inside the checkout is refused. |
 | `container-steps` | `''` | Checks that must carry trusted container execution evidence. |
 | `container-image-id` | `''` | The inspected `sha256:` image ID required with `container-steps`. |
+| `min-profile` | `''` | The minimum [compliance profile](agent-profiles.md#checking-a-profile-in-ci) the note must conform to: `permissive`, `standard` or `strict`, optionally `name@version`. Fixed text, not a variable reference. Needs a `warden-version` with `--min-profile`; an older release rejects the flag and the job fails as a configuration error. |
 | `remote` | `origin` | The remote that holds `refs/notes/warden`. |
 | `warden-version` | `0.36.0` | The warden release to install. It must be an exact version, 0.29.0 or newer. |
 | `stage` | `.pre` | The stage the job runs in. |
