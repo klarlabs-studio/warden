@@ -2,6 +2,7 @@ package domain
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +47,40 @@ func TestAgentEnv_KeepsOnlyTheAllowlist(t *testing.T) {
 		if got := AgentEnv(agent, environ); !slices.Equal(got, want) {
 			t.Errorf("%s:\n got %v\nwant %v", agent, got, want)
 		}
+	}
+}
+
+// On Windows, names match case-insensitively (Path is PATH) and the variables
+// a Windows process needs to start and find its config are kept; a secret is
+// still dropped. Off Windows, a differently cased name is a different variable.
+func TestAgentEnvFor_Windows(t *testing.T) {
+	environ := []string{
+		"Path=C:\\bin", "SystemRoot=C:\\Windows", "windir=C:\\Windows", "ComSpec=C:\\Windows\\system32\\cmd.exe",
+		"PATHEXT=.COM;.EXE;.CMD", "TEMP=C:\\t", "TMP=C:\\t", "USERPROFILE=C:\\Users\\u",
+		"HOMEDRIVE=C:", "HOMEPATH=\\Users\\u", "APPDATA=C:\\a", "LOCALAPPDATA=C:\\l", "USERNAME=u",
+		"lc_all=C", "Anthropic_Api_Key=a",
+		"FAKE_TOKEN=f", "GITHUB_TOKEN=g", "=C:=C:\\repo",
+	}
+	got := agentEnvFor("windows", "claude", environ)
+	want := environ[:15]
+	if !slices.Equal(got, want) {
+		t.Errorf("windows:\n got %v\nwant %v", got, want)
+	}
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		for _, kv := range agentEnvFor(goos, "claude", environ) {
+			if strings.HasPrefix(kv, "FAKE_TOKEN=") || strings.HasPrefix(kv, "GITHUB_TOKEN=") {
+				t.Errorf("%s kept %s", goos, kv)
+			}
+		}
+	}
+	// Unix keeps its exact-name rule: none of the Windows spellings survive.
+	if got := agentEnvFor("linux", "claude", environ); len(got) != 0 {
+		t.Errorf("linux must match names exactly, kept %v", got)
+	}
+	// On Unix, case still matters for PATH and LC_*.
+	unix := []string{"PATH=/bin", "Path=/x", "FAKE_TOKEN=f", "LC_ALL=C", "lc_all=C"}
+	if got := agentEnvFor("darwin", "codex", unix); !slices.Equal(got, []string{"PATH=/bin", "LC_ALL=C"}) {
+		t.Errorf("darwin: %v", got)
 	}
 }
 

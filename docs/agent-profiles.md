@@ -139,6 +139,12 @@ its preset. Each name comes from the CLI's own documentation:
 | `claude` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR` | [Claude Code environment variables](https://code.claude.com/docs/en/env-vars) |
 | `codex` | `CODEX_HOME`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` | [Codex environment variables](https://developers.openai.com/codex/environment-variables) |
 
+On Windows, variable names match regardless of case (`Path` is `PATH`), and
+the agent also keeps what a Windows process needs to start and to find its
+configuration: `SystemRoot`, `windir`, `ComSpec`, `PATHEXT`, `TEMP`, `TMP`,
+`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA` and
+`USERNAME`. None of them holds a credential.
+
 A login stored by the CLI itself (`claude` `/login`, `codex login`) lives
 under the home or config directory, or in the OS keychain, so it keeps
 working. Codex does not read `OPENAI_API_KEY` by a fixed name, so that
