@@ -94,11 +94,18 @@ type Registry map[domain.StepName]Step
 // Binary is the discovered CLI path; Environment is signed only for checks that
 // actually executed in this environment.
 type ContainerExecution struct {
-	// Reference is the canonical local image name used by Apple create; the
-	// created container is inspected before starting to reject tag movement.
+	// Reference is what the engine is told to run. For Apple it is the
+	// canonical local image name; the created container is inspected before
+	// starting to reject tag movement. For Docker-compatible engines it is an
+	// immutable, content-addressed reference that discovery proved resolves to
+	// Environment.ImageID: the config ID (Docker, Podman) or the image's
+	// target digest (nerdctl, which cannot run a config ID).
 	Reference   string
 	Binary      string
 	Environment domain.ExecutionEnvironment
+	// Rootless reports that the engine runs containers in a user namespace
+	// owned by the invoking user, where container root maps to that user.
+	Rootless bool
 }
 
 // PredictionCache holds recent signed local successes for exact staged inputs.
