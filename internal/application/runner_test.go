@@ -25,6 +25,10 @@ type fakeWorktree struct {
 	mu        sync.Mutex
 	clones    []*fakeWorktree // clones minted by Clone, for isolation assertions
 	cloneErr  error
+	// index stands in for `git write-tree`; treeStates counts TreeState calls,
+	// so a test can assert an unprofiled run never captures any.
+	index      string
+	treeStates int
 }
 
 func (w *fakeWorktree) Dir() string                 { return w.dir }
@@ -32,6 +36,12 @@ func (w *fakeWorktree) HeadSHA() (string, error)    { return w.headSHA, nil }
 func (w *fakeWorktree) TrackedDirty() (bool, error) { return w.diffSince != "", nil }
 func (w *fakeWorktree) DiffSince() (string, error)  { return w.diffSince, nil }
 func (w *fakeWorktree) Remove() error               { w.removed = true; return nil }
+func (w *fakeWorktree) TreeState() (domain.TreeState, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.treeStates++
+	return domain.TreeState{Head: w.headSHA, Index: w.index, Unstaged: w.diffSince}, nil
+}
 func (w *fakeWorktree) Clone(bool) (Worktree, error) {
 	if w.cloneErr != nil {
 		return nil, w.cloneErr
@@ -190,6 +200,11 @@ type fakeKernel struct {
 	push     PushFunc
 	approved bool
 	execErr  error
+	// during, when set, runs as each validation step executes: the stand-in
+	// for what a step does to the worktrees while it runs.
+	during func(domain.StepName)
+	// ran records the validation steps executed, in order.
+	ran []domain.StepName
 }
 
 func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutcome, error) {
@@ -198,6 +213,10 @@ func (k *fakeKernel) Execute(_ context.Context, step domain.StepName) (StepOutco
 	}
 	if step == domain.StepPush {
 		return StepOutcome{NeedsApproval: true, SessionID: "s1"}, nil
+	}
+	k.ran = append(k.ran, step)
+	if k.during != nil {
+		k.during(step)
 	}
 	if res, ok := k.results[step]; ok {
 		return StepOutcome{Result: res}, nil

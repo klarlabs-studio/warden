@@ -159,6 +159,34 @@ func (p ResolvedPolicy) AgentFor(s StepName) string {
 	return p.Agents[s]
 }
 
+// AgentBoundaryFor returns what the compliance profile in force enforces around
+// step s at run time: the zero AgentBoundary without a profile, under a
+// profile that enforces nothing (permissive), and for a step that is not an
+// agent step. An agent step is a built-in one (intent, review, document) or a
+// step this run hands to an agent.
+//
+// A step whose writes the config explicitly keeps (writes:, or an auto_fix
+// budget) is not isolated: isolating it would silently discard the writes the
+// config authorized. standard@1 allows that and strict@1 refuses it at load
+// (the no-agent-writes floor), so under strict every agent step is isolated.
+func (p ResolvedPolicy) AgentBoundaryFor(s StepName) AgentBoundary {
+	if p.Profile == nil || (!s.IsAgentStep() && p.AgentFor(s) == "") {
+		return AgentBoundary{}
+	}
+	prof, err := ParseComplianceProfile(p.Profile.Name)
+	if err != nil {
+		return AgentBoundary{}
+	}
+	b := prof.AgentBoundary()
+	if !b.Active() {
+		return AgentBoundary{}
+	}
+	if p.KeepsWrites(s) {
+		b.Isolate = false
+	}
+	return b
+}
+
 // AutoFixBudget returns the retry budget for a step (0 = no auto-fix retries).
 func (p ResolvedPolicy) AutoFixBudget(s StepName) int {
 	if p.AutoFix == nil {

@@ -24,7 +24,9 @@ import (
 // fortify retry + circuit-breaker chain (§4.4 resilience). When no agent is
 // resolved, or no command is configured for it, the step passes marked
 // StepSkipped — a repo can run the deterministic steps (lint/test) without any
-// agent, and no surface will claim the agent step ran.
+// agent, and no surface will claim the agent step ran — unless a compliance
+// profile requires the step to execute, which turns the skip into a failure
+// with a config blocker (see StepContext.AgentBoundary).
 type AgentStep struct {
 	name   domain.StepName
 	prompt string
@@ -40,13 +42,16 @@ func (s AgentStep) Name() domain.StepName { return s.name }
 func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
 	command := expandTemplate(sc.AgentCommand, s.prompt, s.name, sc.WorktreeDir)
 	if sc.Agent == "" || strings.TrimSpace(command) == "" {
-		// Still a pass — an unconfigured agent step must not fail a repo that
-		// runs only deterministic checks — but marked as SKIPPED, so no surface
-		// reports it as a review (or intent check, or doc pass) that happened.
 		reason := "no agent configured"
 		if sc.Agent != "" {
 			reason = "no command configured for agent " + sc.Agent
 		}
+		if sc.AgentBoundary.RequireExecution {
+			return s.requiredButUnconfigured(sc, reason), nil
+		}
+		// Still a pass — an unconfigured agent step must not fail a repo that
+		// runs only deterministic checks — but marked as SKIPPED, so no surface
+		// reports it as a review (or intent check, or doc pass) that happened.
 		return domain.StepResult{
 			Step:          s.name,
 			Status:        domain.StepPass,
@@ -55,8 +60,22 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 			Summary:       string(s.name) + ": skipped (" + reason + ")",
 		}, nil
 	}
+	if sc.AgentBoundary.EnvAllowlist && !domain.IsBundledAgent(sc.Agent) {
+		// The load-time floor refuses this already; the step refuses it too, so
+		// a policy built some other way cannot hand an unknown agent the
+		// allowlisted environment's guarantee.
+		return s.configBlocked("agent "+sc.Agent+" is not a bundled preset",
+			"profile "+sc.AgentBoundary.Profile+" runs only bundled agents ("+strings.Join(domain.BundledAgents(), ", ")+
+				") because a custom agent's environment needs are unknown"), nil
+	}
 
 	out, err := s.invoke(ctx, command, sc)
+	var boundary *domain.AgentBoundaryObservation
+	if sc.AgentBoundary.Active() {
+		// The runner fills in isolation and the tree guard; the environment is
+		// the step's own observation.
+		boundary = &domain.AgentBoundaryObservation{EnvAllowlisted: sc.AgentBoundary.EnvAllowlist}
+	}
 	if err != nil {
 		// A genuinely failed agent run (after retries) is reported as a finding
 		// rather than an operational error, so the pipeline decides the outcome.
@@ -67,16 +86,44 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 				Severity: domain.SeverityMedium,
 				Message:  string(s.name) + " agent (" + sc.Agent + ") failed: " + strings.TrimSpace(err.Error()),
 			}},
-			Summary: string(s.name) + " failed",
-			Agent:   sc.Agent,
+			Summary:       string(s.name) + " failed",
+			AgentBoundary: boundary,
+			Agent:         sc.Agent,
 		}, nil
 	}
 	return domain.StepResult{
-		Step:    s.name,
-		Status:  domain.StepPass,
-		Summary: string(s.name) + " (" + sc.Agent + ") passed: " + firstLine(out),
-		Agent:   sc.Agent,
+		Step:          s.name,
+		Status:        domain.StepPass,
+		Summary:       string(s.name) + " (" + sc.Agent + ") passed: " + firstLine(out),
+		AgentBoundary: boundary,
+		Agent:         sc.Agent,
 	}, nil
+}
+
+// requiredButUnconfigured is the profile's answer to an agent step with nothing
+// to run it: a failure that names the profile and the config that would fix it,
+// instead of the advisory skip that let a note list a review nobody performed.
+func (s AgentStep) requiredButUnconfigured(sc application.StepContext, reason string) domain.StepResult {
+	fix := "set `agent: " + strings.Join(domain.BundledAgents(), "` or `agent: ") + "` in .warden.yaml, or assign one with rules[].then.agent." + string(s.name)
+	if sc.Agent != "" {
+		fix = "add agent_commands." + sc.Agent + " to .warden.yaml, or name a bundled agent (" + strings.Join(domain.BundledAgents(), ", ") + ")"
+	}
+	return s.configBlocked(reason, "profile "+sc.AgentBoundary.Profile+" requires "+string(s.name)+" to run; "+fix)
+}
+
+// configBlocked fails the step without running it, for a config that cannot
+// meet the profile. The config blocker makes the run exit 78, not 1: nothing
+// about the change was judged.
+func (s AgentStep) configBlocked(reason, message string) domain.StepResult {
+	return domain.StepResult{
+		Step:          s.name,
+		Status:        domain.StepFail,
+		Blocker:       domain.BlockerConfig,
+		Outcome:       domain.StepSkipped,
+		OutcomeReason: reason,
+		Findings:      []domain.Finding{{Severity: domain.SeverityMedium, Message: message}},
+		Summary:       string(s.name) + ": not run (" + reason + "): " + message,
+	}
 }
 
 // invoke runs the agent command through a resilience chain: bounded retries with
@@ -105,8 +152,14 @@ func (s AgentStep) invoke(ctx context.Context, command string, sc application.St
 		cmd := exec.CommandContext(ctx, "sh", "-c", command)
 		cmd.Dir = sc.WorktreeDir
 		// An agent CLI reads the repo through git like any other tool, so it
-		// needs the same scrubbed environment the shell steps get.
+		// needs the same scrubbed environment the shell steps get. Under a
+		// profile that allowlists it (strict@1), it gets only the base set and
+		// its preset's documented credential variables: no cloud credentials,
+		// forge tokens or other tools' keys from the developer's shell.
 		cmd.Env = scrubbedEnv()
+		if sc.AgentBoundary.EnvAllowlist {
+			cmd.Env = domain.AgentEnv(sc.Agent, cmd.Env)
+		}
 		// Own process group: a timed-out or cancelled agent CLI is killed with
 		// its whole subtree, not left running detached past the step.
 		proc.Isolate(cmd)

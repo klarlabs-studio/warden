@@ -88,6 +88,8 @@ func (w worktreeAdapter) TrackedDirty() (bool, error) { return w.wt.TrackedDirty
 func (w worktreeAdapter) DiffSince() (string, error)  { return w.wt.DiffSince() }
 func (w worktreeAdapter) Remove() error               { return w.wt.Remove() }
 
+func (w worktreeAdapter) TreeState() (domain.TreeState, error) { return w.wt.TreeState() }
+
 func (w worktreeAdapter) Clone(materializeDeps bool) (application.Worktree, error) {
 	clone, err := w.wt.Clone(materializeDeps)
 	if err != nil {
