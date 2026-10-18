@@ -166,6 +166,16 @@ jobs:
       # this engine's own store so the scenarios execute instead of skipping.
       - name: Load pinned container fixture
         run: ${{ matrix.runtime }} pull "$WARDEN_CONTAINER_TEST_IMAGE"
+      - name: EXPERIMENT host UID inside a rootless engine
+        continue-on-error: true
+        run: |
+          d=$(mktemp -d)
+          ref=$(${{ matrix.runtime }} image inspect --format '{{.Id}}' "$WARDEN_CONTAINER_TEST_IMAGE" || true)
+          echo "ref=$ref"
+          set +e
+          ${{ matrix.runtime }} run --rm --pull=never --network=none --user "$(id -u):$(id -g)" --mount "type=bind,src=$d,dst=/w" "$WARDEN_CONTAINER_TEST_IMAGE" sh -c 'id; touch /w/plain'; echo "plain-user exit=$?"
+          ${{ matrix.runtime }} run --rm --pull=never --network=none --user 0:0 --mount "type=bind,src=$d,dst=/w" "$WARDEN_CONTAINER_TEST_IMAGE" sh -c 'id; touch /w/root'; echo "root exit=$?"
+          ls -ln "$d"
       - name: Test ${{ matrix.runtime }} execution boundary
         run: go test -race ./internal/infrastructure/steps -run '^TestContainerExecutionIntegration$' -count=1 -v
       # -count=1 for the same reason as the e2e job above.
