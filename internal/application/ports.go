@@ -161,6 +161,10 @@ type ApprovalRequest struct {
 	Steps    []domain.StepName
 	Findings []domain.Finding
 	Risk     domain.Risk
+	// Profile is the compliance profile the run's policy was resolved under,
+	// or nil without one. An approver on an agent surface reads it to decide
+	// whether it may answer at all.
+	Profile *domain.ResolvedProfile
 }
 
 // Decision is an approver's answer.
@@ -168,6 +172,10 @@ type Decision struct {
 	Approved  bool
 	Principal string
 	Rationale string
+	// NeedsHuman means the approver did not decide: it may not satisfy this
+	// gate, and a person must. Approved is false with it. The run ends
+	// needs_approval rather than rejected, and Rationale says how to approve.
+	NeedsHuman bool
 }
 
 // StepCache memoizes passing steps by their declared inputs so an unchanged

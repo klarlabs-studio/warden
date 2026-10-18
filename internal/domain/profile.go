@@ -85,6 +85,10 @@ type profileDefinition struct {
 	AgentTimeoutRequired bool `json:"agent_timeout_required,omitempty"`
 	// SigningRequired defaults signing.required to true.
 	SigningRequired bool `json:"signing_required,omitempty"`
+	// NoAgentSurfaceApproval stops the agent surfaces (MCP, axi) from
+	// satisfying the approval gate: a run started there that needs approval
+	// ends needs_approval instead of being auto-approved.
+	NoAgentSurfaceApproval bool `json:"no_agent_surface_approval,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -98,10 +102,11 @@ var builtinProfiles = map[string]profileDefinition{
 			PrePush.ConfigKey():   {StepCredentials, StepLint, StepTest},
 			PreCommit.ConfigKey(): {StepCredentials},
 		},
-		NoSkipRequired:  true,
-		RequireCommands: true,
-		AgentTimeout:    DefaultAgentTimeout,
-		SigningRequired: true,
+		NoSkipRequired:         true,
+		RequireCommands:        true,
+		AgentTimeout:           DefaultAgentTimeout,
+		SigningRequired:        true,
+		NoAgentSurfaceApproval: true,
 	},
 	"strict@1": {
 		Name: "strict", Version: 1, Level: ProfileStrict,
@@ -109,14 +114,15 @@ var builtinProfiles = map[string]profileDefinition{
 			PrePush.ConfigKey():   {StepCredentials, StepLint, StepTest, StepSecurityScan, StepReview},
 			PreCommit.ConfigKey(): {StepCredentials, StepLint},
 		},
-		NoSkipRequired:       true,
-		RequireCommands:      true,
-		ContainerExecution:   true,
-		NetworkNone:          true,
-		NoAgentWrites:        true,
-		AgentTimeout:         DefaultAgentTimeout,
-		AgentTimeoutRequired: true,
-		SigningRequired:      true,
+		NoSkipRequired:         true,
+		RequireCommands:        true,
+		ContainerExecution:     true,
+		NetworkNone:            true,
+		NoAgentWrites:          true,
+		AgentTimeout:           DefaultAgentTimeout,
+		AgentTimeoutRequired:   true,
+		SigningRequired:        true,
+		NoAgentSurfaceApproval: true,
 	},
 }
 
@@ -180,6 +186,13 @@ func (p ComplianceProfile) Lowers(other ComplianceProfile) bool {
 		return p.def.Level < other.def.Level
 	}
 	return p.def.Version < other.def.Version
+}
+
+// AgentSurfaceMayApprove reports whether a run started from an agent surface
+// (MCP, axi) may satisfy its own approval gate under this profile. An agent
+// that asked for a run cannot also be the human that approves it.
+func (p ComplianceProfile) AgentSurfaceMayApprove() bool {
+	return !p.def.NoAgentSurfaceApproval
 }
 
 // RequiredSteps returns the steps the profile requires for a hook.
