@@ -51,6 +51,14 @@ type VerifyOutput struct {
 	// CoversFrom names the commit the gated push started from: everything in
 	// (CoversFrom, SHA] was published by the same gated push.
 	CoversFrom string `json:"covers_from,omitempty"`
+	// Profile, StepOutcomes and Approval are the signed observations a note
+	// written under a compliance profile carries: the profile and its
+	// definition digest, what happened to each step (executed, cached,
+	// predicted, skipped) and how the approval gate was answered. Absent for a
+	// note written without a profile, which records none of them.
+	Profile      *domain.ProfileRef                         `json:"profile,omitempty"`
+	StepOutcomes map[domain.StepName]domain.StepObservation `json:"step_outcomes,omitempty"`
+	Approval     *domain.ApprovalRef                        `json:"approval,omitempty"`
 }
 
 // RangeVerifyOutput gates a whole base..head span — the shape a PR check needs.
@@ -224,6 +232,9 @@ func newVerifyOutput(sha string, r ProvenanceRecord) VerifyOutput {
 		out.WardenVersion = r.Record.WardenVersion
 		out.ReattestedFrom = r.Record.ReattestedFrom
 		out.CoversFrom = r.Record.CoversFrom
+		out.Profile = r.Record.Profile
+		out.StepOutcomes = r.Record.StepOutcomes
+		out.Approval = r.Record.Approval
 	}
 	return out
 }
