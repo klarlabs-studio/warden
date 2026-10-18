@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -100,6 +101,10 @@ rules:
 func TestAxi_RunTriggerCannotSelfApproveUnderAProfile(t *testing.T) {
 	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
 	dir := gitRepo(t)
+	// The rule matches main; git's default branch name varies by machine.
+	if out, err := exec.Command("git", "-C", dir, "branch", "-M", "main").CombinedOutput(); err != nil {
+		t.Fatalf("branch -M main: %v %s", err, out)
+	}
 	writeConfig(t, dir, standardApprovalConfig)
 
 	code, out, errb := run("axi", "run-trigger", "--trust")
