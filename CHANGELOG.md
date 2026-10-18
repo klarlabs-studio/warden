@@ -27,7 +27,7 @@ All notable changes to warden are documented here. The format follows
   `include: remote:` pinned to a release. No GitLab catalog project mirrors it
   yet, so `include: component:` does not resolve. It was tested by running its
   scripts against real signed notes, not on a GitLab instance. See
-  [GitLab CI](docs/gitlab-ci.md).
+  [GitLab CI](docs/gitlab-ci.md). (#287)
 
 ## [0.35.0] - 2026-10-18
 
