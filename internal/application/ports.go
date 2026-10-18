@@ -184,11 +184,13 @@ type StepCache interface {
 	Record(key string)
 }
 
-// SBOM collects the dependency lockfiles present in a validated worktree, so a
-// run record can carry a signed fingerprint of its dependency sets. It is
-// optional: a nil SBOM leaves records without a dependency manifest.
+// SBOM collects the dependency lockfiles in the commit a record attests, so a
+// run record can carry a signed fingerprint of its dependency sets. rev is that
+// commit, resolved in the repository at dir; the manifest comes from its tree,
+// never from files a step left in the worktree. It is optional: a nil SBOM
+// leaves records without a dependency manifest.
 type SBOM interface {
-	Collect(dir string) []domain.DependencyManifest
+	Collect(dir, rev string) []domain.DependencyManifest
 }
 
 // DepDriftDetector reports dependency directories exposed into a worktree that

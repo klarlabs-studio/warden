@@ -558,21 +558,24 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if err != nil {
 		return RunResult{}, err
 	}
+	// Bind the record to the commit it attests BEFORE signing, so the commit SHA
+	// is covered by the signature and the note can't be transplanted to another
+	// commit. The same SHA is the note key. If HEAD can't be read the record stays
+	// unbound and no note is written (best-effort provenance never fails the gate).
+	finalSHA, shaErr := r.Git.HeadSHA()
 	// Attach the SBOM before signing so the dependency digests are covered by the
-	// signature. Best-effort: a collector that finds nothing leaves it empty.
-	if r.SBOM != nil {
-		record.Dependencies = r.SBOM.Collect(sc.WorktreeDir)
+	// signature. It is read from finalSHA's tree — the commit the note attests —
+	// and not from the worktree, where a step may have generated or rewritten a
+	// lockfile that commit does not contain. No commit, no claim. Best-effort: a
+	// collector that finds nothing leaves it empty.
+	if r.SBOM != nil && shaErr == nil {
+		record.Dependencies = r.SBOM.Collect(sc.WorktreeDir, finalSHA)
 	}
 	// Attach drift in the same place and for the same reason: it must be inside
 	// the signature. A caveat the verifier cannot see is not a caveat.
 	if r.DepDrift != nil {
 		record.DependenciesDrifted = r.DepDrift.DetectDepDrift(sc.WorktreeDir)
 	}
-	// Bind the record to the commit it attests BEFORE signing, so the commit SHA
-	// is covered by the signature and the note can't be transplanted to another
-	// commit. The same SHA is the note key. If HEAD can't be read the record stays
-	// unbound and no note is written (best-effort provenance never fails the gate).
-	finalSHA, shaErr := r.Git.HeadSHA()
 	if shaErr == nil {
 		record.CommitSHA = finalSHA
 		// Claim the span only when it is strictly below the tip. A base equal to

@@ -16,6 +16,13 @@ All notable changes to warden are documented here. The format follows
   did not fire, and `WARDEN_CHANGED_FILES` listed strings no step could open.
   Changed paths are now read NUL-separated with rename detection off: a rename
   lists both the old and the new path, and every name arrives as written.
+- **The signed SBOM lists only what the commit contains.** Dependency
+  lockfiles were found by walking the validation worktree, so a lockfile a
+  check generated and nobody committed, or a committed one a check rewrote,
+  went into the note's signed `dependencies` as if the commit carried it.
+  Lockfiles are now read from the attested commit's tree, with each digest
+  taken over the committed content. Symlinked lockfiles are no longer listed,
+  since the commit holds a link rather than the file.
 
 ## [0.35.0] - 2026-10-18
 

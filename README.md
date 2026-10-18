@@ -331,7 +331,9 @@ self-hosted pre-receive recipe, and [ADR-0002](docs/adr/0002-provenance-enforcem
 for the design.
 
 Each note also carries a small **SBOM**: a SHA-256 digest of every dependency
-lockfile present at validation (`go.sum`, `package-lock.json`, `Cargo.lock`, …).
+lockfile committed in the attested commit (`go.sum`, `package-lock.json`,
+`Cargo.lock`, …), read from the commit's tree — a lockfile a check generated but
+nobody committed is not listed.
 Because it's part of the signed, hash-chained record, a validated commit ships a
 tamper-evident, signed fingerprint of exactly which dependency sets it had —
 shown by `warden why`.
