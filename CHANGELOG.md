@@ -6,6 +6,14 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-19
+
+A minor release. `extends:` now applies settings a child config used to have
+silently ignored, Podman and nerdctl actually run checks, and the compliance
+profile reader arrives as a preview. Two changes are visible to scripts: a
+pass line that includes a skipped or cached step separates steps with `; `,
+and live `warden watch` waits for two agreeing samples before its first run.
+
 ### Added
 
 - **Compliance profiles, the reader.** A repository where agents commit had no
