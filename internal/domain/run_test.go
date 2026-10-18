@@ -111,3 +111,24 @@ func TestRunRecord_VerifyChain(t *testing.T) {
 		t.Error("empty chain with empty root is vacuously intact")
 	}
 }
+
+// AwaitHuman is terminal and distinct from Reject: the gate stopped because the
+// surface may not approve, not because anybody declined.
+func TestRun_AwaitHumanIsTerminalAndNotARejection(t *testing.T) {
+	run := newTestRun()
+	if err := run.AwaitHuman("a person must approve"); err != nil {
+		t.Fatal(err)
+	}
+	if run.Outcome() != OutcomeNeedsApproval || run.Outcome() == OutcomeRejected {
+		t.Fatalf("outcome = %s, want needs_approval", run.Outcome())
+	}
+	if run.Message() != "a person must approve" {
+		t.Errorf("message = %q", run.Message())
+	}
+	if err := run.MarkPushed(RunRecord{}, "x"); !errors.Is(err, ErrRunTerminal) {
+		t.Errorf("a run awaiting a human must not be pushed, got %v", err)
+	}
+	if err := run.AwaitHuman("again"); !errors.Is(err, ErrRunTerminal) {
+		t.Errorf("AwaitHuman on a terminal run must error, got %v", err)
+	}
+}

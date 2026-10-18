@@ -20,8 +20,8 @@ import (
 // Once a note can carry a digest, that window closes for good.
 const (
 	goldenPermissive1 = "sha256:85ae44054d6db52f954f7b575905d58dcabff4793fc52452f3030f1f13bca09d"
-	goldenStandard1   = "sha256:c4fad297728aa51ac4f0ec7bbb5f711cfe7b324d4d94d9c614b537f0fc2f211c"
-	goldenStrict1     = "sha256:48b832094df8885802569d27102763bd3b18a5718bb555475b92d16f7e587c9c"
+	goldenStandard1   = "sha256:d811bbbd747d1dd31aeafeff045770ba8bcd7460c2c1cc461408f216e2b97126"
+	goldenStrict1     = "sha256:f49db7433c9cb96227c911266a456d8dce2d989e8559dbff1ce67140242c11ed"
 )
 
 func mustProfile(t *testing.T, s string) ComplianceProfile {
@@ -357,5 +357,19 @@ func TestEffectiveHookSteps(t *testing.T) {
 	cfg := Config{Steps: map[string][]StepName{"pre_push": {}}}
 	if got := EffectiveHookSteps(cfg, PrePush); len(got) != 0 {
 		t.Errorf("an explicitly empty list stays empty: %v", got)
+	}
+}
+
+// Only standard and strict withhold approval from the agent surface;
+// permissive records a profile without changing who may approve.
+func TestComplianceProfile_AgentSurfaceMayApprove(t *testing.T) {
+	for name, want := range map[string]bool{
+		"permissive": true,
+		"standard":   false,
+		"strict":     false,
+	} {
+		if got := mustProfile(t, name).AgentSurfaceMayApprove(); got != want {
+			t.Errorf("%s: AgentSurfaceMayApprove() = %v, want %v", name, got, want)
+		}
 	}
 }
