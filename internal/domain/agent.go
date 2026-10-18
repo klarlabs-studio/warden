@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -77,20 +78,71 @@ func AgentEnvNames(agent string) []string {
 	return append(slices.Clone(agentBaseEnv), agentPresetEnv[agent]...)
 }
 
+// agentWindowsBaseEnv is what an allowlisted agent step also keeps on Windows,
+// where a process needs more than agentBaseEnv to start, find programs and
+// find the user's configuration. None of these carries a secret.
+//
+//   - SystemRoot, windir: the Windows directory ("SYSTEMROOT: same as WINDIR";
+//     "WINDIR: refers to the Windows folder located on the system drive",
+//     https://learn.microsoft.com/en-us/windows/deployment/usmt/usmt-recognized-environment-variables).
+//     Go's os/exec adds SYSTEMROOT to a child environment that lacks it
+//     (https://pkg.go.dev/os/exec#Cmd), because system DLLs fail to load
+//     without it; listing it keeps the parent's value instead.
+//   - ComSpec: the command interpreter; cmd replaces a bare "CMD" with it
+//     (https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start).
+//   - PATHEXT: the extensions tried, in order, when a command is named without
+//     one, so `claude` resolves to claude.cmd or claude.exe (same page).
+//   - TEMP, TMP: "the temporary folder on the computer" (USMT page above).
+//   - USERPROFILE, HOMEDRIVE, HOMEPATH: the user's profile folder, which is
+//     what HOME is on Unix and where the CLIs' config and stored login live
+//     (USMT page above).
+//   - APPDATA, LOCALAPPDATA: the roaming and local application-data folders
+//     (CSIDL_APPDATA, CSIDL_LOCAL_APPDATA on the USMT page above).
+//   - USERNAME: the signed-in user, the Windows counterpart of USER
+//     (https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd).
+//
+// PATH is already in agentBaseEnv; Windows spells it Path, which the
+// case-insensitive match below covers.
+var agentWindowsBaseEnv = []string{
+	"SystemRoot", "windir", "ComSpec", "PATHEXT", "TEMP", "TMP",
+	"USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "USERNAME",
+}
+
 // AgentEnv filters environ ("KEY=value" entries) down to what an allowlisted
 // agent step may see: the base set, every LC_* locale variable, and the
 // preset's documented credential and configuration variables. Everything else
 // is dropped: cloud credentials, forge tokens, other tools' API keys, and the
 // GIT_* variables git exports into a hook.
 func AgentEnv(agent string, environ []string) []string {
+	return agentEnvFor(runtime.GOOS, agent, environ)
+}
+
+// agentEnvFor is AgentEnv for a given GOOS, so both rules are testable on any
+// machine. Off Windows, names match exactly. On Windows, environment variable
+// names are not case-sensitive ("Variable names aren't case-sensitive",
+// https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd),
+// so names match case-insensitively and agentWindowsBaseEnv is kept as well.
+func agentEnvFor(goos, agent string, environ []string) []string {
 	keep := AgentEnvNames(agent)
+	matches := func(name string) bool {
+		return slices.Contains(keep, name) || strings.HasPrefix(name, "LC_")
+	}
+	if goos == "windows" {
+		keep = append(keep, agentWindowsBaseEnv...)
+		matches = func(name string) bool {
+			if len(name) >= 3 && strings.EqualFold(name[:3], "LC_") {
+				return true
+			}
+			return slices.ContainsFunc(keep, func(k string) bool { return strings.EqualFold(k, name) })
+		}
+	}
 	var out []string
 	for _, kv := range environ {
 		name, _, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
 		}
-		if slices.Contains(keep, name) || strings.HasPrefix(name, "LC_") {
+		if matches(name) {
 			out = append(out, kv)
 		}
 	}

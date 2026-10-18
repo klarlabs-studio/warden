@@ -70,7 +70,11 @@ All notable changes to warden are documented here. The format follows
     `CODEX_ACCESS_TOKEN`, `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`). Codex does
     not read `OPENAI_API_KEY` by a fixed name, so that variable is not passed
     either. Bedrock, Vertex and Foundry routing need ambient cloud credentials
-    and are not supported under strict yet.
+    and are not supported under strict yet. On Windows, names match
+    regardless of case, and the agent also keeps `SystemRoot`, `windir`,
+    `ComSpec`, `PATHEXT`, `TEMP`, `TMP`, `USERPROFILE`, `HOMEDRIVE`,
+    `HOMEPATH`, `APPDATA`, `LOCALAPPDATA` and `USERNAME`, which a Windows
+    process needs to start and to find its configuration.
   - strict: an agent that is not a bundled preset, named in `agent:` or in a
     rule's `then.agent`, is a load error. Overriding a preset's command with
     `agent_commands` is still allowed.
