@@ -924,11 +924,16 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 	if run.RequiresApproval() {
 		decision, err = r.Approver.Approve(ctx, ApprovalRequest{
 			Hook: run.Hook(), Branch: run.Branch(), Steps: run.Policy().Steps, Findings: run.Findings(), Risk: run.Policy().Risk,
+			Profile: run.Policy().Profile,
 		})
 		if err != nil {
 			return approval, err
 		}
 		approval = decision.approvalRef()
+	}
+	if decision.NeedsHuman {
+		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)
+		return approval, run.AwaitHuman(decision.Rationale)
 	}
 	if !decision.Approved {
 		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)

@@ -77,7 +77,7 @@ type RangeVerifyRequest struct {
 
 // RunSummary is a delivery-neutral run result the MCP tool returns.
 type RunSummary struct {
-	Outcome string            `json:"outcome"` // passed|failed|rejected|aborted
+	Outcome string            `json:"outcome"` // passed|failed|rejected|aborted|needs_approval
 	Hook    string            `json:"hook"`
 	Steps   []domain.StepName `json:"steps"`
 	// StepOutcomes names the steps that passed WITHOUT executing — cached, or
@@ -183,10 +183,15 @@ func AllowAllRuns() error { return nil }
 const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATELY with a run_id " +
 	"and phase=running — poll run_status(run_id) for finished steps and the final summary, since " +
 	"a full pipeline routinely takes minutes. " +
-	"This EXECUTES the repository's configured commands as shell on the auto-approved, " +
-	"non-interactive path (no human in the loop), so it is refused unless the operator has " +
-	"explicitly trusted this repo (`warden trust add`, the axi --trust flag, or " +
-	"WARDEN_MCP_ALLOW_RUN=1). The read-only tools are always available."
+	"This EXECUTES the repository's configured commands as shell on the non-interactive path " +
+	"(no human in the loop), so it is refused unless the operator has explicitly trusted this " +
+	"repo (`warden trust add`, the axi --trust flag, or WARDEN_MCP_ALLOW_RUN=1). " +
+	"Approval: without a profile, or under profile permissive, this surface auto-approves the " +
+	"gate. Under profile standard or strict it cannot: a run that needs approval (a rule's " +
+	"require_approval, or a high-severity finding) ends with summary.outcome=needs_approval, " +
+	"nothing pushed and no note written, and summary.message says how a person approves it " +
+	"(run the gate from an interactive terminal). Do not retry it from here. " +
+	"The read-only tools are always available."
 
 // NewServer builds an MCP server exposing Warden's operation set as typed tools:
 //
@@ -297,9 +302,11 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		})
 
 	srv.Tool("run_respond").
-		Description("Not supported: this surface auto-approves, so a run never pauses for an " +
-			"answer. The operator checkpoint here is the per-repo trust grant that permits " +
-			"run_trigger at all, not a per-run prompt.").
+		Description("Not supported: a run never pauses here for an answer. Without a profile " +
+			"(or under permissive) this surface auto-approves; under standard or strict a run " +
+			"that needs approval ends needs_approval and a person approves it at a terminal. The " +
+			"operator checkpoint here is the per-repo trust grant that permits run_trigger at " +
+			"all, not a per-run prompt.").
 		Handler(func(map[string]any) (struct{}, error) {
 			return struct{}{}, errVisible(errNotSupported("run_respond"))
 		})

@@ -16,6 +16,10 @@ const (
 	OutcomeFailed   Outcome = "failed"   // a step rejected the change
 	OutcomeRejected Outcome = "rejected" // an approver declined at the gate
 	OutcomeAborted  Outcome = "aborted"  // operational abort (e.g. branch moved)
+	// OutcomeNeedsApproval means the gate needed approval and the surface that
+	// started the run may not give it: nobody declined, but nobody who could
+	// approve was asked. A person has to run the gate where they can answer.
+	OutcomeNeedsApproval Outcome = "needs_approval"
 )
 
 // RunID is the identity of a run aggregate. It is a value object: non-empty by
@@ -169,6 +173,18 @@ func (r *Run) Reject(reason string) error {
 		return err
 	}
 	r.outcome = OutcomeRejected
+	r.message = reason
+	return nil
+}
+
+// AwaitHuman marks a pending run that reached the approval gate on a surface
+// that may not satisfy it. It is terminal, like Reject, and records no push and
+// no note; it differs in what it claims: nobody declined the change.
+func (r *Run) AwaitHuman(reason string) error {
+	if err := r.ensurePending(); err != nil {
+		return err
+	}
+	r.outcome = OutcomeNeedsApproval
 	r.message = reason
 	return nil
 }
