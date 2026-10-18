@@ -55,7 +55,7 @@ commands: {test: 'true'}
 	imageID := "sha256:" + strings.Repeat("a", 64)
 	script := `#!/bin/sh
 case "$1" in
-info) exit 0;;
+info) echo '["name=seccomp,profile=builtin"]';;
 image) printf '%s' '[{"Id":"` + imageID + `","Os":"linux","Architecture":"arm64"}]';;
 run) echo checked; exit 0;;
 rm) exit 0;;

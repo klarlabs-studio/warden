@@ -90,7 +90,7 @@ func TestContainerRunCannotReuseHostStepCache(t *testing.T) {
 		t.Skip("fake engine uses POSIX shell")
 	}
 	dir := t.TempDir()
-	script := "#!/bin/sh\nif [ \"$1\" = info ]; then exit 0; fi\nprintf '%s\\n' '[{\"Id\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Os\":\"linux\",\"Architecture\":\"arm64\"}]'\n"
+	script := "#!/bin/sh\nif [ \"$1\" = info ]; then echo '[\"name=seccomp,profile=builtin\"]'; exit 0; fi\nprintf '%s\\n' '[{\"Id\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Os\":\"linux\",\"Architecture\":\"arm64\"}]'\n"
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
