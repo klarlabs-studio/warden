@@ -296,6 +296,59 @@ the fields it does not know, computes a different payload and reports the
 signature as invalid. A verifier that pins a key therefore rejects a profiled
 note it cannot read, so upgrade verifiers before adopting a profile.
 
+## Checking a profile in CI
+
+A profile name in a note is a claim. `warden verify --min-profile` does not
+take the claim; it recomputes conformance from what the note's signature
+covers:
+
+```bash
+warden verify --key '<trusted-fingerprint>' --min-profile strict
+```
+
+It exits 0 only when every clause below holds for the exact commit, and 1
+otherwise, listing each clause that failed. It refuses to run (exit 2) without
+an explicit `--key`: the `.warden.yaml` roster lives in the checkout being
+judged, so it cannot vouch for that checkout. It is single-commit only; with
+`--range` it exits 2.
+
+| Clause | permissive | standard | strict |
+|---|---|---|---|
+| The note attests this commit, is signed by a pinned key, and is not an external-run attestation | yes | yes | yes |
+| The note records a profile whose name, version and digest match this warden's built-in definition. An unknown version or a different digest fails | yes | yes | yes |
+| The recorded profile ranks at least the minimum | yes | yes | yes |
+| Each required pre-push step (`credentials, lint, test`; strict adds `security-scan, review`) has a recorded outcome that counts | | executed, cached or predicted | executed only |
+| Each required shell step (`lint`, `test`, `security-scan`) has a complete Linux container execution record | | | yes |
+| Each required shell step ran with network `none` | | | yes |
+| Where the approval gate needed a decision, it was answered by `tty` or `tui`, not `auto` | | yes | yes |
+
+The network clause is checked separately from the container record:
+`--container-steps` accepts a container check that ran with `network: bridge`,
+and strict does not.
+
+A cached or predicted result reuses a pass recorded for identical inputs on an
+earlier run, so standard counts it. Strict does not: the note does not
+describe that earlier run.
+
+**Not checked in this release.** strict@1 also defines two clauses that the
+signed note cannot support yet, because it does not record the observations
+they need. `--min-profile strict` does not check them, and its output says so
+on every pass:
+
+- every agent step ran isolated, with the canonical tree and HEAD unchanged;
+- a commit that declares an agent carries a notarized Agent Trace.
+
+They become checkable when the note records agent isolation and authorship
+signals.
+
+A [version 2 requirements file](execution-contracts.md#version-2-a-minimum-profile)
+can demand the same minimum from protected CI policy. The GitHub
+`warden-verify` action and the GitLab component take a `min-profile` input.
+A warden release older than this feature rejects the flag, so the GitHub action
+reports `validated=false` and CI runs its checks. The `warden-gate` action
+accepts `min-profile` too, but it gates a range, which no release checks a
+profile across yet, so setting it fails the gate.
+
 ## Not yet enforced
 
 These parts of the design need runtime or verifier work that later releases
@@ -303,9 +356,11 @@ add. In this release a profile does **not**:
 
 - record agent isolation (the boundary observations above) in the signed
   note;
-- give CI a way to demand a minimum profile (`verify --min-profile`, the range
-  gate, the action inputs);
-- refuse host cache hits or predictions for required steps.
+- check a minimum profile across a range (`verify --range`, the
+  `warden-gate` action); only single-commit `verify --min-profile` exists;
+- refuse host cache hits or predictions for required steps while the gate
+  runs. `verify --min-profile strict` refuses them afterwards (see
+  [Checking a profile in CI](#checking-a-profile-in-ci)).
 
 Until the release that records the profile in signed notes, a later release may
 add the checks above to the existing `standard@1` and `strict@1` definitions.
