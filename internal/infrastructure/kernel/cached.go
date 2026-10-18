@@ -10,7 +10,8 @@ import (
 )
 
 // cachedStep wraps a step so a run whose declared inputs are byte-identical to a
-// prior passing run is skipped (returns a synthetic pass) instead of re-running
+// prior passing run is skipped (returns a synthetic pass, marked StepCached so
+// no surface reports it as executed) instead of re-running
 // the command. The pass still flows through the kernel, so its evidence is
 // recorded and the provenance chain stays complete. Only non-mutating steps are
 // wrapped (see ResolvedPolicy.Cacheable).
@@ -30,16 +31,22 @@ func (c cachedStep) Run(ctx context.Context, sc application.StepContext) (domain
 		key = cacheKey(c.inner.Name(), c.command, fp)
 		if c.cache.Seen(key) {
 			return domain.StepResult{
-				Step:    c.inner.Name(),
-				Status:  domain.StepPass,
-				Summary: string(c.inner.Name()) + " (cached — inputs unchanged)",
+				Step:          c.inner.Name(),
+				Status:        domain.StepPass,
+				Outcome:       domain.StepCached,
+				OutcomeReason: "inputs unchanged",
+				Summary:       string(c.inner.Name()) + " (cached — inputs unchanged)",
 			}, nil
 		}
 	}
 
 	res, err := c.inner.Run(ctx, sc)
-	// Only a clean pass is cached; a failure or a fixed/mutated run must re-run.
-	if err == nil && key != "" && res.Status == domain.StepPass && !res.Fixed {
+	// Only a clean, EXECUTED pass is cached; a failure or a fixed/mutated run
+	// must re-run. A pass that executed nothing (an agent step with no agent
+	// configured) is not cached either: replaying it would turn "skipped" into
+	// "cached", which reads as though the work was done once.
+	if err == nil && key != "" && res.Status == domain.StepPass && !res.Fixed &&
+		res.ExecutionOutcome() == domain.StepExecuted {
 		c.cache.Record(key)
 	}
 	return res, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -37,6 +38,62 @@ func TestCachedStep_HitSkipsInner(t *testing.T) {
 	}
 	if res.Status != domain.StepPass || res.Summary == "" {
 		t.Errorf("cache hit should be a pass with a summary, got %+v", res)
+	}
+	if res.Outcome != domain.StepCached || res.OutcomeReason != "inputs unchanged" {
+		t.Errorf("a cache hit must be marked cached, not executed: %+v", res)
+	}
+}
+
+func TestCachedStep_MissIsMarkedExecuted(t *testing.T) {
+	inner := &fakeStep{name: domain.StepTest, status: domain.StepPass}
+	cs := cachedStep{inner: inner, cache: &fakeCache{fp: "fp1"}, globs: []string{"**/*.go"}, command: "go test"}
+	res, err := cs.Run(context.Background(), application.StepContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExecutionOutcome() != domain.StepExecuted {
+		t.Errorf("a miss ran the step and must read as executed, got %q", res.ExecutionOutcome())
+	}
+}
+
+// skippingStep passes without executing, the way an agent step with no agent
+// configured does.
+type skippingStep struct{ name domain.StepName }
+
+func (s skippingStep) Name() domain.StepName { return s.name }
+func (s skippingStep) Run(context.Context, application.StepContext) (domain.StepResult, error) {
+	return domain.StepResult{Step: s.name, Status: domain.StepPass, Outcome: domain.StepSkipped, OutcomeReason: "no agent configured"}, nil
+}
+
+// A skipped pass must not be cached: the next run would replay it as
+// "cached — inputs unchanged", which reads as though the work was done once.
+func TestCachedStep_SkippedPassNotRecorded(t *testing.T) {
+	cache := &fakeCache{fp: "fp1"}
+	cs := cachedStep{inner: skippingStep{name: domain.StepReview}, cache: cache, globs: []string{"**/*"}, command: "\x00"}
+	res, err := cs.Run(context.Background(), application.StepContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != domain.StepSkipped {
+		t.Errorf("the inner skip must pass through unchanged, got %+v", res)
+	}
+	if len(cache.recorded) != 0 {
+		t.Errorf("a skipped pass must not be cached, recorded %d", len(cache.recorded))
+	}
+}
+
+// The marker is a delivery-surface fact. Evidence feeds the signed chain, so a
+// skipped or cached pass must produce exactly the evidence an executed pass
+// does — otherwise this change would alter the note for an unchanged run.
+func TestEvidenceFor_OutcomeMarkerStaysOutOfEvidence(t *testing.T) {
+	plain := domain.StepResult{Step: domain.StepReview, Status: domain.StepPass}
+	want := evidenceFor(plain)
+	for _, o := range []domain.StepOutcome{domain.StepSkipped, domain.StepCached} {
+		marked := plain
+		marked.Outcome, marked.OutcomeReason = o, "reason"
+		if got := evidenceFor(marked); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: evidence changed:\n got %+v\nwant %+v", o, got, want)
+		}
 	}
 }
 

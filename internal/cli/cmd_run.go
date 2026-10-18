@@ -450,7 +450,7 @@ func buildNotification(res application.RunResult, repo, branch string) notify.No
 	// A bare "passed" says nothing about what stands behind it; name the checks,
 	// the same way the terminal lines now do.
 	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
-		n.Body = fmt.Sprintf("%s (%s)", n.Body, domain.JoinSteps(res.Policy.Steps))
+		n.Body = fmt.Sprintf("%s (%s)", n.Body, domain.DescribeSteps(res.Policy.Steps, res.StepNotes))
 	}
 	if n.Body == "" {
 		n.Body = verdict
@@ -502,11 +502,14 @@ type preCommitReporter interface {
 // side-effect-free so the wording is unit-testable. A run whose step list is
 // unknown (empty policy, or an unreadable config) degrades to the original
 // unqualified line rather than asserting something it cannot back up.
-func passLine(ran, prePush []domain.StepName) string {
+//
+// notes qualifies any step that passed without executing (cached, or skipped
+// for want of an agent), so the line never lists a skipped review as one that ran.
+func passLine(ran, prePush []domain.StepName, notes map[domain.StepName]domain.OutcomeNote) string {
 	if len(ran) == 0 {
 		return "warden: pre-commit passed."
 	}
-	line := fmt.Sprintf("warden: pre-commit passed (%s)", domain.JoinSteps(ran))
+	line := fmt.Sprintf("warden: pre-commit passed (%s)", domain.DescribeSteps(ran, notes))
 	if deferred := domain.DeferredSteps(ran, prePush); len(deferred) > 0 {
 		verb := "runs"
 		if len(deferred) > 1 {
@@ -542,7 +545,7 @@ func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, 
 	if err != nil {
 		prePush = nil
 	}
-	_, _ = fmt.Fprintln(stdout, passLine(res.Policy.Steps, prePush))
+	_, _ = fmt.Fprintln(stdout, passLine(res.Policy.Steps, prePush, res.StepNotes))
 	return 0
 }
 
@@ -563,7 +566,7 @@ func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, 
 func runPrePushExit(res application.RunResult, stdout io.Writer) int {
 	msg := res.Message
 	if res.Outcome == domain.OutcomePassed && len(res.Policy.Steps) > 0 {
-		msg = fmt.Sprintf("%s (%s)", msg, domain.JoinSteps(res.Policy.Steps))
+		msg = fmt.Sprintf("%s (%s)", msg, domain.DescribeSteps(res.Policy.Steps, res.StepNotes))
 	}
 	_, _ = fmt.Fprintf(stdout, "warden: %s\n", msg)
 	printWarnings(stdout, res)

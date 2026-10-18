@@ -111,6 +111,9 @@ func TestCmdWhy_RendersRecord(t *testing.T) {
 		"lint",
 		"review(agent=claude)",
 		"matched rules: main, docs",
+		// The note cannot say whether review executed or was skipped; why
+		// must not let the step list imply it did.
+		whyOutcomesCaveat,
 		"evidence:      1 records",
 		"valid, signed by",
 		"agent trace:   trace.json (notarized, spec 0.1)",

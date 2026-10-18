@@ -52,6 +52,33 @@ func TestAgentStep_NoCommandSkips(t *testing.T) {
 		if len(res.Findings) != 0 {
 			t.Errorf("case %d: skipped step should have no findings", i)
 		}
+		// The pass is a verdict; the marker is what stops every surface
+		// reporting the review as one that ran.
+		if res.Outcome != domain.StepSkipped || res.ExecutionOutcome() != domain.StepSkipped {
+			t.Errorf("case %d: a skip must be marked StepSkipped, got %q", i, res.Outcome)
+		}
+	}
+}
+
+func TestAgentStep_SkipReasonNamesWhatIsMissing(t *testing.T) {
+	step := NewAgentStep(domain.StepReview, "review this")
+	for _, tc := range []struct {
+		sc   application.StepContext
+		want string
+	}{
+		{application.StepContext{WorktreeDir: t.TempDir()}, "no agent configured"},
+		{application.StepContext{WorktreeDir: t.TempDir(), Agent: "aider"}, "no command configured for agent aider"},
+	} {
+		res, err := step.Run(context.Background(), tc.sc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.OutcomeReason != tc.want {
+			t.Errorf("reason = %q, want %q", res.OutcomeReason, tc.want)
+		}
+		if want := "review: skipped (" + tc.want + ")"; res.Summary != want {
+			t.Errorf("summary = %q, want %q", res.Summary, want)
+		}
 	}
 }
 

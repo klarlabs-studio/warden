@@ -208,7 +208,11 @@ func (r *predictionReporter) OnStep(event application.StepEvent) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", event.Result.Status, event.Result.Summary)
+	status := string(event.Result.Status)
+	if n, ok := event.Result.Note(); ok {
+		status += " (" + string(n.Outcome) + ")"
+	}
+	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", status, event.Result.Summary)
 	if event.Result.Status != domain.StepPass {
 		printFindings(r.w, event.Result.Findings)
 	}

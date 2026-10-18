@@ -709,8 +709,9 @@ commands:
 # Agent steps (intent/review/document) run the command configured for the
 # resolved agent, expanding {prompt}/{step}/{repo}. claude and codex work out of
 # the box via bundled presets — you only need agent_commands to override those
-# or add another agent. No command (and no preset) → advisory skip; Warden never
-# guesses an agent's CLI.
+# or add another agent. No command (and no preset) → the step passes but is
+# reported as "review: skipped, no agent configured", never as a review that ran;
+# Warden never guesses an agent's CLI.
 agent_commands:
   opencode: "opencode run {prompt}"   # example: any other agent
 steps:
@@ -880,7 +881,7 @@ have finished and, once it ends, the verdict:
 { "run_id": "run-1", "phase": "running", "steps": [] }
 
 // run_status → while it works
-{ "run_id": "run-1", "phase": "running", "steps": [ { "step": "lint", "status": "pass" } ] }
+{ "run_id": "run-1", "phase": "running", "steps": [ { "step": "lint", "status": "pass", "outcome": "executed" } ] }
 
 // run_status → when it ends
 { "run_id": "run-1", "phase": "complete", "summary": { "outcome": "passed", … } }
@@ -890,6 +891,13 @@ have finished and, once it ends, the verdict:
 `summary.outcome` for the verdict. A run that could not be carried out at all
 reports `errored` instead, which is a different thing from a rejected change and
 must not be treated as one.
+
+Each step's `outcome` says whether it did its work: `executed`, `cached` (an
+identical earlier pass was reused) or `skipped` (an agent step with no agent
+configured), with `outcome_reason` saying why. It is not a verdict — `status` is —
+but a `pass` that was `skipped` examined nothing. The final summary's
+`step_outcomes` (and `step_outcomes` in `warden axi run-trigger`) lists the steps
+that passed without executing.
 
 Steps appear as they finish, so an agent can start fixing a lint failure while the
 test step is still running. Run ids are per-process and don't survive a server

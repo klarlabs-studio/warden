@@ -52,6 +52,11 @@ const (
 type StepProgress struct {
 	Step   domain.StepName `json:"step"`
 	Status string          `json:"status"` // pass | fail | needs_approval
+	// Outcome says whether the step did its work: executed | cached | skipped.
+	// It is NOT a verdict — Status is — but a "pass" with outcome "skipped"
+	// means nothing examined the change for this step. OutcomeReason says why.
+	Outcome       string `json:"outcome"`
+	OutcomeReason string `json:"outcome_reason,omitempty"`
 	// Summary is the step's own one-line verdict, when it gave one.
 	Summary string `json:"summary,omitempty"`
 	// Findings are what the step reported. They arrive here as soon as the step

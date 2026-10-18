@@ -131,6 +131,27 @@ func DeferredSteps(ran, later []StepName) []StepName {
 	return out
 }
 
+// DescribeSteps is JoinSteps with each step that did not execute qualified by
+// its outcome: "lint; review: skipped, no agent configured". With no notes it is
+// exactly JoinSteps, so an ordinary run reads as it always did; once any step
+// carries a clause the separator becomes "; " so the clause's own comma cannot
+// be mistaken for the list's.
+func DescribeSteps(steps []StepName, notes map[StepName]OutcomeNote) string {
+	qualified := false
+	parts := make([]string, len(steps))
+	for i, s := range steps {
+		parts[i] = string(s)
+		if n, ok := notes[s]; ok {
+			parts[i] += ": " + n.String()
+			qualified = true
+		}
+	}
+	if !qualified {
+		return strings.Join(parts, ", ")
+	}
+	return strings.Join(parts, "; ")
+}
+
 // JoinSteps renders a step list as a comma-separated string for a one-line
 // human-facing summary ("lint, test"). An empty list renders as "".
 func JoinSteps(steps []StepName) string {

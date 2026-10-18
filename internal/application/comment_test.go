@@ -44,6 +44,21 @@ func TestPRComment(t *testing.T) {
 		}
 	})
 
+	t.Run("a skipped step is not counted as run", func(t *testing.T) {
+		res := base
+		res.Policy = domain.ResolvedPolicy{Steps: []domain.StepName{"lint", "review"}}
+		res.StepNotes = map[domain.StepName]domain.OutcomeNote{"review": {Outcome: domain.StepSkipped, Reason: "no agent configured"}}
+		out := prComment(res, "b")
+		for _, want := range []string{"after running **1 step**: `lint`.", "Passed without running:", "- `review`: **skipped** — no agent configured"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("comment missing %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "`lint`, `review`") {
+			t.Errorf("review listed among the steps that ran:\n%s", out)
+		}
+	})
+
 	t.Run("single step is not pluralized", func(t *testing.T) {
 		res := base
 		res.Policy = domain.ResolvedPolicy{Steps: []domain.StepName{"lint"}}
@@ -56,3 +71,12 @@ func TestPRComment(t *testing.T) {
 // signedPubKey is a valid base64 ed25519 public key (32 bytes) for exercising
 // the signer-fingerprint rendering without generating one at test time.
 const signedPubKey = "xol0IZ6xoITku5FmxybGmtUoka9JwsZ/l9qEb5enqM8="
+
+func TestStatusDescription_QualifiesSkippedSteps(t *testing.T) {
+	run := domain.NewRun("run_1", domain.PrePush, domain.ResolvedPolicy{Steps: []domain.StepName{"lint", "review"}}, "main")
+	_ = run.RecordStep(domain.StepResult{Step: "lint", Status: domain.StepPass})
+	_ = run.RecordStep(domain.StepResult{Step: "review", Status: domain.StepPass, Outcome: domain.StepSkipped, OutcomeReason: "no agent configured"})
+	if got, want := statusDescription(run), "warden gate passed (lint; review: skipped, no agent configured)"; got != want {
+		t.Errorf("statusDescription = %q, want %q", got, want)
+	}
+}

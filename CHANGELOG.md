@@ -6,6 +6,25 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A skipped agent step no longer reads as one that ran.** With `review` (or
+  `intent`, `document`) in the policy and no agent configured, the step passes
+  without examining anything, and every surface said so as "passed": the push
+  line read `gate passed (lint, review)`, the PR comment counted it among the
+  steps run, the commit status and notification named it, and MCP/axi reported a
+  plain `pass`. Host cache hits were likewise indistinguishable from steps that
+  executed. Results now carry an outcome — executed, cached or skipped — and the
+  run output, TUI, `warden attach`, `warden watch --staged`, notifications,
+  commit status, PR comment and MCP/axi results name it:
+  `gate passed (lint; review: skipped, no agent configured)`. MCP steps gain
+  `outcome`/`outcome_reason`, and run summaries gain `step_outcomes`. `warden
+  why` reads only the note, which does not record outcomes yet, and now says
+  so. Verdicts and exit codes are unchanged, and so is the signed note: the
+  outcome is kept out of the record and the evidence chain. A skipped pass is
+  also no longer written to the step cache, where the next run would have
+  replayed it as "cached".
+
 ## [0.35.0] - 2026-10-18
 
 A minor release: `warden init` and `warden hooks enable` now refuse a

@@ -45,10 +45,15 @@ func short12(sha string) string {
 // patch). The domain owns the outcome; this is just its read model.
 type RunResult struct {
 	ReusedSteps map[domain.StepName]domain.ExecutionReuse
-	Outcome     domain.Outcome
-	Hook        domain.Hook
-	Policy      domain.ResolvedPolicy
-	Findings    []domain.Finding
+	// StepNotes names the steps that passed without executing — cached or
+	// skipped — and why. A step absent from it executed. Every surface that
+	// lists "the steps that ran" must qualify these, or a skipped review reads
+	// as a review that passed. Not part of the signed record.
+	StepNotes map[domain.StepName]domain.OutcomeNote
+	Outcome   domain.Outcome
+	Hook      domain.Hook
+	Policy    domain.ResolvedPolicy
+	Findings  []domain.Finding
 	// Record is the provenance note written on a passing pre-push run.
 	Record *domain.RunRecord
 	// PR is the pull request opened or found after a passing push, if enabled.
@@ -748,11 +753,7 @@ func statusDescription(run *domain.Run) string {
 	if len(steps) == 0 {
 		return "warden gate passed"
 	}
-	names := make([]string, 0, len(steps))
-	for _, s := range steps {
-		names = append(names, string(s))
-	}
-	return "warden gate passed (" + strings.Join(names, ", ") + ")"
+	return "warden gate passed (" + domain.DescribeSteps(steps, run.StepNotes()) + ")"
 }
 
 // runValidation builds the run's kernel and folds each resolved step's outcome
@@ -1087,6 +1088,7 @@ func pushedMessage(sha, remote, branch string, gitCompletes, attestOnly bool) st
 func (r *Runner) result(run *domain.Run, patch string) RunResult {
 	return RunResult{
 		ReusedSteps: run.ExecutionReuses(),
+		StepNotes:   run.StepNotes(),
 		Outcome:     run.Outcome(),
 		Hook:        run.Hook(),
 		Policy:      run.Policy(),

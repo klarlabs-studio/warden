@@ -129,7 +129,7 @@ func TestPassLine(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := passLine(tc.ran, tc.prePush); got != tc.want {
+			if got := passLine(tc.ran, tc.prePush, nil); got != tc.want {
 				t.Errorf("passLine() =\n  %q\nwant\n  %q", got, tc.want)
 			}
 		})
