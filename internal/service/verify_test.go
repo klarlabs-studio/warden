@@ -213,3 +213,47 @@ func TestService_Verify_SignedAndPinned(t *testing.T) {
 		}
 	})
 }
+
+// A note that carries a signature which does not verify was altered after it
+// was signed. Without a pinned key warden accepts an unsigned note (the key is
+// what makes provenance trusted), but a broken signature is positive evidence
+// of tampering, so it must never validate — pinned or not.
+func TestService_Verify_InvalidSignatureNeverValidates(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	rec := domain.RunRecord{
+		RunID:             "run_signed",
+		CommitSHA:         head,
+		StepsRun:          []domain.StepName{"lint"},
+		EvidenceChainRoot: "h0",
+		Evidence:          []domain.EvidenceEntry{{Hash: "h0"}},
+		PublicKey:         base64.StdEncoding.EncodeToString(pub),
+	}
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	rec.StepsRun = []domain.StepName{"lint", "test"} // edited after signing
+	if err := svc.Repo().WriteNote(head, rec); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.Verify("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Signed || res.SignatureValid {
+		t.Fatalf("fixture must be a signed note whose signature fails, got %+v", res)
+	}
+	if res.Validated {
+		t.Error("a note whose signature does not verify must not validate, even without a pinned key")
+	}
+}

@@ -215,6 +215,11 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) domain.CommitV
 	if !rec.Attests(sha) {
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonBrokenChain}
 	}
+	// A present signature that does not verify means the note was edited after
+	// signing: tampered, whatever the key policy (see VerifyWithPolicy).
+	if rec.Signed() && !rec.VerifySignature() {
+		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonBrokenChain}
+	}
 	if rec.IsExternal() {
 		if opts.ExternalPolicy == ExternalReject {
 			return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonExternal}
