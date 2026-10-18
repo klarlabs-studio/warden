@@ -17,8 +17,8 @@ All notable changes to warden are documented here. The format follows
   staged prediction, or `skipped`) with the agent warden invoked, and how the
   approval gate was answered (`tty`, `tui`, `auto`, or `none` when no decision
   was needed). All three are inside the signature and say only what warden
-  observed; nothing about agent isolation is recorded, because agent steps are
-  not isolated yet. `warden why`, MCP `verify` and `warden axi verify` show
+  observed; agent isolation (see Changed below) is not recorded in the note
+  yet. `warden why`, MCP `verify` and `warden axi verify` show
   them, and `warden reattest` carries them unchanged. A repository without
   `profile:` writes exactly the note it wrote before. A warden older than this
   release reports a profiled note's signature as invalid, so a verifier that
@@ -41,6 +41,46 @@ All notable changes to warden are documented here. The format follows
   repositories without a profile still auto-approve on these surfaces. This
   extends `standard@1` and `strict@1` while the definitions are still in
   preview, so their digests change.
+
+- **Compliance profiles enforce boundaries around agent steps.** Under
+  `standard` or `strict`, an agent step could still do everything it could do
+  without a profile. With no agent configured, `review` passed as skipped, so a
+  profile that required it accepted a gate where no review ran. A `review`
+  that ran on its own, or whose clone could not be made, ran in the worktree
+  whose HEAD becomes the attested commit. An agent that amended that commit
+  changed what was noted and pushed. The agent CLI also received warden's
+  whole environment, including cloud credentials and forge tokens. This
+  release adds these floors to the preview definitions, so `standard@1` and
+  `strict@1` get stricter on upgrade, as the preview note allows:
+  - standard and strict: an agent step with no agent or command fails with
+    exit 78. The message names the profile and says to set `agent: claude`,
+    set `agent: codex`, or assign an agent with a rule.
+  - standard and strict: every agent step runs in its own disposable clone.
+    If the clone cannot be made, the step fails instead of falling back. HEAD,
+    the index tree and the tracked files of the clone and of the validated
+    worktree are compared before and after the step. Any change fails the
+    run, and no note is written. Untracked output is allowed. Under standard,
+    a step whose writes the config keeps (`writes:`, `auto_fix`) is not
+    isolated, because isolating it would discard writes the config allowed.
+  - strict: an agent step sees only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`,
+    `LC_*`, `TERM`, `TMPDIR`, `SHELL` and the variables its preset's CLI
+    documents for credentials and configuration (claude: `ANTHROPIC_API_KEY`,
+    `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`,
+    `CLAUDE_CONFIG_DIR`; codex: `CODEX_HOME`, `CODEX_API_KEY`,
+    `CODEX_ACCESS_TOKEN`, `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE`). Codex does
+    not read `OPENAI_API_KEY` by a fixed name, so that variable is not passed
+    either. Bedrock, Vertex and Foundry routing need ambient cloud credentials
+    and are not supported under strict yet.
+  - strict: an agent that is not a bundled preset, named in `agent:` or in a
+    rule's `then.agent`, is a load error. Overriding a preset's command with
+    `agent_commands` is still allowed.
+
+  Agent steps under a profile now report whether they were isolated, whether
+  the tree was unchanged and whether the environment was allowlisted. That
+  report is on the step result only: it is not in the signed note yet. Without
+  a profile, and under `permissive`, nothing changes: no clone, no guard, the
+  full environment, and an advisory skip. The pinned digests of `standard@1`
+  and `strict@1` change.
 
 ### Fixed
 

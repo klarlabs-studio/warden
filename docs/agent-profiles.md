@@ -69,7 +69,8 @@ About `agent:`: without a profile it still does nothing, exactly as before,
 because switching it on everywhere would start model calls on every push in
 repositories that set it long ago. Under a profile, `agent: claude` or
 `agent: codex` selects that preset for `intent`, `review` and `document` unless a
-rule assigns another agent. `agent: auto` and custom agents stay inert.
+rule assigns another agent. `agent: auto` and custom agents stay inert under
+permissive and standard; strict refuses them at load (see the floors below).
 
 ### Floors (checked at load)
 
@@ -88,6 +89,7 @@ every unmet floor, the field, and the file that set it where one file did.
 | `execution.network` is `none` | | yes |
 | No `auto_fix` budget and no `writes:` entry on an agent step | | yes |
 | No agent step timeout of `"0"` | | yes |
+| Every agent named in `agent:` or a rule's `then.agent` is a bundled preset (`claude`, `codex`) | | yes |
 
 A step list you never configured counts as the built-in default, which for
 `pre_commit` is `[lint]`. So standard and strict need an explicit
@@ -135,6 +137,60 @@ it is why the agent surfaces themselves refuse rather than rely on the prompt.
 `permissive` keeps today's behavior, so a repository can record a profile
 before it changes who approves. Repositories without a profile are unchanged.
 
+### Agent step boundaries (checked at run time)
+
+An agent step is one of `intent`, `review` and `document`, or a step a rule
+hands to an agent. Under standard and strict, warden enforces these around
+each one while the gate runs:
+
+| Boundary | standard | strict |
+|---|---|---|
+| An agent step with no agent, or no command for its agent, fails with exit 78 instead of passing as skipped | yes | yes |
+| The step runs in its own disposable clone; if the clone cannot be made, the step fails instead of using the validated worktree | yes | yes |
+| HEAD, the index tree and the tracked files of the clone and of the validated worktree must be unchanged after the step; untracked output is allowed | yes | yes |
+| The agent sees only the base environment plus its preset's credential variables | | yes |
+
+The exit-78 failure names the profile and the fix:
+
+```
+profile standard@1 requires review to run; set `agent: claude` or `agent: codex` in .warden.yaml, or assign one with rules[].then.agent.review
+warden: step review could not run: its compliance profile cannot run it as configured
+```
+
+A tree-guard failure fails the run before anything is noted or pushed, and
+says what the agent changed (for example `moved HEAD`, `changed tracked
+files`). Under standard, a step whose writes the config keeps (`writes:` or an
+`auto_fix` budget) runs where it always has, without a clone, because a clone
+would throw away the writes the config allowed. strict refuses such writes at
+load, so under strict every agent step is isolated.
+
+Under strict the agent process gets these variables, if they are set, and no
+others: `PATH HOME USER LOGNAME LANG LC_* TERM TMPDIR SHELL`, plus the table for
+its preset. Each name comes from the CLI's own documentation:
+
+| Preset | Also passed | Source |
+|---|---|---|
+| `claude` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR` | [Claude Code environment variables](https://code.claude.com/docs/en/env-vars) |
+| `codex` | `CODEX_HOME`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` | [Codex environment variables](https://developers.openai.com/codex/environment-variables) |
+
+A login stored by the CLI itself (`claude` `/login`, `codex login`) lives
+under the home or config directory, or in the OS keychain, so it keeps
+working. Codex does not read `OPENAI_API_KEY` by a fixed name, so that
+variable is not passed: store the key with `codex login --with-api-key` or
+use `CODEX_API_KEY`. Routing Claude Code through Bedrock, Vertex or Foundry
+needs cloud credentials in the environment, and those are what the allowlist
+removes, so strict does not support that yet. `agent_commands` may still
+replace a preset's command; the command keeps the preset's name, and with it
+the preset's table.
+
+Agent steps still run on the host with the network they need to reach their
+model. See "What strict does not prove" below.
+
+Each agent step under standard or strict reports what warden observed:
+whether it was isolated, whether the tree was unchanged, and whether its
+environment was allowlisted. In this release that report is on the step
+result, not in the signed note.
+
 ### Profiles and `extends:`
 
 `profile` ratchets through `extends:`. The effective profile is the highest one
@@ -170,8 +226,9 @@ a profile carries three more fields, all inside the signed payload:
   channel that answered it (`tty`, `tui` or `auto`) and the name the approver
   gave itself. `none` means no decision was needed.
 
-They state only what warden observed. Nothing is recorded about isolation of
-agent steps, because agent steps are not isolated yet. `warden why`, MCP
+They state only what warden observed. The agent step boundary observations
+(isolated, tree unchanged, environment allowlisted) are not in the note yet;
+they are reported on the step result only. `warden why`, MCP
 `verify` and `warden axi verify` show the three fields.
 
 A note written without a profile has none of them and is byte for byte what it
@@ -185,12 +242,8 @@ note it cannot read, so upgrade verifiers before adopting a profile.
 These parts of the design need runtime or verifier work that later releases
 add. In this release a profile does **not**:
 
-- fail an agent step that has no agent to run (today it is reported as
-  skipped);
-- run agent steps in a clone with a guard on the canonical tree and HEAD;
-- reduce the environment an agent step sees;
-- refuse a custom agent under strict;
-- record agent isolation or authorship signals in the signed note;
+- record agent isolation (the boundary observations above) or authorship
+  signals in the signed note;
 - give CI a way to demand a minimum profile (`verify --min-profile`, the range
   gate, the action inputs);
 - refuse host cache hits or predictions for required steps.
