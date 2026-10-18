@@ -314,3 +314,35 @@ func TestService_VerifyRange_CorruptNoteIsNotReportedMissing(t *testing.T) {
 		t.Errorf("absent note: reason = %q, want %q", got, domain.ReasonMissing)
 	}
 }
+
+// A note whose signature no longer verifies was edited after signing. The range
+// gate must refuse it even with no key pinned and RequireSigned off, the same
+// rule single-commit verify applies.
+func TestService_VerifyRange_InvalidSignatureFailsWithoutAKey(t *testing.T) {
+	dir := initRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1 := commit(t, dir, svc, "c1")
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	rec := sign(t, attestRecord(c1, "r1"), pub, priv)
+	rec.StepsRun = []domain.StepName{"lint"} // edited after signing
+	if err := svc.Repo().WriteNote(c1, rec); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.VerifyRange(base, c1, RangeVerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK() {
+		t.Fatal("a tampered signed note must fail the range gate without a pinned key")
+	}
+	if len(res.Commits) != 1 || res.Commits[0].Reason != domain.ReasonBrokenChain {
+		t.Errorf("verdicts = %+v, want one %q", res.Commits, domain.ReasonBrokenChain)
+	}
+}

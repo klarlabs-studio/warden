@@ -108,6 +108,16 @@ All notable changes to warden are documented here. The format follows
   watches cannot hold the push open. Windows keeps the old behavior. A
   terminal answering is not proof that a person did: an agent driving a
   pseudo-terminal can answer, as ADR 0007 states.
+- **A note with a broken signature no longer verifies without a key.**
+  `warden verify` and `warden verify --range` with no pinned key and no
+  `--require-signed` accepted a note on its evidence chain alone, so a note that
+  carried a signature which no longer verified still exited 0, printing
+  "signature INVALID" next to a pass. An unsigned note is still accepted that
+  way (pinning a key is what makes provenance trusted), but a signature that is
+  present and fails means the note was edited after it was signed, and it now
+  fails in both: single-commit verify refuses it, and the range gate reports it
+  as a broken chain.
+
 
 ## [0.36.0] - 2026-10-19
 
