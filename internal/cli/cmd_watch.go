@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/config"
 	"go.klarlabs.de/warden/internal/infrastructure/watch"
 	"go.klarlabs.de/warden/internal/service"
 )
@@ -42,6 +44,7 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	defer disableOptionalLocks()()
 	svc, err := newService(autoApprover{})
 	if err != nil {
 		return fail(stderr, err)
@@ -69,23 +72,43 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 
 	_, _ = fmt.Fprintf(stdout, "warden: watching %s (ctrl+c to stop) — %d check(s)\n", dir, len(cmds))
-	runWatchChecks(ctx, stdout, dir, cmds) // run once up front
+	runLiveWatch(ctx, dir, cmds, stdout)
+	_, _ = fmt.Fprintln(stdout, "\nwarden: watch stopped.")
+	return 0
+}
 
-	last := watch.Fingerprint(dir)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			_, _ = fmt.Fprintln(stdout, "\nwarden: watch stopped.")
-			return 0
-		case <-ticker.C:
-			if watch.Fingerprint(dir) != last {
-				runWatchChecks(ctx, stdout, dir, cmds)
-				// Re-fingerprint after the run so checks that write files (rare in
-				// watch) don't retrigger themselves.
-				last = watch.Fingerprint(dir)
+// runLiveWatch re-runs cmds in dir whenever the tree's content changes. It
+// shares the staged watcher's loop: a snapshot is evaluated once two samples
+// agree, and a change during a run cancels it and evaluates the new snapshot,
+// so an edit saved mid-run is never absorbed unchecked.
+func runLiveWatch(ctx context.Context, dir string, cmds []namedCommand, stdout io.Writer) {
+	tree := watch.NewTree(dir)
+	watch.Loop{
+		Interval:    pollInterval,
+		Fingerprint: func(context.Context) (string, error) { return tree.Fingerprint(), nil },
+		Evaluate: func(run context.Context) error {
+			runWatchChecks(run, stdout, dir, cmds)
+			if run.Err() != nil && ctx.Err() == nil {
+				_, _ = fmt.Fprintln(stdout, "  ↻ superseded by a newer change")
 			}
+			return nil
+		},
+	}.Run(ctx)
+}
+
+// disableOptionalLocks sets GIT_OPTIONAL_LOCKS=0 for every git process the
+// watcher starts, including those the service's git adapter spawns, so a
+// background evaluation never takes index.lock and fails the developer's own
+// commit. It returns a function restoring the previous value.
+func disableOptionalLocks() func() {
+	key, value, _ := strings.Cut(watch.OptionalLocksOff, "=")
+	previous, had := os.LookupEnv(key)
+	_ = os.Setenv(key, value)
+	return func() {
+		if had {
+			_ = os.Setenv(key, previous)
+		} else {
+			_ = os.Unsetenv(key)
 		}
 	}
 }
@@ -137,6 +160,22 @@ func runWatchChecks(ctx context.Context, w io.Writer, dir string, cmds []namedCo
 	}
 }
 
+// Bounds for retrying a staged evaluation the machine prevented. Variables so
+// tests need not wait out the production backoff.
+var (
+	stagedRetryMin = watch.DefaultRetryMin
+	stagedRetryMax = watch.DefaultRetryMax
+)
+
+// stagedBlocked is a staged evaluation that did not run because of the machine.
+type stagedBlocked struct {
+	kind domain.Blocker
+	err  error
+}
+
+func (b stagedBlocked) Error() string { return b.err.Error() }
+func (b stagedBlocked) Unwrap() error { return b.err }
+
 func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once bool, stdout, stderr io.Writer) int {
 	cfg, err := svc.Config()
 	if err != nil {
@@ -150,56 +189,142 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 		return fail(stderr, fmt.Errorf("staged watch needs a local signing key"))
 	}
 	evaluate := func(ctx context.Context) error {
-		svc.SetObserver(&predictionReporter{ctx: ctx, w: stdout})
-		result, err := svc.PredictStaged(ctx)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			return err
-		}
-		if result.Outcome != domain.OutcomePassed {
-			return fmt.Errorf("staged checks %s: %s", result.Outcome, result.Message)
-		}
-		_, _ = fmt.Fprintln(stdout, "warden: staged checks passed; saved predictions expire after 10 minutes")
-		return nil
+		return evaluateStaged(ctx, svc, dir, stdout)
 	}
 	defer svc.SetObserver(nil)
 	if once {
-		if err := evaluate(ctx); err != nil {
-			return fail(stderr, err)
-		}
+		return reportStagedOnce(evaluate(ctx), stdout, stderr)
+	}
+	gate, err := stagedGate(ctx, svc, dir)
+	if err != nil && ctx.Err() == nil {
+		return fail(stderr, err)
+	}
+	if ctx.Err() != nil { // interrupted while starting: a stop, not a failure
+		_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
 		return 0
 	}
-	fingerprint := func(ctx context.Context) (string, error) {
-		index, err := watch.StagedFingerprint(ctx, dir)
-		if err != nil {
-			return "", err
-		}
-		cfg, err := svc.Config()
-		if err != nil {
-			return "", err
-		}
-		configDigest, err := domain.DigestJSON(cfg)
-		if err != nil {
-			return "", err
-		}
-		return index + configDigest, nil
-	}
 	_, _ = fmt.Fprintln(stdout, "warden: watching staged inputs (ctrl+c to stop); checks run in disposable container worktrees")
-	watch.RunStaged(ctx, pollInterval, fingerprint, evaluate, func(err error) {
-		if err != nil {
-			_, _ = fmt.Fprintln(stderr, "warden:", err)
-		}
-	})
+	watch.Loop{
+		Interval:    pollInterval,
+		Fingerprint: gate.Fingerprint,
+		Evaluate:    evaluate,
+		Report:      func(e watch.Event) { reportStagedEvent(e, stdout, stderr) },
+		RetryMin:    stagedRetryMin,
+		RetryMax:    stagedRetryMax,
+	}.Run(ctx)
 	_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
 	return 0
 }
 
+// evaluateStaged runs the predictive staged checks once. Nothing staged is
+// watch.ErrIdle; a run the machine prevented is wrapped with watch.Blocked so
+// the loop retries it rather than recording it as the snapshot's verdict.
+func evaluateStaged(ctx context.Context, svc *service.Service, dir string, stdout io.Writer) error {
+	// An inspection failure is not "nothing staged": evaluate, and let the
+	// run report what is wrong.
+	if empty, err := watch.NothingStaged(ctx, dir); err == nil && empty {
+		return watch.ErrIdle
+	}
+	reporter := &predictionReporter{ctx: ctx, w: stdout}
+	svc.SetObserver(reporter)
+	result, err := svc.PredictStaged(ctx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		if errors.Is(err, application.ErrContainerUnavailable) {
+			return watch.Blocked(stagedBlocked{kind: domain.BlockerEnvironment, err: err})
+		}
+		return err
+	}
+	if kind := firstBlocker(result.Blocker, reporter.blocker()); kind != domain.BlockerNone {
+		return watch.Blocked(stagedBlocked{kind: kind, err: fmt.Errorf("staged checks could not run: %s", result.Message)})
+	}
+	if result.Outcome != domain.OutcomePassed {
+		return fmt.Errorf("staged checks %s: %s", result.Outcome, result.Message)
+	}
+	_, _ = fmt.Fprintln(stdout, "warden: staged checks passed; saved predictions expire after 10 minutes")
+	return nil
+}
+
+func firstBlocker(blockers ...domain.Blocker) domain.Blocker {
+	for _, b := range blockers {
+		if b != domain.BlockerNone {
+			return b
+		}
+	}
+	return domain.BlockerNone
+}
+
+// stagedGate fingerprints the staged inputs plus the configuration, hashing
+// the index and loading the configuration only when a stat of their files
+// changes (or the backstop elapses).
+func stagedGate(ctx context.Context, svc *service.Service, dir string) (*watch.StatGate, error) {
+	key, err := watch.StagedStatKey(ctx, dir, config.FileName)
+	if err != nil {
+		return nil, err
+	}
+	return &watch.StatGate{
+		Key: key,
+		Full: func(ctx context.Context) (string, error) {
+			index, err := watch.StagedFingerprint(ctx, dir)
+			if err != nil {
+				return "", err
+			}
+			cfg, err := svc.Config()
+			if err != nil {
+				return "", err
+			}
+			configDigest, err := domain.DigestJSON(cfg)
+			if err != nil {
+				return "", err
+			}
+			return index + configDigest, nil
+		},
+	}, nil
+}
+
+func reportStagedOnce(err error, stdout, stderr io.Writer) int {
+	var blocked stagedBlocked
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, watch.ErrIdle):
+		_, _ = fmt.Fprintln(stdout, "warden: nothing staged; no checks run")
+		return 0
+	case errors.As(err, &blocked):
+		_, _ = fmt.Fprintf(stderr, "warden: blocked: %v\n", err)
+		return exitForBlocker(blocked.kind)
+	default:
+		return fail(stderr, err)
+	}
+}
+
+func reportStagedEvent(e watch.Event, stdout, stderr io.Writer) {
+	switch e.State {
+	case watch.StateIdle:
+		_, _ = fmt.Fprintln(stdout, "warden: nothing staged; no checks run")
+	case watch.StateBlocked:
+		_, _ = fmt.Fprintf(stderr, "warden: blocked: %v; retrying in %s\n", e.Err, e.RetryIn)
+	default:
+		if e.Err != nil {
+			_, _ = fmt.Fprintln(stderr, "warden:", e.Err)
+		}
+	}
+}
+
 type predictionReporter struct {
-	ctx context.Context
-	w   io.Writer
-	mu  sync.Mutex
+	ctx      context.Context
+	w        io.Writer
+	mu       sync.Mutex
+	blockers []domain.Blocker
+}
+
+// blocker returns the first environmental obstacle a finished step reported.
+func (r *predictionReporter) blocker() domain.Blocker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return firstBlocker(r.blockers...)
 }
 
 func (r *predictionReporter) OnStep(event application.StepEvent) {
@@ -208,6 +333,9 @@ func (r *predictionReporter) OnStep(event application.StepEvent) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if event.Result.Blocker != domain.BlockerNone {
+		r.blockers = append(r.blockers, event.Result.Blocker)
+	}
 	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", event.Result.Status, event.Result.Summary)
 	if event.Result.Status != domain.StepPass {
 		printFindings(r.w, event.Result.Findings)
