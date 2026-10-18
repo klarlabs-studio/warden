@@ -23,6 +23,16 @@ All notable changes to warden are documented here. The format follows
   `profile:` writes exactly the note it wrote before. A warden older than this
   release reports a profiled note's signature as invalid, so a verifier that
   pins a key rejects it: upgrade verifiers before adopting a profile.
+- **Profiled notes record each agent step's boundary, signed.** The runner
+  observed whether an agent step ran in its own guarded clone, whether the
+  tree guard found a change, and whether the agent saw only the allowlisted
+  environment, but the note kept none of it, so a verifier could not tell an
+  isolated review from one that ran in the attested worktree. A profiled
+  note's `step_outcomes` now carries `isolated`, `tree_unchanged` and
+  `env_allowlisted` for an agent step that executed, inside the signature,
+  and only as observed: a field nobody observed is left out rather than
+  written as `false`. `warden reattest` carries them, `warden why` and
+  `warden axi verify` show them, and a note without a profile is unchanged.
 - **CI can demand a minimum profile, checked from the evidence (preview).** A
   profiled note named its profile, but nothing let CI require one, and the
   name alone proves nothing about what ran. `warden verify --min-profile
@@ -33,11 +43,12 @@ All notable changes to warden are documented here. The format follows
   that counts (strict: executed only, so cached and predicted results fail;
   standard also counts them; skipped never counts), under strict each
   required shell step has a Linux container record with network `none`
-  (`--container-steps` alone accepts `network: bridge`), and from standard up
-  no required approval was auto-approved. Two strict clauses are not checked,
-  because the note does not record them yet: agent-step isolation, and an
-  Agent Trace for a declared agent commit. A pass prints what was checked and
-  what was not. The flag needs an explicit `--key` and is single-commit only.
+  (`--container-steps` alone accepts `network: bridge`), from standard up
+  every agent step that ran was isolated with its tree unchanged (strict:
+  and saw only the allowlisted environment), and from standard up no required
+  approval was auto-approved. One strict clause is not checked, because the
+  note does not record authorship yet: an Agent Trace for a declared agent
+  commit. A pass prints what was checked and what was not. The flag needs an explicit `--key` and is single-commit only.
   A version 2 requirements file (`{"version":2,"profile":{"min":"strict"}}`,
   `steps` optional) demands the same from protected policy; version 1 files
   are unchanged, and an older warden refuses version 2, so CI runs its checks.

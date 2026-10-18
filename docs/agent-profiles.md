@@ -194,8 +194,8 @@ model. See "What strict does not prove" below.
 
 Each agent step under standard or strict reports what warden observed:
 whether it was isolated, whether the tree was unchanged, and whether its
-environment was allowlisted. In this release that report is on the step
-result, not in the signed note.
+environment was allowlisted. The signed note records it (see
+[What the signed note records](#what-the-signed-note-records)).
 
 ### Profiles and `extends:`
 
@@ -227,15 +227,20 @@ a profile carries three more fields, all inside the signed payload:
 - `step_outcomes`: for each step that ran through the gate, whether it was
   `executed`, `cached` (the host input cache), `predicted` (a matching staged
   prediction) or `skipped` (nothing was configured to perform it), and the
-  agent warden invoked when an agent executed it.
+  agent warden invoked when an agent executed it. For an agent step that
+  executed, it also records the boundary warden observed: `isolated: true`
+  when the step ran in its own guarded clone, `tree_unchanged` with what the
+  tree guard found, and `env_allowlisted: true` when the agent saw only the
+  allowlisted environment.
 - `approval`: whether the approval gate needed a decision, and if so the
   channel that answered it (`tty`, `tui` or `auto`) and the name the approver
   gave itself. `none` means no decision was needed.
 
-They state only what warden observed. The agent step boundary observations
-(isolated, tree unchanged, environment allowlisted) are not in the note yet;
-they are reported on the step result only. `warden why`, MCP
-`verify` and `warden axi verify` show the three fields.
+They state only what warden observed. A boundary field that was not observed
+is left out, never written as `false`: an agent step that was not isolated
+has no `isolated` or `tree_unchanged` key at all, and a step whose agent did
+not run now (cached, skipped) has none of them. `warden why`, MCP `verify` and
+`warden axi verify` show all of it.
 
 A note written without a profile has none of them and is byte for byte what it
 was before. A warden older than this feature that meets a profiled note drops
@@ -267,6 +272,8 @@ judged, so it cannot vouch for that checkout. It is single-commit only; with
 | Each required pre-push step (`credentials, lint, test`; strict adds `security-scan, review`) has a recorded outcome that counts | | executed, cached or predicted | executed only |
 | Each required shell step (`lint`, `test`, `security-scan`) has a complete Linux container execution record | | | yes |
 | Each required shell step ran with network `none` | | | yes |
+| Every agent step that executed has `isolated: true` and `tree_unchanged: true` | | yes | yes |
+| Every agent step that executed has `env_allowlisted: true` | | | yes |
 | Where the approval gate needed a decision, it was answered by `tty` or `tui`, not `auto` | | yes | yes |
 
 The network clause is checked separately from the container record:
@@ -277,16 +284,15 @@ A cached or predicted result reuses a pass recorded for identical inputs on an
 earlier run, so standard counts it. Strict does not: the note does not
 describe that earlier run.
 
-**Not checked in this release.** strict@1 also defines two clauses that the
-signed note cannot support yet, because it does not record the observations
-they need. `--min-profile strict` does not check them, and its output says so
-on every pass:
+An agent step is one the note says an agent ran, a built-in agent step, or a
+step the policy handed to an agent. A missing boundary observation fails the
+same way a `false` one does.
 
-- every agent step ran isolated, with the canonical tree and HEAD unchanged;
-- a commit that declares an agent carries a notarized Agent Trace.
-
-They become checkable when the note records agent isolation and authorship
-signals.
+**Not checked in this release.** strict@1 also requires that a commit that
+declares an agent carries a notarized Agent Trace. The signed note does not
+record authorship signals yet, so `--min-profile strict` does not check it,
+and its output says so on every pass. It becomes checkable when the note
+records them.
 
 A [version 2 requirements file](execution-contracts.md#version-2-a-minimum-profile)
 can demand the same minimum from protected CI policy. The GitHub
@@ -301,8 +307,8 @@ profile across yet, so setting it fails the gate.
 These parts of the design need runtime or verifier work that later releases
 add. In this release a profile does **not**:
 
-- record agent isolation (the boundary observations above) or authorship
-  signals in the signed note;
+- record authorship signals in the signed note, so `verify --min-profile
+  strict` cannot check the Agent Trace clause;
 - check a minimum profile across a range (`verify --range`, the
   `warden-gate` action); only single-commit `verify --min-profile` exists;
 - refuse host cache hits or predictions for required steps while the gate
