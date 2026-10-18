@@ -36,6 +36,10 @@ type VerifyResult struct {
 	// delivery can say nothing but "unverified", sending someone to look for a
 	// missing note that is sitting right there.
 	ExternalRefused bool
+	// Conformance holds one report per minimum compliance profile the caller
+	// demanded (--min-profile, or a version 2 requirements file). Empty when
+	// none was demanded.
+	Conformance []ConformanceReport
 }
 
 // ExternalPolicy decides whether a verification accepts an external-run
