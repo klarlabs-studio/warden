@@ -19,6 +19,9 @@ fi
 if [[ -n "${WARDEN_CONTAINER_IMAGE_ID:-}" ]]; then
   REQUIREMENTS+=(--container-image-id "$WARDEN_CONTAINER_IMAGE_ID")
 fi
+if [[ -n "${WARDEN_MIN_PROFILE:-}" ]]; then
+  REQUIREMENTS+=(--min-profile "$WARDEN_MIN_PROFILE")
+fi
 
 if warden "${REQUIREMENTS[@]}" --quiet; then
   echo "validated=true" >> "$GITHUB_OUTPUT"

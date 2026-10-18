@@ -36,6 +36,15 @@ inputs:
     description: "Optional inspected sha256 image ID to require with container-steps."
     required: false
     default: ""
+  min-profile:
+    description: >-
+      Optional minimum compliance profile (permissive, standard or strict) the
+      note must conform to, recomputed from its signed observations rather than
+      the recorded name. Single-commit only. Requires a warden release
+      supporting --min-profile; an older binary rejects the flag, so validated
+      is false and CI runs its checks.
+    required: false
+    default: ""
   warden-version:
     description: "warden version to install (e.g. v0.18.16, or 'latest')."
     required: false
@@ -95,4 +104,5 @@ runs:
         WARDEN_REQUIREMENTS: ${{ inputs.requirements }}
         WARDEN_CONTAINER_STEPS: ${{ inputs.container-steps }}
         WARDEN_CONTAINER_IMAGE_ID: ${{ inputs.container-image-id }}
+        WARDEN_MIN_PROFILE: ${{ inputs.min-profile }}
       run: bash "$GITHUB_ACTION_PATH/verify.sh"

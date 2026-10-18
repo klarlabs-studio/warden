@@ -46,6 +46,16 @@ inputs:
     description: "Remote holding refs/notes/warden."
     required: false
     default: origin
+  min-profile:
+    description: >-
+      Optional minimum compliance profile (permissive, standard or strict).
+      Passed to `warden verify --range` as --min-profile. No released warden
+      checks a profile across a range yet: the current release refuses the
+      combination and an older one rejects the flag, so setting this input
+      FAILS the gate until a release that supports it. It never passes a
+      range it did not check.
+    required: false
+    default: ""
   warden-version:
     description: "warden version to install (a module version like v0.14.0, or 'latest')."
     required: false
@@ -88,6 +98,7 @@ runs:
         KEY: ${{ inputs.key }}
         REQUIRE_SIGNED: ${{ inputs.require-signed }}
         SKIP_MERGES: ${{ inputs.skip-merges }}
+        MIN_PROFILE: ${{ inputs.min-profile }}
       run: |
         set -euo pipefail
         BASE="${IN_BASE:-${PR_BASE:-$PUSH_BEFORE}}"
@@ -106,6 +117,7 @@ runs:
         [ "$REQUIRE_SIGNED" = "true" ] && ARGS+=(--require-signed)
         [ "$SKIP_MERGES" != "true" ] && ARGS+=(--skip-merges=false)
         [ -n "$KEY" ] && ARGS+=(--key "$KEY")
+        [ -n "$MIN_PROFILE" ] && ARGS+=(--min-profile "$MIN_PROFILE")
         echo "+ warden ${ARGS[*]}"
         if warden "${ARGS[@]}"; then
           {
