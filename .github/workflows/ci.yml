@@ -97,3 +97,77 @@ jobs:
       # See the note in e2e/e2e_test.go.
       - name: Run e2e tests
         run: WARDEN_E2E=1 go test ./e2e/ -v -count=1
+
+  # The same live boundary checks as the Docker run above, against the other
+  # two Docker-compatible engines warden supports. Both run ROOTLESS, as the
+  # runner user, because that is the only way warden can drive them: warden
+  # invokes the engine CLI as the user who runs the hook, and rootful
+  # nerdctl/Podman would need warden itself to run as root.
+  container-runtimes:
+    name: Container runtime (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    needs: [ci]
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [podman, nerdctl]
+    env:
+      WARDEN_CONTAINER_TEST_RUNTIME: ${{ matrix.runtime }}
+      WARDEN_CONTAINER_TEST_IMAGE: docker.io/library/alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+      NERDCTL_VERSION: 2.4.1
+      NERDCTL_SHA256: ff018f11ac2f1354bf7b3aaaca6e0b52d81139c746a89134744d0b7be3a0e62f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Configure git identity
+        run: |
+          git config --global user.email ci@warden.test
+          git config --global user.name ci
+      # Podman ships on the Ubuntu runner image. Fail here, not in a skipped
+      # test, if that ever stops being true.
+      - name: Check Podman
+        if: matrix.runtime == 'podman'
+        run: |
+          podman version
+          podman info --format 'rootless={{.Host.Security.Rootless}}'
+      # nerdctl-full bundles containerd, runc, RootlessKit, slirp4netns, CNI
+      # and BuildKit. Rootless containerd runs as a systemd user service, so
+      # the runner user needs a lingering user manager. Ubuntu 24.04 confines
+      # unprivileged user namespaces through AppArmor; RootlessKit needs the
+      # profile nerdctl's rootless guide documents.
+      - name: Install rootless nerdctl
+        if: matrix.runtime == 'nerdctl'
+        run: |
+          archive="nerdctl-full-${NERDCTL_VERSION}-linux-amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$archive" "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/${archive}"
+          echo "${NERDCTL_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          sudo tar -C /usr/local -xzf "$RUNNER_TEMP/$archive"
+          cat <<'PROFILE' | sudo tee /etc/apparmor.d/usr.local.bin.rootlesskit >/dev/null
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/local/bin/rootlesskit flags=(unconfined) {
+            userns,
+            include if exists <local/usr.local.bin.rootlesskit>
+          }
+          PROFILE
+          sudo systemctl reload apparmor.service
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          for _ in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          containerd-rootless-setuptool.sh install
+          nerdctl version
+          nerdctl info --format '{{json .SecurityOptions}}'
+      # Tests never pull images themselves. Preload the pinned fixture into
+      # this engine's own store so the scenarios execute instead of skipping.
+      - name: Load pinned container fixture
+        run: ${{ matrix.runtime }} pull "$WARDEN_CONTAINER_TEST_IMAGE"
+      - name: Test ${{ matrix.runtime }} execution boundary
+        run: go test -race ./internal/infrastructure/steps -run '^TestContainerExecutionIntegration$' -count=1 -v
+      # -count=1 for the same reason as the e2e job above.
+      - name: Run golden-fleet container scenarios
+        run: WARDEN_E2E=1 go test ./e2e/ -run '^TestGoldenFleet_(ContainerEvidenceRequiresObservedExecution|StagedPredictionIsLocalExactAndInvalidated)$' -v -count=1
