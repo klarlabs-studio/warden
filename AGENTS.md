@@ -11,7 +11,7 @@ Review mode: critique hard on correctness (esp. provenance/security invariants),
 Project: warden (klarlabs OSS) — a local provenance git-gate.
 Module: `go.klarlabs.de/warden` (vanity). Repo: klarlabs-studio/warden.
 What it does: runs a validation pipeline in disposable per-step worktrees, records commit-bound provenance RunRecords, gates pushes on attestation. Cosign-keyless signed releases (goreleaser + SBOM + npm + GHCR, triggered by a `v*` tag).
-Phase: active — v0.33.0 released 2026-09-15. PR #276 merged 2026-10-03 with trusted-signed provenance. Publication reporting, Windows compilation, and remediation queue hygiene are the live areas.
+Phase: active — v0.35.0 released 2026-10-18 (Husky bridge, hook activation checks); v0.34.0 added container execution and predictive staged checks.
 Stack: Go 1.26.3 (toolchain go1.26.7). Key subsystems: `internal/infrastructure/git` (worktrees, notes, dep exposure), `internal/domain` (policy, runrecord, audit states), `internal/infrastructure/kernel` (build/executor), `internal/application` (runner, ports), `internal/service` (verify, doctor, reattest, attest-external).
 
 ## Constraints

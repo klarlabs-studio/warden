@@ -6,6 +6,95 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-18
+
+A minor release: `warden init` and `warden hooks enable` now refuse a
+repository whose Git hook directory points somewhere else, which used to
+succeed and leave the gate silently unarmed.
+
+### Added
+
+- **`warden import` bridges Husky.** A root `.husky/pre-commit` script used to
+  be ignored, so adopting warden could drop checks that lived only in the hook.
+  Import now keeps it as its own step beside the inferred commands. The step
+  runs the script in warden's staged worktree, with local Node binaries on
+  `PATH`, a fail-fast shell and Husky enabled. It is scheduled as a writer, and
+  a script that changes tracked files or the index is rejected: checking
+  rewritten files must not approve the original staged snapshot. Only the root
+  `pre-commit` hook is imported; hooks that need remote-ref input or a commit
+  message still need explicit configuration. (#282)
+
+### Changed
+
+- **Hook activation is verified, not assumed.** warden asks Git for the
+  effective hook directory before `init` or `hooks enable`. A
+  `core.hooksPath` that points elsewhere (Husky sets one) now fails before any
+  shim, configuration or adoption point is written, and `warden status`
+  reports shims Git cannot see as inactive. Selecting the normal directory
+  explicitly is accepted. warden never changes Git configuration itself.
+  Linked worktrees install, inspect, repin and remove shims in Git's shared
+  hook directory. (#282)
+
+### Fixed
+
+- **Nox remediation cleanup works.** Every scheduled run had failed closing
+  superseded PRs with `403 Forbidden`, because the request carried no
+  `User-Agent`. It now sends one, and an API failure includes the start of
+  GitHub's answer. (#283)
+
+### Security
+
+- `golang.org/x/crypto` v0.57.0, `golang.org/x/net` v0.60.0, with `x/sys`
+  v0.48.0 and `x/text` v0.42.0, redone with signed provenance from the bot's
+  #280. (#284)
+
+## [0.34.0] - 2026-10-17
+
+### Added
+
+- **Container execution (opt-in).** Configure an execution image and warden
+  finds Apple container, Docker, Podman or nerdctl, or uses the runtime you
+  name. Checks run in disposable worktrees with networking off by default, and
+  the inspected image identity is recorded in provenance. Without an image,
+  checks run on the host as before. Explicit runtime selection fails closed.
+  See `docs/container-execution.md`. (#281)
+- **Signed execution contracts.** Fresh container checks bind their command,
+  effective configuration, Git tree, dependency inputs and observed
+  environment into signed provenance. `warden verify --requirements` checks
+  that evidence against a consumer policy, and `--container-steps` can require
+  container execution for named steps. See `docs/execution-contracts.md`.
+  (#281)
+- **Predictive staged validation.** With `predictive_cache` on, `warden watch
+  --staged` checks staged snapshots in the background, and pre-commit can
+  reuse a recent signed, exact-match prediction. Predictions publish no notes
+  and never stand in for fresh pre-push checks. See
+  `docs/predictive-cache.md`. (#281)
+
+### Changed
+
+- The GitHub verification action requires an explicit trusted-key pin before
+  it reports validated evidence. (#281)
+
+## [0.33.1] - 2026-10-03
+
+### Fixed
+
+- **Incomplete provenance is reported.** A passing run could leave a commit's
+  note missing or unpublished and still report success. Results in the CLI,
+  axi and MCP now say whether the note is `missing`, `local` or `published`
+  and whether warden pushed the branch; exit code 4 marks incomplete
+  publication and stops pending pushes and success statuses. (#277)
+- **Signing happens before the branch is published.** A signing failure could
+  occur after the branch had already been pushed while the result said
+  nothing was. warden now signs the commit-bound evidence first. (#278)
+- **Audit gaps closed.** A run refuses dirty tracked or index state; the hook's
+  ref and SHA must match the checked-out branch; multi-branch and renaming
+  pushes fail with instructions; carried external evidence can no longer
+  become trusted local validation; re-attestation publication errors
+  propagate. (#279)
+- Windows amd64 and arm64 compile in CI, so a Unix-only file can no longer
+  break the release build. (#277)
+
 ## [0.33.0] - 2026-09-15
 
 A minor release rather than a patch: `warden init` no longer moves the adoption
