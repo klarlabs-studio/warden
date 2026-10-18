@@ -13,8 +13,8 @@ the pipeline fails (enforcement).
 
 | | Status |
 |---|---|
-| `templates/verify.yml` in this repository | Ships in the first release after 0.35.0 |
-| `include: remote:` from a release tag's raw URL | Works once that release is tagged. Until then, pin a `main` commit SHA instead of a tag |
+| `templates/verify.yml` in this repository | Shipped in 0.36.0 |
+| `include: remote:` from a release tag's raw URL | Works from `v0.36.0`: pin the tag, or a commit SHA for an immutable include |
 | `include: component:` from the GitLab CI/CD Catalog | **Not published.** No GitLab catalog project mirrors warden yet. The layout (`templates/<name>.yml` with `spec: inputs:`) is what a catalog project needs, so mirroring the repository is enough. The component path below is the shape it will have, not an address that resolves today |
 | Range gate (`warden-gate`), `warden-doctor`, `warden-reattest` for GitLab | Not ported. This template verifies one commit |
 | Windows (PowerShell) runners | Not supported. The job needs a POSIX shell and bash |
@@ -84,7 +84,7 @@ candidate commit can edit `.gitlab-ci.yml`.
 | `container-steps` | `''` | Checks that must carry trusted container execution evidence. |
 | `container-image-id` | `''` | The inspected `sha256:` image ID required with `container-steps`. |
 | `remote` | `origin` | The remote that holds `refs/notes/warden`. |
-| `warden-version` | `0.35.0` | The warden release to install. It must be an exact version, 0.29.0 or newer. |
+| `warden-version` | `0.36.0` | The warden release to install. It must be an exact version, 0.29.0 or newer. |
 | `stage` | `.pre` | The stage the job runs in. |
 | `image` | `buildpack-deps:bookworm-scm` | The job image. It needs bash, git, curl, tar, mktemp and sha256sum or shasum. |
 
