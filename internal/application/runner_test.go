@@ -889,10 +889,40 @@ func TestRunner_BatchStepErrorStillRemovesWorktree(t *testing.T) {
 	}
 }
 
-// fakeSBOM returns a scripted manifest.
-type fakeSBOM struct{ manifests []domain.DependencyManifest }
+// fakeSBOM returns a scripted manifest and, when revs is set, records the
+// commit it was asked to read.
+type fakeSBOM struct {
+	manifests []domain.DependencyManifest
+	revs      *[]string
+}
 
-func (f fakeSBOM) Collect(string) []domain.DependencyManifest { return f.manifests }
+func (f fakeSBOM) Collect(_, rev string) []domain.DependencyManifest {
+	if f.revs != nil {
+		*f.revs = append(*f.revs, rev)
+	}
+	return f.manifests
+}
+
+// The SBOM must describe the commit the note attests. A step can rewrite the
+// tree, so the worktree's HEAD at seed time and the attested commit can differ;
+// the collector must be handed the SHA the note is keyed by.
+func TestRunner_PrePushSBOMReadsTheAttestedCommit(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha2"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	var revs []string
+	r.SBOM = fakeSBOM{revs: &revs, manifests: []domain.DependencyManifest{{Ecosystem: "go", Path: "go.sum", Digest: "sha256:abc"}}}
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if git.note.CommitSHA == "" {
+		t.Fatal("no note was written")
+	}
+	if len(revs) != 1 || revs[0] != git.note.CommitSHA {
+		t.Fatalf("SBOM read %q, want exactly the attested commit %q", revs, git.note.CommitSHA)
+	}
+}
 
 func TestRunner_PrePushAttachesSignedSBOM(t *testing.T) {
 	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
