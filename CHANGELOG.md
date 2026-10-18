@@ -8,6 +8,36 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **Compliance profiles, the reader.** A repository where agents commit had no
+  single setting that said "these checks always run, in a container, and no
+  child config can weaken that". Each part was a separate key, and `extends:` or
+  a rule could lower any of them without a trace. The new `profile:` key selects
+  a built-in level: `permissive`, `standard` or `strict` (a bare name always
+  means version 1; `strict@1` also works). The level's defaults become the
+  lowest layer under the extends chain: standard and strict turn on
+  `signing.required` and a 10-minute timeout for agent steps, and strict
+  defaults `execution.network` to `none`. Its floors are then checked against
+  the merged config. Missing required steps, a rule that skips one, a required
+  shell step with no command, and under strict host execution, a network other
+  than `none`, auto-fix or kept writes on an agent step, or an agent timeout of
+  `"0"` all fail the load, before anything runs. The error names each field and
+  the file that set it. A child that names a lower profile than it inherits is
+  a load error naming both files. Under a profile, the top-level `agent:` now
+  applies to `intent`, `review` and `document` when it names a bundled preset;
+  without one it stays inert, as before. `warden policy explain`, MCP
+  `policy_explain` and `axi policy-explain` show the profile, its digest and
+  each floor. Nothing new is written to notes yet, and a repository without
+  `profile:` loads, resolves and writes notes exactly as before. Older wardens
+  reject the key, so upgrade every reader to this release before committing
+  it. Agent isolation, the agent environment, approval, signed profile records
+  and `verify --min-profile` come in later releases. See
+  [Compliance profiles](docs/agent-profiles.md) and
+  [ADR 0007](docs/adr/0007-agent-compliance-profiles.md).
+- **An unknown config key says it may need a newer warden.** A config written
+  for a newer release failed on an older one with a bare `field X not found in
+  type domain.Config`. The error now adds a hint naming the running version.
+  Every future key benefits.
+
 - **GitLab CI gets the provenance handshake.** GitLab users had no counterpart
   to the `warden-verify` action. `templates/verify.yml` is a GitLab CI/CD
   component. It adds a `warden-verify` job that checks the checked-out commit
