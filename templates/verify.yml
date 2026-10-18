@@ -1,0 +1,349 @@
+# warden-verify for GitLab CI — the GitLab side of the remote CI handshake.
+#
+# Verifies that the checked-out commit carries a signed, commit-bound warden
+# provenance note (refs/notes/warden) from an explicitly pinned signer, and
+# optionally that it meets protected execution requirements. The verdict is the
+# job's exit status and a dotenv artifact (warden-verify.env) that later jobs
+# read through the `.warden-skip-if-verified` helper defined below.
+#
+# Consumed as a CI/CD component (`include: component:`) once mirrored to a
+# GitLab catalog project, or directly with `include: remote:` pinned to a warden
+# release tag. See docs/gitlab-ci.md.
+#
+# Every input is interpolated into the job scripts LITERALLY at pipeline
+# creation, so a pipeline or project variable cannot override a pinned key,
+# commit or mode at run time. An input whose value is a single variable
+# reference ($NAME or ${NAME}) is expanded at run time by choice — and then
+# carries that variable's precedence rules, which docs/gitlab-ci.md spells out.
+spec:
+  inputs:
+    stage:
+      description: Stage the warden-verify job runs in.
+      default: .pre
+    image:
+      description: >-
+        Image for the job. Needs bash, git, curl, tar, mktemp and sha256sum (or
+        shasum). Pin it by digest, or point it at an internal mirror.
+      default: buildpack-deps:bookworm-scm
+    commit:
+      description: >-
+        Commit to verify. HEAD is the commit the runner checked out, which a
+        pipeline variable cannot redirect. A $VARIABLE reference is expanded at
+        run time.
+      default: HEAD
+      regex: '^([0-9A-Za-z][0-9A-Za-z._/-]*|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)$'
+    remote:
+      description: Remote holding refs/notes/warden.
+      default: origin
+      regex: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    key:
+      description: >-
+        Trusted signer key(s) or fingerprint(s), comma-separated. Without a
+        non-empty pin nothing is ever validated. Get a fingerprint with
+        `warden key show`. A $VARIABLE reference is expanded at run time.
+      default: ''
+      regex: '^([A-Za-z0-9+/=, ]*|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)$'
+    requirements:
+      description: >-
+        Optional path to a protected JSON execution-requirements file, normally
+        a File-type CI/CD variable ($WARDEN_REQUIREMENTS). Refused when it
+        resolves inside the checkout under test.
+      default: ''
+      regex: '^([A-Za-z0-9._/ -]*|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)$'
+    container-steps:
+      description: Optional comma-separated checks that must carry trusted container execution evidence.
+      default: ''
+      regex: '^[A-Za-z0-9_.,-]*$'
+    container-image-id:
+      description: Optional inspected sha256 image ID to require with container-steps.
+      default: ''
+      regex: '^(sha256:[0-9a-f]{64})?$'
+    warden-version:
+      description: >-
+        warden release to install (0.29.0 or newer: it must publish a cosign
+        bundle for checksums.txt). An exact version; "latest" is not accepted.
+      default: '0.35.0'
+      regex: '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
+    on-unverified:
+      description: >-
+        fail — the job fails unless the commit is validated (enforcement).
+        run-checks — the job succeeds with WARDEN_VALIDATED=false, so downstream
+        jobs run their checks (provenance-skip). Configuration and install
+        errors fail the job in both modes.
+      default: fail
+      options: [fail, run-checks]
+---
+warden-verify:
+  stage: $[[ inputs.stage ]]
+  image: $[[ inputs.image ]]
+  # Isolate the job from a project-wide `default:` that assumes another image.
+  before_script: []
+  after_script: []
+  script:
+    - export WARDEN_BIN_DIR="$(mktemp -d)"
+    - |
+      # warden: install
+      # A released binary, verified before it runs: the cosign binary against a
+      # digest pinned here, checksums.txt against warden's keyless release
+      # signature, the archive against checksums.txt. No `latest`, no source
+      # fallback — each would break the chain from this pinned file to the
+      # binary that renders the verdict.
+      cat > "$WARDEN_BIN_DIR/install.sh" <<'WARDEN_SCRIPT'
+      set -euo pipefail
+      ver='$[[ inputs.warden-version ]]'
+      ver="${ver#v}"
+      refuse_version() {
+        echo "warden-verify: refusing version '$ver': expected a release tag like 0.35.0" >&2
+        exit 1
+      }
+      # The alphabet check first: a regex alone can be satisfied line by line.
+      case "$ver" in "" | *[!0-9A-Za-z.+-]*) refuse_version ;; esac
+      [[ $ver =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || refuse_version
+      if [ -z "${WARDEN_BIN_DIR:-}" ] || [ ! -d "$WARDEN_BIN_DIR" ]; then
+        echo "warden-verify: WARDEN_BIN_DIR is not a directory" >&2
+        exit 1
+      fi
+
+      os=$(uname -s | tr '[:upper:]' '[:lower:]')
+      arch=$(uname -m)
+      case "$arch" in x86_64 | amd64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; esac
+
+      # cosign v3.0.6, the release that signs warden's checksums. Digests from
+      # sigstore's cosign_checksums.txt, itself verified against sigstore's
+      # keyless release identity before being copied here.
+      cosign_version=v3.0.6
+      case "$os-$arch" in
+        linux-amd64) cosign_sha=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 ;;
+        linux-arm64) cosign_sha=bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8 ;;
+        darwin-amd64) cosign_sha=4c3e7af8372d3ca3296e62fa56f23fcbb5721cc6ac1827900d398f110d7cd280 ;;
+        darwin-arm64) cosign_sha=5fadd012ae6381a6a29ff86a7d39aa873878852f1073fc90b15995961ecfb084 ;;
+        *)
+          echo "warden-verify: unsupported runner platform ${os}/${arch}" >&2
+          exit 1
+          ;;
+      esac
+
+      if command -v sha256sum >/dev/null 2>&1; then
+        digest() { sha256sum "$1" | awk '{print $1}'; }
+      elif command -v shasum >/dev/null 2>&1; then
+        digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+      else
+        echo "warden-verify: need sha256sum or shasum to verify downloads" >&2
+        exit 1
+      fi
+
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      fetch() { curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -o "$1" "$2"; }
+      install_failed() {
+        echo "warden-verify: $*" >&2
+        echo "warden-verify: NOTHING WAS VERIFIED — this is an install failure, not a provenance verdict." >&2
+        exit 1
+      }
+
+      fetch "$tmp/cosign" "https://github.com/sigstore/cosign/releases/download/${cosign_version}/cosign-${os}-${arch}" ||
+        install_failed "could not download cosign ${cosign_version}"
+      got=$(digest "$tmp/cosign")
+      [ "$got" = "$cosign_sha" ] ||
+        install_failed "COSIGN DIGEST MISMATCH (expected $cosign_sha, got $got); refusing to run it"
+      chmod +x "$tmp/cosign"
+
+      repo=klarlabs-studio/warden
+      archive="warden_${ver}_${os}_${arch}.tar.gz"
+      base="https://github.com/${repo}/releases/download/v${ver}"
+      for f in "$archive" checksums.txt checksums.txt.bundle; do
+        fetch "$tmp/$f" "$base/$f" ||
+          install_failed "could not download $f for v${ver} (releases before 0.29.0 publish no checksums.txt.bundle)"
+      done
+
+      # Keyless: the certificate must name warden's release workflow at exactly
+      # this tag, issued to GitHub Actions' OIDC identity.
+      "$tmp/cosign" verify-blob \
+        --bundle "$tmp/checksums.txt.bundle" \
+        --certificate-identity "https://github.com/${repo}/.github/workflows/release.yml@refs/tags/v${ver}" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        "$tmp/checksums.txt" ||
+        install_failed "checksums.txt for v${ver} does not carry warden's release signature"
+
+      want=$(awk -v f="$archive" '$2 == f {print $1}' "$tmp/checksums.txt" | head -n1)
+      got=$(digest "$tmp/$archive")
+      if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        install_failed "CHECKSUM MISMATCH for $archive (expected ${want:-<none published>}, got $got)"
+      fi
+      tar -xzf "$tmp/$archive" -C "$tmp" warden
+      cp "$tmp/warden" "$WARDEN_BIN_DIR/warden"
+      chmod 0755 "$WARDEN_BIN_DIR/warden"
+      "$WARDEN_BIN_DIR/warden" --version
+      WARDEN_SCRIPT
+      bash "$WARDEN_BIN_DIR/install.sh"
+    - |
+      # warden: verify
+      cat > "$WARDEN_BIN_DIR/verify.sh" <<'WARDEN_SCRIPT'
+      set -euo pipefail
+      in_commit='$[[ inputs.commit ]]'
+      in_remote='$[[ inputs.remote ]]'
+      in_key='$[[ inputs.key ]]'
+      in_requirements='$[[ inputs.requirements ]]'
+      in_container_steps='$[[ inputs.container-steps ]]'
+      in_container_image_id='$[[ inputs.container-image-id ]]'
+      mode='$[[ inputs.on-unverified ]]'
+
+      project_dir="${CI_PROJECT_DIR:-$PWD}"
+      verdict_file="$project_dir/warden-verify.env"
+      sha=""
+
+      # The verdict file is written FIRST, false, and rewritten on every exit
+      # path, so a job that dies anywhere leaves "not validated" behind rather
+      # than a file from somewhere else. rm before write: a tracked symlink of
+      # that name must not redirect the write.
+      record() {
+        rm -f -- "$verdict_file"
+        printf 'WARDEN_VALIDATED=%s\nWARDEN_VERDICT=%s\nWARDEN_VERIFIED_COMMIT=%s\n' "$1" "$2" "$sha" >"$verdict_file"
+      }
+      config_error() {
+        record false error
+        echo "warden-verify: $*" >&2
+        echo "warden-verify: NOTHING WAS VERIFIED — a configuration or environment error, not a provenance verdict." >&2
+        exit 2
+      }
+      conclude() {
+        record "$1" "$2"
+        if [ "$1" = true ]; then
+          echo "warden-verify: $sha carries trusted, commit-bound provenance (WARDEN_VALIDATED=true)."
+          echo "warden-verify: skip only checks equivalent to the ones that note records."
+          exit 0
+        fi
+        echo "warden-verify: $3 (WARDEN_VERDICT=$2)" >&2
+        if [ "$mode" = run-checks ]; then
+          echo "warden-verify: WARDEN_VALIDATED=false — downstream jobs must run their checks."
+          exit 0
+        fi
+        echo "warden-verify: failing the job (on-unverified: fail)." >&2
+        exit 1
+      }
+      record false not-run
+
+      # $NAME / ${NAME} is a run-time variable reference; anything else is the
+      # literal value interpolated at pipeline creation.
+      expand() {
+        local re='^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$'
+        if [[ $1 =~ $re ]]; then
+          local name="${BASH_REMATCH[1]}"
+          printf '%s' "${!name-}"
+        else
+          printf '%s' "$1"
+        fi
+      }
+      commit=$(expand "$in_commit")
+      keys=$(expand "$in_key")
+      requirements=$(expand "$in_requirements")
+      remote="$in_remote"
+
+      case "$mode" in fail | run-checks) ;; *) config_error "on-unverified must be fail or run-checks" ;; esac
+      [[ $remote =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || config_error "invalid remote name"
+      [[ $commit =~ ^[0-9A-Za-z][0-9A-Za-z._/-]*$ ]] || config_error "invalid commit '$commit'"
+      [[ $keys =~ ^[A-Za-z0-9+/=,[:space:]]*$ ]] || config_error "key holds characters no key or fingerprint uses"
+      [[ $in_container_steps =~ ^[A-Za-z0-9_.,-]*$ ]] || config_error "invalid container-steps"
+      [[ $in_container_image_id =~ ^(sha256:[0-9a-f]{64})?$ ]] || config_error "invalid container-image-id"
+      if [ -z "${WARDEN_BIN_DIR:-}" ] || [ ! -x "$WARDEN_BIN_DIR/warden" ]; then
+        config_error "no installed warden at \$WARDEN_BIN_DIR/warden"
+      fi
+      git rev-parse --git-dir >/dev/null 2>&1 ||
+        config_error "not inside a git checkout (GIT_STRATEGY: none?) — warden verifies the checked-out repository"
+
+      # Policy must never come from the candidate under test.
+      if [ -n "$requirements" ]; then
+        [ -f "$requirements" ] || config_error "requirements file '$requirements' does not exist"
+        req_real=$(cd "$(dirname -- "$requirements")" && pwd -P)/$(basename -- "$requirements")
+        if command -v realpath >/dev/null 2>&1; then req_real=$(realpath -- "$requirements"); fi
+        project_real=$(cd "$project_dir" && pwd -P)
+        case "$req_real" in
+          "$project_real"/*) config_error "requirements resolve inside the checkout under test ($req_real); load them from a protected File-type CI/CD variable" ;;
+        esac
+      fi
+
+      # GitLab fetches shallow and detached; a commit other than HEAD may not be
+      # present. Fetch just that object before giving up on it.
+      if ! sha=$(git rev-parse --verify --quiet "${commit}^{commit}"); then
+        git fetch --quiet --no-tags --depth=1 -- "$remote" "$commit" >/dev/null 2>&1 || true
+        if ! sha=$(git rev-parse --verify --quiet "${commit}^{commit}"); then
+          sha=""
+          config_error "cannot resolve commit '$commit' in this checkout"
+        fi
+      fi
+
+      if [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
+        echo "warden-verify: this checks one commit. A squash or merge commit GitLab creates is a new sha no developer's warden gated; it carries no note."
+      fi
+      if [ "${CI_MERGE_REQUEST_EVENT_TYPE:-}" = merged_result ] && [ "$sha" = "$(git rev-parse HEAD)" ]; then
+        echo "warden-verify: merged-results pipeline — HEAD is GitLab's ephemeral merge commit, which carries no note, so it will not verify."
+      fi
+
+      if [[ -z "${keys//[[:space:],]/}" ]]; then
+        conclude false no-key "no trusted key pinned (input 'key'); only an explicitly pinned signer may authorize skipping checks"
+      fi
+
+      # The verdict rests on what the remote publishes. A notes ref left behind
+      # in a reused build directory is discarded, and the remote's replaces it
+      # outright: a verifier has no unpublished notes of its own to protect.
+      git update-ref -d refs/notes/warden >/dev/null 2>&1 || true
+      set +e
+      listing=$(git ls-remote -- "$remote" refs/notes/warden)
+      status=$?
+      set -e
+      [ "$status" -eq 0 ] || conclude false notes-unreachable "could not read refs/notes/warden from '$remote' (git exit $status)"
+      [ -n "$listing" ] || conclude false no-notes "'$remote' publishes no refs/notes/warden, so no commit there carries a warden note"
+      git fetch --quiet --no-tags -- "$remote" '+refs/notes/warden:refs/notes/warden' ||
+        conclude false notes-unreachable "could not fetch refs/notes/warden from '$remote'"
+
+      args=(verify --commit "$sha" --key "$keys")
+      if [ -n "$requirements" ]; then args+=(--requirements "$requirements"); fi
+      if [ -n "$in_container_steps" ]; then args+=(--container-steps "$in_container_steps"); fi
+      if [ -n "$in_container_image_id" ]; then args+=(--container-image-id "$in_container_image_id"); fi
+      echo "+ warden ${args[*]}"
+      set +e
+      "$WARDEN_BIN_DIR/warden" "${args[@]}" </dev/null
+      status=$?
+      set -e
+      case "$status" in
+        0) conclude true validated "" ;;
+        1) conclude false unverified "$sha does not carry trusted provenance" ;;
+        *) config_error "warden verify could not decide (exit $status)" ;;
+      esac
+      WARDEN_SCRIPT
+      bash "$WARDEN_BIN_DIR/verify.sh"
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - warden-verify.env
+    reports:
+      dotenv: warden-verify.env
+
+# Reuse this in a downstream job that `needs: [warden-verify]`:
+#
+#   test:
+#     needs: [warden-verify]
+#     before_script:
+#       - !reference [.warden-skip-if-verified, before_script]
+#     script: [make test]
+#
+# It reads the verdict FILE, not the WARDEN_VALIDATED variable: a pipeline
+# variable outranks a dotenv variable and could forge it, but cannot forge an
+# artifact. The file must be the artifact (not tracked in the commit) and must
+# name the commit this job checked out. GitLab runs before_script and script in
+# one shell, so `exit 0` here ends the job successfully without the checks.
+.warden-skip-if-verified:
+  before_script:
+    - |
+      # warden: skip-if-verified
+      if command -v git >/dev/null 2>&1 &&
+        [ -f warden-verify.env ] && [ ! -L warden-verify.env ] &&
+        ! git ls-files --error-unmatch -- warden-verify.env >/dev/null 2>&1 &&
+        warden_head=$(git rev-parse --verify HEAD 2>/dev/null) &&
+        grep -qx 'WARDEN_VALIDATED=true' warden-verify.env &&
+        grep -qx "WARDEN_VERIFIED_COMMIT=$warden_head" warden-verify.env; then
+        echo "warden: $warden_head carries trusted provenance (warden-verify); skipping this job's checks."
+        exit 0
+      fi
+      echo "warden: no trusted warden verdict for this checkout; running the checks."

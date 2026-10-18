@@ -6,6 +6,29 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **GitLab CI gets the provenance handshake.** GitLab users had no counterpart
+  to the `warden-verify` action. `templates/verify.yml` is a GitLab CI/CD
+  component. It adds a `warden-verify` job that checks the checked-out commit
+  for a signed, commit-bound note from a pinned key, and optionally for
+  execution requirements. The job fetches `refs/notes/warden` into GitLab's
+  shallow, detached clone itself, and replaces any notes left in a reused build
+  directory. The verdict is the job's exit status plus a `warden-verify.env`
+  dotenv artifact. A `.warden-skip-if-verified` helper lets downstream jobs exit
+  early on a validated commit. It reads the artifact file, not the variable,
+  because a pipeline variable can override a dotenv value. With
+  `on-unverified: fail` (the default) the pipeline fails instead. A missing key,
+  note or signature, an untrusted signer, or a note bound to another commit
+  never validates. The job installs an exact warden release only after checking
+  a pinned cosign digest, warden's keyless release signature over
+  `checksums.txt`, and the archive digest. Inputs go into the script as written,
+  so a pipeline variable cannot replace a pinned key. Use it today with
+  `include: remote:` pinned to a release. No GitLab catalog project mirrors it
+  yet, so `include: component:` does not resolve. It was tested by running its
+  scripts against real signed notes, not on a GitLab instance. See
+  [GitLab CI](docs/gitlab-ci.md).
+
 ## [0.35.0] - 2026-10-18
 
 A minor release: `warden init` and `warden hooks enable` now refuse a
