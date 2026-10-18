@@ -55,7 +55,8 @@ func TestForgeConfig_ZeroValueRejects(t *testing.T) {
 }
 
 func TestForgeConfig_AcceptAndKeyDefaulting(t *testing.T) {
-	cfg := ForgeConfig{AcceptAuthored: true}
+	yes := true
+	cfg := ForgeConfig{AcceptAuthored: &yes}
 	if cfg.Policy() != ForgeAccept {
 		t.Error("accept_authored: true must select ForgeAccept")
 	}
@@ -64,7 +65,7 @@ func TestForgeConfig_AcceptAndKeyDefaulting(t *testing.T) {
 	if got := cfg.ForgeKeys(); len(got) != len(GitHubWebFlowKeys) {
 		t.Errorf("default keys = %v, want GitHub's web-flow keys", got)
 	}
-	custom := ForgeConfig{AcceptAuthored: true, Keys: []string{"AAAA"}}
+	custom := ForgeConfig{AcceptAuthored: &yes, Keys: []string{"AAAA"}}
 	if got := custom.ForgeKeys(); len(got) != 1 || got[0] != "AAAA" {
 		t.Errorf("explicit keys must win, got %v", got)
 	}

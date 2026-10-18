@@ -6,6 +6,29 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A repo that extends a base config now gets its own `signing`, `forge`,
+  `agent_trace`, `status` and `push` settings.** The `extends:` merge never
+  copied these five blocks from the child, so a repo that wrote
+  `signing: { required: true }` on top of an org base still wrote unsigned
+  notes and pushed. The setting read correctly in the file and did nothing.
+  The same was true of `forge.accept_authored`, `agent_trace`,
+  `status.enabled` and `push.force`: the base's value, or the default, always
+  won. These blocks now merge field by field, with the child winning, like
+  `execution` and `security_scan` do. Two exceptions: `signing.required` and
+  `agent_trace.required` only ratchet up, so a child cannot switch off a
+  requirement the base set. `forge.accept_authored` and `status.enabled`
+  follow the child both ways, so an explicit `false` now overrides a base's
+  `true`. A test now fails when a new config field is added without a merge
+  rule.
+
+  **Behavior change for `extends:` users:** child settings in these blocks
+  that were silently ignored now take effect. A repo that set
+  `signing.required: true` will refuse to write an unsigned note, and a repo
+  that set `push.force: never` will stop rewriting rebased branches. Repos
+  without `extends:` are unaffected.
+
 ## [0.35.0] - 2026-10-18
 
 A minor release: `warden init` and `warden hooks enable` now refuse a

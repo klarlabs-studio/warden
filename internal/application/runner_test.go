@@ -1356,7 +1356,7 @@ func TestRunner_PublishesTheGateStatusWhenEnabled(t *testing.T) {
 	forge := &fakeForge{available: true}
 
 	cfg := prePushCfg()
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Forge = forge
 
@@ -1414,7 +1414,7 @@ func TestRunner_AFailedStatusIsAWarningNotAFailure(t *testing.T) {
 	forge := &fakeForge{available: true, statusErr: errors.New("403 from the forge")}
 
 	cfg := prePushCfg()
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Forge = forge
 
@@ -1438,7 +1438,7 @@ func TestRunner_PublishesNothingWhenTheGateFails(t *testing.T) {
 	forge := &fakeForge{available: true}
 
 	cfg := prePushCfg()
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Forge = forge
 
@@ -1461,7 +1461,7 @@ func TestRunner_MakesTheCommitReachableBeforePublishingItsStatus(t *testing.T) {
 	forge := &fakeForge{available: true}
 
 	cfg := prePushCfg()
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Forge = forge
 
@@ -1486,7 +1486,7 @@ func TestRunner_SkipsThePublishWhenTheCommitCannotReachTheRemote(t *testing.T) {
 	forge := &fakeForge{available: true}
 
 	cfg := prePushCfg()
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Forge = forge
 

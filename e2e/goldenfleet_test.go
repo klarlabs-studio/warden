@@ -603,6 +603,46 @@ func TestGoldenFleet_RequiredSigningFailureLeavesRemoteUntouched(t *testing.T) {
 	}
 }
 
+// A repo that extends an org base and turns on signing.required itself must get
+// the refusal it asked for. The merge once dropped the child's signing block, so
+// the setting parsed, read correctly in the file, and changed nothing: the run
+// wrote an unsigned note and pushed.
+func TestGoldenFleet_ExtendsChildRequiredSigningIsEnforced(t *testing.T) {
+	g := newGoldenRepo(t)
+	g.adopt()
+	if err := os.MkdirAll(filepath.Join(g.dir, "policy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base := "hooks: { pre_push: true }\nsteps: { pre_push: [amender] }\ncommands: { amender: \"git commit -q --allow-empty --no-verify -m checked-rewrite\" }\nrules: []\n"
+	if err := os.WriteFile(filepath.Join(g.dir, "policy", "base.yaml"), []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := "extends: policy/base.yaml\nsigning: { required: true }\n"
+	if err := os.WriteFile(filepath.Join(g.dir, ".warden.yaml"), []byte(child), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.git("add", ".warden.yaml", "policy/base.yaml")
+	g.git("commit", "--no-verify", "-m", "extend the org base, require signing")
+	before := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main"))
+	blockedDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedDir, []byte("block key creation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, code := g.wardenEnv([]string{"WARDEN_CONFIG_DIR=" + blockedDir}, "run", "pre-push")
+	if code == 0 || code == 3 || !strings.Contains(out, "unsigned provenance") {
+		t.Fatalf("the child's signing.required was not enforced: exit=%d %s", code, out)
+	}
+	if got := strings.TrimSpace(gitIn(t, g.remote, "rev-parse", "refs/heads/main")); got != before {
+		t.Fatalf("signing failure pushed branch: %s -> %s", before, got)
+	}
+	for _, dir := range []string{g.dir, g.remote} {
+		cmd := exec.Command("git", "-C", dir, "show-ref", "--verify", "refs/notes/warden")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			t.Fatalf("signing failure wrote notes in %s: %s", dir, out)
+		}
+	}
+}
+
 func TestGoldenFleet_UncommittedValidationCannotAttest(t *testing.T) {
 	for _, stage := range []bool{false, true} {
 		g := newGoldenRepo(t)

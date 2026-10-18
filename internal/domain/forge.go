@@ -70,12 +70,18 @@ const DefaultStatusContext = "warden/gate"
 // signed verdict on this machine; this is only the part that tells GitHub. It
 // is not a second opinion, and it claims nothing the note does not already say.
 type StatusConfig struct {
-	// Enabled turns on publishing after a passing, pushed gate run.
-	Enabled bool `yaml:"enabled"`
+	// Enabled turns on publishing after a passing, pushed gate run. A pointer so
+	// that an explicit `false` is distinguishable from unset: a repo extending a
+	// base that turned publishing on must be able to turn it off. Read it through
+	// IsEnabled.
+	Enabled *bool `yaml:"enabled"`
 
 	// Context overrides the status context. Empty means DefaultStatusContext.
 	Context string `yaml:"context"`
 }
+
+// IsEnabled reports whether publishing is switched on. Unset means off.
+func (c StatusConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enabled }
 
 // StatusContext is the context to publish under, defaulted.
 func (c StatusConfig) StatusContext() string {

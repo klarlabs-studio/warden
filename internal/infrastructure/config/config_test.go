@@ -423,6 +423,36 @@ func TestResolveAtRef(t *testing.T) {
 		}
 	})
 
+	// The child's own signing/forge/status/push blocks once vanished in the
+	// merge, so a repo extending a base silently got the base's values. Parsed
+	// from real YAML, an explicit `false` must also survive as a choice.
+	t.Run("the child's signing, forge, status and push blocks apply", func(t *testing.T) {
+		cfg, err := ResolveAtRef(reader(map[string]string{
+			FileName: "extends: policy/base.yaml\nsigning: { required: true }\nforge: { accept_authored: false }\n" +
+				"status: { enabled: false }\npush: { force: never }\nagent_trace: { required: true }\n",
+			"policy/base.yaml": "signing: { signer: ssh }\nforge: { accept_authored: true }\n" +
+				"status: { enabled: true, context: org/gate }\nagent_trace: { path: trace.json }\n",
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Signing.Required || cfg.Signing.Signer != "ssh" {
+			t.Errorf("signing = %+v, want the child's required with the base's signer", cfg.Signing)
+		}
+		if cfg.Forge.Policy() != domain.ForgeReject {
+			t.Error("a child's accept_authored: false must override the base's true")
+		}
+		if cfg.Status.IsEnabled() || cfg.Status.StatusContext() != "org/gate" {
+			t.Errorf("status = %+v, want the child's enabled: false with the base's context", cfg.Status)
+		}
+		if cfg.PushForceMode() != domain.ForceNever {
+			t.Errorf("push.force = %q, want the child's never", cfg.PushForceMode())
+		}
+		if !cfg.AgentTrace.Required || cfg.AgentTrace.Path != "trace.json" {
+			t.Errorf("agent_trace = %+v, want the child's required with the base's path", cfg.AgentTrace)
+		}
+	})
+
 	t.Run("a missing root config yields a zero config", func(t *testing.T) {
 		cfg, err := ResolveAtRef(reader(map[string]string{}))
 		if err != nil {

@@ -14,7 +14,10 @@ package domain
 type ForgeConfig struct {
 	// AcceptAuthored lets a commit pass with no warden note when it carries a
 	// signature warden could VERIFY against one of Keys.
-	AcceptAuthored bool `yaml:"accept_authored"`
+	//
+	// A pointer so that an explicit `false` is distinguishable from unset: a repo
+	// extending a base that opted in must be able to opt back out.
+	AcceptAuthored *bool `yaml:"accept_authored"`
 
 	// Keys pins the forge's signing fingerprints. Empty means GitHub's published
 	// web-flow keys, which is the only forge warden ships fingerprints for.
@@ -35,7 +38,7 @@ func (f ForgeConfig) ForgeKeys() []string {
 
 // Policy maps the config onto the gate's decision. Reject unless asked.
 func (f ForgeConfig) Policy() ForgePolicy {
-	if f.AcceptAuthored {
+	if f.AcceptAuthored != nil && *f.AcceptAuthored {
 		return ForgeAccept
 	}
 	return ForgeReject
