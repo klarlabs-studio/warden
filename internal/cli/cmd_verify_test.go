@@ -382,3 +382,115 @@ func TestWatchRefusesContainerConfiguration(t *testing.T) {
 		t.Fatalf("watch: %d %s %s", code, out.String(), errb.String())
 	}
 }
+
+func TestVerifyMinProfile(t *testing.T) {
+	repoWithConfig(t, "")
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard, err := domain.ParseComplianceProfile("standard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.NewProfileRef(standard)
+	executed := domain.StepObservation{Outcome: domain.StepExecuted}
+	record := domain.RunRecord{
+		RunID: "profiled-run", CommitSHA: head,
+		StepsRun:          []domain.StepName{domain.StepCredentials, domain.StepLint, domain.StepTest},
+		EvidenceChainRoot: "root", Evidence: []domain.EvidenceEntry{{Hash: "root"}},
+		PublicKey:    base64.StdEncoding.EncodeToString(pub),
+		Profile:      &ref,
+		StepOutcomes: map[domain.StepName]domain.StepObservation{domain.StepCredentials: executed, domain.StepLint: executed, domain.StepTest: executed},
+		Approval:     &domain.ApprovalRef{Channel: domain.ApprovalNone},
+	}
+	payload, err := record.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	if err := svc.Repo().WriteNote(head, record); err != nil {
+		t.Fatal(err)
+	}
+	fp := record.SignerFingerprint()
+	writeReq := func(body string) string {
+		t.Helper()
+		f := filepath.Join(t.TempDir(), "requirements.json")
+		if err := os.WriteFile(f, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	v2Standard := writeReq(`{"version":2,"profile":{"min":"standard"}}`)
+	v2Strict := writeReq(`{"version":2,"profile":{"min":"strict"}}`)
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		want    int
+		wantOut string
+	}{
+		{"meets standard", []string{"--key", fp, "--min-profile", "standard"}, 0, "conforms to standard@1; checked: trusted, commit-bound local provenance"},
+		{"meets permissive", []string{"--key", fp, "--min-profile", "permissive"}, 0, "conforms to permissive@1"},
+		{"below strict", []string{"--key", fp, "--min-profile", "strict"}, 1, "gated under standard@1"},
+		{"untrusted key", []string{"--key", strings.Repeat("ab", 8), "--min-profile", "standard"}, 1, "unverified"},
+		{"no pinned key", []string{"--min-profile", "standard"}, 2, "needs a pinned --key"},
+		{"blank pinned key", []string{"--key", " , ", "--min-profile", "standard"}, 2, "needs a pinned --key"},
+		{"unknown level", []string{"--key", fp, "--min-profile", "paranoid"}, 2, "invalid --min-profile"},
+		{"unknown version", []string{"--key", fp, "--min-profile", "strict@2"}, 2, "invalid --min-profile"},
+		{"explicit empty", []string{"--key", fp, "--min-profile", ""}, 2, "invalid --min-profile"},
+		{"range unsupported", []string{"--key", fp, "--range", "HEAD~1..HEAD", "--min-profile", "standard"}, 2, "single-commit only"},
+		{"v2 file meets standard", []string{"--key", fp, "--requirements", v2Standard}, 0, "conforms to standard@1"},
+		{"v2 file below strict", []string{"--key", fp, "--requirements", v2Strict}, 1, "profile strict@1"},
+		{"v2 file plus flag", []string{"--key", fp, "--requirements", v2Standard, "--min-profile", "strict"}, 1, "profile strict@1"},
+		{"v2 file needs a pinned key", []string{"--requirements", v2Standard}, 2, "needs a pinned --key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := cmdVerify(tc.args, &out, &errb)
+			if code != tc.want {
+				t.Fatalf("exit %d want %d: %s %s", code, tc.want, out.String(), errb.String())
+			}
+			if all := out.String() + errb.String(); !strings.Contains(all, tc.wantOut) {
+				t.Fatalf("output lacks %q:\n%s", tc.wantOut, all)
+			}
+		})
+	}
+}
+
+func TestPrintConformanceNamesDeferredClauses(t *testing.T) {
+	var out bytes.Buffer
+	printConformance(&out, []service.ConformanceReport{{Min: "strict@1", Checked: []string{"a", "b"}, Deferred: []string{"c"}}})
+	want := "  conforms to strict@1; checked: a; b\n  not checked by this release: c\n"
+	if out.String() != want {
+		t.Fatalf("got %q want %q", out.String(), want)
+	}
+}
+
+func TestLoadExecutionRequirementsVersion2(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		ok   bool
+	}{
+		{`{"version":2,"profile":{"min":"strict"}}`, true},
+		{`{"version":2,"profile":{"min":"strict","max":"strict"}}`, false},
+		{`{"version":2,"profile":{"min":"strict"},"profile":{"min":"permissive"}}`, false},
+		{`{"version":1,"profile":{"min":"strict"},"steps":{}}`, false},
+		{`{"version":2}`, false},
+	} {
+		file := filepath.Join(t.TempDir(), "requirements.json")
+		if err := os.WriteFile(file, []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadExecutionRequirements(file); (err == nil) != tc.ok {
+			t.Errorf("%s: err=%v want ok=%v", tc.body, err, tc.ok)
+		}
+	}
+}

@@ -46,3 +46,44 @@ func TestExecutionContractRequirements(t *testing.T) {
 		t.Fatal("accepted unspecified inputs")
 	}
 }
+
+func TestExecutionRequirementsVersion2(t *testing.T) {
+	digest := DigestBytes([]byte("input"))
+	step := StepRequirements{Command: "go test ./...", ConfigurationDigest: digest, ContextDigest: digest, Inputs: map[string]string{}, ImageID: digest, ImageIDKind: "config", Platform: "linux/arm64", Network: "none"}
+	steps := map[StepName]StepRequirements{StepTest: step}
+	for _, tt := range []struct {
+		name string
+		req  ExecutionRequirements
+		ok   bool
+	}{
+		{"v1 steps", ExecutionRequirements{Version: 1, Steps: steps}, true},
+		{"v1 without steps", ExecutionRequirements{Version: 1}, false},
+		{"v1 cannot name a profile", ExecutionRequirements{Version: 1, Profile: &ProfileRequirement{Min: "strict"}, Steps: steps}, false},
+		{"v2 profile only", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict"}}, true},
+		{"v2 profile with version", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "standard@1"}}, true},
+		{"v2 profile and steps", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "permissive"}, Steps: steps}, true},
+		{"v2 steps only", ExecutionRequirements{Version: 2, Steps: steps}, true},
+		{"v2 empty", ExecutionRequirements{Version: 2}, false},
+		{"v2 unknown profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "paranoid"}}, false},
+		{"v2 unknown profile version", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict@2"}}, false},
+		{"v2 empty profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{}}, false},
+		{"v3", ExecutionRequirements{Version: 3, Profile: &ProfileRequirement{Min: "strict"}}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.req.Validate(); (err == nil) != tt.ok {
+				t.Fatalf("Validate() = %v, want ok=%v", err, tt.ok)
+			}
+		})
+	}
+	bridged := step
+	bridged.Network = "bridge"
+	if (ExecutionRequirements{Version: 2, Steps: map[StepName]StepRequirements{StepTest: bridged}}).Validate() == nil {
+		t.Fatal("version 2 steps must still require network none")
+	}
+	if p, ok := (ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict"}}).MinProfile(); !ok || p.String() != "strict@1" {
+		t.Fatalf("MinProfile = %v, %v", p, ok)
+	}
+	if _, ok := (ExecutionRequirements{Version: 1, Steps: steps}).MinProfile(); ok {
+		t.Fatal("a version 1 file demands no profile")
+	}
+}

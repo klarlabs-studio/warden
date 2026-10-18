@@ -176,4 +176,4 @@ jobs:
         run: go test -race ./internal/infrastructure/steps -run '^TestContainerExecutionIntegration$' -count=1 -v
       # -count=1 for the same reason as the e2e job above.
       - name: Run golden-fleet container scenarios
-        run: WARDEN_E2E=1 go test ./e2e/ -run '^TestGoldenFleet_(ContainerEvidenceRequiresObservedExecution|StagedPredictionIsLocalExactAndInvalidated)$' -v -count=1
+        run: WARDEN_E2E=1 go test ./e2e/ -run '^TestGoldenFleet_(ContainerEvidenceRequiresObservedExecution|StagedPredictionIsLocalExactAndInvalidated|StrictConformanceNeedsNetworkNone)$' -v -count=1
