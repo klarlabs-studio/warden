@@ -8,8 +8,14 @@ import "maps"
 // per field; the per-hook `steps:` lists UNION (base steps are preserved so a
 // repo cannot silently drop an org-mandated step — see mergeStepMap); rules
 // concatenate (base first, then child) so an org base can set broad policy and
-// a repo append stricter rules. This backs `extends:` — the org-policy-sync
-// mechanism (§5.2).
+// a repo append stricter rules. The signing, agent_trace, forge, status and push
+// blocks merge per field (child wins), except that signing.required and
+// agent_trace.required only ratchet up. This backs `extends:` — the
+// org-policy-sync mechanism (§5.2).
+//
+// Every Config field needs a decision here: TestOverlayOnto_EveryConfigFieldHasAMergeDecision
+// fails when one is added without one, because a field this function forgets is
+// silently dropped from every repo that extends a base.
 func (c Config) OverlayOnto(base Config) Config {
 	out := base
 	if c.PredictiveCache != nil {
@@ -51,6 +57,11 @@ func (c Config) OverlayOnto(base Config) Config {
 	if c.PR != (PRConfig{}) {
 		out.PR = c.PR
 	}
+	out.Status = mergeStatus(base.Status, c.Status)
+	out.Push = mergePush(base.Push, c.Push)
+	out.Forge = mergeForge(base.Forge, c.Forge)
+	out.Signing = mergeSigning(base.Signing, c.Signing)
+	out.AgentTrace = mergeAgentTrace(base.AgentTrace, c.AgentTrace)
 	if c.Parallel != nil {
 		out.Parallel = c.Parallel
 	}
@@ -169,4 +180,75 @@ func mergeRisk(base, child RiskConfig) RiskConfig {
 		out.FilesTouchedHigh = child.FilesTouchedHigh
 	}
 	return out
+}
+
+// mergeSigning overlays a child signing block field by field. Required only
+// ratchets up: it is a repo (or org) saying an unsigned note is not an
+// acceptable outcome, and a child writing `required: false` must not quietly
+// undo an org base that demands signatures — the rule security_scan.mode and
+// trusted_keys already follow.
+func mergeSigning(base, child SigningConfig) SigningConfig {
+	out := base
+	if child.Signer != "" {
+		out.Signer = child.Signer
+	}
+	if child.SSHKey != "" {
+		out.SSHKey = child.SSHKey
+	}
+	out.Required = base.Required || child.Required
+	return out
+}
+
+// mergeAgentTrace overlays a child agent_trace block field by field. Required
+// ratchets up for the same reason as signing.required.
+func mergeAgentTrace(base, child AgentTraceConfig) AgentTraceConfig {
+	out := base
+	if child.Path != "" {
+		out.Path = child.Path
+	}
+	out.Required = base.Required || child.Required
+	return out
+}
+
+// mergeForge overlays a child forge block field by field. accept_authored
+// follows the child in both directions: a repo may opt in under a base that did
+// not, and may opt out (the stricter choice) under one that did. Keys a child
+// pins replace the base's.
+func mergeForge(base, child ForgeConfig) ForgeConfig {
+	out := base
+	if child.AcceptAuthored != nil {
+		out.AcceptAuthored = child.AcceptAuthored
+	}
+	if len(child.Keys) > 0 {
+		out.Keys = child.Keys
+	}
+	return out
+}
+
+// mergeStatus overlays a child status block field by field.
+func mergeStatus(base, child StatusConfig) StatusConfig {
+	out := base
+	if child.Enabled != nil {
+		out.Enabled = child.Enabled
+	}
+	if child.Context != "" {
+		out.Context = child.Context
+	}
+	return out
+}
+
+// mergePush overlays a child push block field by field, returning a fresh value
+// so the merged config never aliases (and a later edit never mutates) the base.
+func mergePush(base, child *PushConfig) *PushConfig {
+	if base == nil && child == nil {
+		return nil
+	}
+	var out PushConfig
+	if base != nil {
+		out = *base
+	}
+	if child != nil && child.Force != "" {
+		out.Force = child.Force
+	}
+	return &out
 }

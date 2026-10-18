@@ -61,7 +61,7 @@ func TestRunner_UnpublishedProvenanceDoesNotOpenPRorPublishSuccess(t *testing.T)
 		wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}, pushNotesErr: errors.New("remote rejected notes")}
 	cfg := prePushCfg()
 	cfg.PR = domain.PRConfig{Enabled: true}
-	cfg.Status = domain.StatusConfig{Enabled: true}
+	cfg.Status = domain.StatusConfig{Enabled: boolPtr(true)}
 	forge := &fakeForge{available: true}
 	r := newRunner(t, git, &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}, fakeApprover{approve: true}, cfg)
 	r.Forge = forge

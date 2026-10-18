@@ -705,7 +705,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// Publishing the verdict is best-effort and post-push for the same reason
 	// as PR creation, and matters most where CI cannot run: without it the
 	// commit is gated but looks ungated to branch protection.
-	if provenance == "published" && cfg.Status.Enabled && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
+	if provenance == "published" && cfg.Status.IsEnabled() && r.Forge != nil && r.Forge.Available() && finalSHA != "" {
 		// The forge refuses a status for a commit it has never seen, and when
 		// git is completing the push the branch has not reached it yet. Put the
 		// commit there under its anchor ref first — explicitly, and checked,
