@@ -240,11 +240,31 @@ func (r *Repo) DiffStats(base string) (domain.DiffStats, error) {
 	if base == "" {
 		return domain.DiffStats{}, errors.New("diff stats: empty base; pass a ref, or use StagedPaths for the index")
 	}
-	out, err := r.run("diff", "--numstat", base+"..HEAD")
+	out, err := runRawIn(r.Dir, changedPathsArgs("--numstat", base+"..HEAD")...)
 	if err != nil {
 		return domain.DiffStats{}, err
 	}
-	return parseNumstat(out), nil
+	return parseNumstatZ(out), nil
+}
+
+// changedPathsArgs builds a `git diff` invocation whose path column is the
+// real repository path, for every caller that derives a set of changed paths.
+//
+// git's defaults do not give one. With rename detection on (the default since
+// 2.9) a moved file is reported once, as `old/{a => b}/f` in --numstat or as
+// only its new name in --name-only; and with core.quotePath (also default) a
+// path with non-ASCII bytes, quotes or control characters is C-quoted. Neither
+// string is a path, so a `match.paths` glob or a step reading
+// WARDEN_CHANGED_FILES missed the file — a rename out of a guarded directory
+// left no trace of that directory in the change set at all.
+//
+// -z turns quoting off and NUL-terminates each record; --no-renames reports a
+// rename as the deletion of the old path and the addition of the new one, so
+// both directories are in the set. --no-ext-diff and --no-textconv keep a
+// user's diff drivers out of a machine-read listing.
+func changedPathsArgs(format string, rest ...string) []string {
+	args := []string{"diff", format, "-z", "--no-renames", "--no-ext-diff", "--no-textconv"}
+	return append(args, rest...)
 }
 
 // DefaultBranchRef is the remote's default head, e.g. "origin/main". It names
@@ -266,28 +286,46 @@ func (r *Repo) EmptyTree() (string, error) {
 // DiffStats shape as DiffStats but only fills Paths and FilesTouched, since the
 // caller needs the path set, not line counts.
 func (r *Repo) StagedPaths() (domain.DiffStats, error) {
-	out, err := r.run("diff", "--cached", "--name-only")
+	out, err := runRawIn(r.Dir, changedPathsArgs("--name-only", "--cached")...)
 	if err != nil {
 		return domain.DiffStats{}, err
 	}
-	paths := splitLines(out)
+	paths := splitNUL(out)
 	return domain.DiffStats{FilesTouched: len(paths), Paths: paths}, nil
 }
 
-// parseNumstat turns `git diff --numstat` output into DiffStats. Each line is
-// tab-separated as "added<TAB>deleted<TAB>path", so splitting on tabs preserves
-// spaces in the path and takes the path column directly — no fragile index math
-// that could slice on a not-found substring. Binary files report "-" for both
-// columns; they count toward files touched but not lines.
-func parseNumstat(out string) domain.DiffStats {
+// parseNumstatZ turns `git diff --numstat -z` output into DiffStats. Each
+// record is "added<TAB>deleted<TAB>path<NUL>", and the path is raw bytes —
+// never quoted, never trimmed, so a tab or trailing space in a name survives.
+// Binary files report "-" for both counts; they count toward files touched but
+// not lines.
+//
+// A rename record has an empty path column followed by two more NUL-terminated
+// fields, the old path and the new. changedPathsArgs passes --no-renames so git
+// does not emit one, but if it ever does, both paths are reported: dropping
+// either would hide a directory the change touched.
+func parseNumstatZ(out string) domain.DiffStats {
 	var stats domain.DiffStats
-	for _, line := range splitLines(out) {
-		cols := strings.SplitN(line, "\t", 3)
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		cols := strings.SplitN(fields[i], "\t", 3)
 		if len(cols) < 3 {
 			continue
 		}
-		stats.FilesTouched++
-		stats.Paths = append(stats.Paths, strings.TrimSpace(cols[2]))
+		paths := []string{cols[2]}
+		if cols[2] == "" {
+			if i+2 >= len(fields) {
+				break
+			}
+			paths = []string{fields[i+1], fields[i+2]}
+			i += 2
+		}
+		for _, p := range paths {
+			if p != "" {
+				stats.FilesTouched++
+				stats.Paths = append(stats.Paths, p)
+			}
+		}
 		if added, err := strconv.Atoi(cols[0]); err == nil {
 			stats.LinesChanged += added
 		}
@@ -296,6 +334,18 @@ func parseNumstat(out string) domain.DiffStats {
 		}
 	}
 	return stats
+}
+
+// splitNUL splits NUL-terminated git output into its fields, dropping empty
+// ones, so empty output yields a nil slice.
+func splitNUL(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, "\x00") {
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // splitLines splits on newlines and drops empty entries so empty git output
