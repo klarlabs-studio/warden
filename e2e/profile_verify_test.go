@@ -41,9 +41,7 @@ func (g *goldenRepo) profiledNote(cfg string) domain.RunRecord {
 // and does not conform to strict, which it was never gated under.
 func TestGoldenFleet_MinProfileStandardPassesOnARealNote(t *testing.T) {
 	g := newGoldenRepo(t)
-	rec := g.profiledNote("hooks: { pre_push: true }\nprofile: standard\n" +
-		"steps: { pre_commit: [credentials], pre_push: [credentials, lint, test] }\n" +
-		"commands: { lint: \"true\", test: \"true\" }\nrules: []\n")
+	rec := g.profiledNote(standardConfig("agent: claude\nagent_commands: { claude: \"true\" }\n"))
 
 	// The artifact first: the note records what the verifier will read.
 	standard, err := domain.ParseComplianceProfile("standard")
@@ -58,6 +56,13 @@ func TestGoldenFleet_MinProfileStandardPassesOnARealNote(t *testing.T) {
 			t.Fatalf("%s outcome = %q, want executed: %+v", s, got, rec.StepOutcomes)
 		}
 	}
+	// The review ran in a guarded clone: the note says so, and says nothing
+	// about the environment, which standard does not scrub.
+	review := rec.StepOutcomes[domain.StepReview]
+	if review.Agent != "claude" || review.Isolated == nil || !*review.Isolated ||
+		review.TreeUnchanged == nil || !*review.TreeUnchanged || review.EnvAllowlisted != nil {
+		t.Fatalf("review observation = %+v, want claude, isolated, tree unchanged, no environment claim", review)
+	}
 
 	fp := rec.SignerFingerprint()
 	out, code := g.warden("verify", "--key", fp, "--min-profile", "standard")
@@ -65,6 +70,7 @@ func TestGoldenFleet_MinProfileStandardPassesOnARealNote(t *testing.T) {
 		t.Fatalf("verify --min-profile standard: %d %s", code, out)
 	}
 	if !strings.Contains(out, "conforms to standard@1; checked: trusted, commit-bound local provenance") ||
+		!strings.Contains(out, "isolated in a clone") ||
 		strings.Contains(out, "not checked by this release") {
 		t.Errorf("a standard pass must list what it checked and defer nothing:\n%s", out)
 	}
@@ -73,7 +79,7 @@ func TestGoldenFleet_MinProfileStandardPassesOnARealNote(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("a standard note must not conform to strict: %d %s", code, out)
 	}
-	for _, want := range []string{"gated under standard@1", "security-scan has no recorded outcome", "review has no recorded outcome", "lint has no complete container execution record"} {
+	for _, want := range []string{"gated under standard@1", "security-scan has no recorded outcome", "review has no allowlisted-environment observation", "lint has no complete container execution record"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("strict failure must name %q:\n%s", want, out)
 		}
@@ -134,5 +140,28 @@ rules: []
 	}
 	if out, code := g.warden("verify", "--key", fp, "--min-profile", "standard"); code != 0 {
 		t.Errorf("the same note conforms to standard, which has no network clause: %d %s", code, out)
+	}
+}
+
+// A real strict note, with its checks in a network-less container and its
+// review run by an agent in a guarded clone with the allowlisted environment,
+// conforms to strict. The pass still names the one clause it cannot check.
+func TestGoldenFleet_MinProfileStrictPassesOnARealStrictNote(t *testing.T) {
+	g := newGoldenRepo(t)
+	rec := g.profiledNote(strictContainerConfig(t, "agent: claude\nagent_commands: { claude: \"true\" }\n"))
+	review := rec.StepOutcomes[domain.StepReview]
+	for name, v := range map[string]*bool{"isolated": review.Isolated, "tree_unchanged": review.TreeUnchanged, "env_allowlisted": review.EnvAllowlisted} {
+		if v == nil || !*v {
+			t.Fatalf("review %s must be observed true under strict: %+v", name, review)
+		}
+	}
+	out, code := g.warden("verify", "--key", rec.SignerFingerprint(), "--min-profile", "strict")
+	if code != 0 {
+		t.Fatalf("a real strict note must conform to strict: %d %s", code, out)
+	}
+	for _, want := range []string{"conforms to strict@1", "network none", "allowlisted environment", "not checked by this release: a declared agent commit carries a notarized Agent Trace"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("strict pass must mention %q:\n%s", want, out)
+		}
 	}
 }
