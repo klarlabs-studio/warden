@@ -5,13 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -57,35 +55,12 @@ func ResolveContainer(cfg domain.ExecutionConfig) (*application.ContainerExecuti
 			problems = append(problems, "apple: "+err.Error())
 			continue
 		}
-		if _, err := containerProbe(bin, "info"); err != nil {
-			problems = append(problems, runtimeName+": engine unavailable")
-			continue
-		}
-		out, err := containerProbe(bin, "image", "inspect", cfg.Image)
+		selected, err := resolveCompatContainer(runtimeName, bin, cfg)
 		if err != nil {
-			problems = append(problems, runtimeName+": image not available locally")
+			problems = append(problems, runtimeName+": "+err.Error())
 			continue
 		}
-		var images []struct {
-			ID           string `json:"Id"`
-			OS           string `json:"Os"`
-			Architecture string `json:"Architecture"`
-		}
-		if err := json.Unmarshal(out, &images); err != nil || len(images) != 1 || !domain.ValidContainerImageID(images[0].ID) {
-			problems = append(problems, runtimeName+": invalid image inspection")
-			continue
-		}
-		image := images[0]
-		platform := image.OS + "/" + image.Architecture
-		if image.OS != "linux" || (image.Architecture != "amd64" && image.Architecture != "arm64") || (cfg.Platform != "" && cfg.Platform != platform) {
-			problems = append(problems, runtimeName+": image platform does not match supported/requested Linux platform")
-			continue
-		}
-		network := cfg.Network
-		if network == "" {
-			network = "none"
-		}
-		return &application.ContainerExecution{Binary: bin, Environment: domain.ExecutionEnvironment{Runtime: runtimeName, Image: cfg.Image, ImageID: image.ID, Platform: platform, Network: network, HostOS: runtime.GOOS, GuestOS: image.OS, ImageIDKind: "config"}}, nil
+		return selected, nil
 	}
 	return nil, fmt.Errorf("container execution unavailable (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", strings.Join(problems, "; "))
 }
@@ -133,13 +108,11 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 	if env.Runtime == "apple" {
 		return runAppleContainer(ctx, sc, abs, name, checked)
 	}
-	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
-	if uid, gid := os.Getuid(), os.Getgid(); uid >= 0 && gid >= 0 {
-		if env.Runtime == "podman" {
-			args = append(args, "--userns=keep-id")
-		}
-		args = append(args, "--user", strconv.Itoa(uid)+":"+strconv.Itoa(gid))
+	if selected.Reference == "" {
+		return nil, fmt.Errorf("container execution has no inspected image reference to run")
 	}
+	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
+	args = append(args, compatUserArgs(selected, os.Getuid(), os.Getgid())...)
 	// Only Warden's explicit step inputs cross the boundary. In particular, do
 	// not inherit PATH, credentials, or host absolute build-cache locations.
 	for _, value := range stepInputs(sc) {
@@ -149,9 +122,9 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 			args = append(args, "--env", value)
 		}
 	}
-	// Run the inspected immutable ID, so a moved tag cannot change the image
-	// between inspection and execution.
-	args = append(args, "--env", "HOME=/tmp", "--env", "GOLANGCI_LINT_CACHE=/tmp/warden-lint", env.ImageID, "-c", checked)
+	// Run the inspected immutable reference, so a moved tag cannot change the
+	// image between inspection and execution.
+	args = append(args, "--env", "HOME=/tmp", "--env", "GOLANGCI_LINT_CACHE=/tmp/warden-lint", selected.Reference, "-c", checked)
 	cmd := exec.CommandContext(ctx, selected.Binary, args...)
 	cmd.Env = scrubbedEnv()
 	proc.Isolate(cmd)

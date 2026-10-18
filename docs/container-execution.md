@@ -87,8 +87,14 @@ cleanup failures.
 
 ## Evidence and verification
 
-Docker-compatible backends inspect the image, then run its immutable config
-image ID rather than its mutable tag. Apple creates a stopped container and
+Docker-compatible backends inspect the image, then run an immutable reference
+rather than its mutable tag. Docker and Podman run the inspected config image
+ID (Podman prints it without the `sha256:` prefix; Warden records it with one).
+nerdctl cannot run a config ID, only a name or containerd's target digest (the
+image index or manifest), so Warden runs the target digest. During discovery it
+inspects that digest again for the selected platform and refuses the engine
+unless it resolves to the same config ID; content addressing then fixes what
+the run executes. Apple creates a stopped container and
 checks its image index and platform before starting it. The signed RunRecord records the runtime name, requested
 image,
 resolved image ID, Linux architecture, network mode, Warden host OS, and Linux
@@ -131,8 +137,25 @@ Only the disposable worktree is bind-mounted. Warden does not expose host
 engine socket. It forwards only the five explicit step inputs (`WARDEN_HOOK`,
 `WARDEN_BRANCH`, `WARDEN_CHANGED_FILES`, `WARDEN_FILES_TOUCHED`, and
 `WARDEN_LINES_CHANGED`), sets a temporary home and lint-cache path, and leaves
-other environment settings to the image. On Unix it uses the invoking UID/GID;
-Podman additionally uses `keep-id` user namespaces.
+other environment settings to the image.
+
+On Unix the check runs as the invoking user, so files it writes in the worktree
+belong to that user on the host. How that is expressed depends on the engine's
+user-namespace mode, which Warden reads from the engine's `info` before
+selecting it (an answer it cannot read fails selection):
+
+| Engine mode | Container user |
+|---|---|
+| Rootful Docker, Podman, nerdctl | the invoking UID/GID |
+| Rootless Podman | the invoking UID/GID, mapped with `--userns=keep-id` |
+| Rootless Docker, nerdctl | container root, which the user namespace maps to the invoking user |
+
+Rootless Docker and nerdctl map only container root to the invoking user; any
+other UID lands on a subordinate ID that cannot write the worktree. Container
+root there holds no host privilege beyond the invoking user's, and capabilities
+are still dropped. Warden drives an engine as the user running the hook, so
+rootful nerdctl (which requires root) is reachable only when Warden itself runs
+as root.
 
 Networking defaults to `none` and capabilities are dropped. Docker-compatible
 backends additionally set `no-new-privileges`; Apple exposes no equivalent CLI
@@ -168,17 +191,30 @@ without measurements.
 
 The default test suite exercises both CLI adapters, discovery, fail-closed
 selection, argument boundaries, cancellation, signatures, verification requirements, and clean
-worktree cloning with controlled engine CLIs. To exercise a real Docker engine
-without downloading an image:
+worktree cloning with controlled engine CLIs.
+
+CI also runs the live integration test and the golden-fleet container scenarios
+on every pull request against three engines on Ubuntu: Docker, rootless Podman
+4.9.3 (from the runner image), and rootless nerdctl 2.4.1 (nerdctl-full, its
+containerd run as a systemd user service). Each run asserts that a host
+environment variable does not reach the check, that `network: none` leaves the
+workload no IPv4 route, that the recorded runtime, image and config ID match
+what discovery inspected, and that the check's output is written in the
+worktree and owned by the invoking user. The first live runs found two adapter
+defects that the controlled CLIs had encoded wrongly: Podman's unprefixed image
+ID was rejected, and nerdctl could not run a config ID. Rootful Podman and
+rootful nerdctl, and rootless Docker, are covered by argument tests only.
+
+To exercise a real engine without downloading an image:
 
 ```bash
 WARDEN_CONTAINER_TEST_IMAGE=<preloaded-image> go test ./internal/infrastructure/steps -run TestContainerExecutionIntegration -count=1
 WARDEN_E2E=1 WARDEN_CONTAINER_TEST_IMAGE=<preloaded-image> go test ./e2e -run TestGoldenFleet_ContainerEvidenceRequiresObservedExecution -count=1
 ```
 
-For a live Apple test, set `WARDEN_CONTAINER_TEST_RUNTIME=apple` alongside the
-same image variable in either command above. The image must already be available
-in Apple's image store.
+For another engine, set `WARDEN_CONTAINER_TEST_RUNTIME` to `podman`, `nerdctl`,
+or `apple` alongside the same image variable in either command above. The image
+must already be in that engine's own image store.
 
 Runtime flag references: [Docker run](https://docs.docker.com/reference/cli/docker/container/run/),
 [Podman run](https://docs.podman.io/en/latest/markdown/podman-run.1.html),

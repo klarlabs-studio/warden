@@ -14,7 +14,13 @@ import (
 )
 
 const testImageID = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const testImageJSON = `[{"Id":"` + testImageID + `","Os":"linux","Architecture":"arm64"}]`
+const testTargetDigest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+const testImageJSON = `[{"Id":"` + testImageID + `","Os":"linux","Architecture":"arm64","RepoDigests":["docker.io/library/checks@` + testTargetDigest + `"]}]`
+
+// fakeContainerEngine answers like a Docker-compatible CLI. `info` reports the
+// rootless mode in the runtime's own format (WARDEN_TEST_CONTAINER_ROOTLESS);
+// an inspection of the target digest answers WARDEN_TEST_TARGET_INSPECTION when
+// set, so a test can make nerdctl's run reference resolve to another image.
 
 func fakeContainerEngine(t *testing.T, dir, name, infoStatus, inspection string) {
 	t.Helper()
@@ -23,8 +29,16 @@ func fakeContainerEngine(t *testing.T, dir, name, infoStatus, inspection string)
 	}
 	script := `#!/bin/sh
 case "$1" in
-info) exit ` + infoStatus + ` ;;
-image) printf '%s\n' ` + shellQuote(inspection) + ` ;;
+info) [ ` + infoStatus + ` = 0 ] || exit ` + infoStatus + `
+ rootless="${WARDEN_TEST_CONTAINER_ROOTLESS:-false}"
+ case "$3" in
+ *Rootless*) echo "$rootless" ;;
+ *SecurityOptions*) if [ "$rootless" = true ]; then echo '["name=seccomp,profile=builtin","name=rootless"]'; elif [ "$rootless" = garbage ]; then echo 'not json'; else echo '["name=seccomp,profile=builtin"]'; fi ;;
+ *) exit 91 ;;
+ esac ;;
+image) last=""; for arg in "$@"; do last="$arg"; done
+ if [ "$last" = ` + shellQuote(testTargetDigest) + ` ] && [ -n "${WARDEN_TEST_TARGET_INSPECTION:-}" ]; then printf '%s\n' "$WARDEN_TEST_TARGET_INSPECTION"; exit 0; fi
+ printf '%s\n' ` + shellQuote(inspection) + ` ;;
 run) printf '%s\000' "$@" > "$WARDEN_TEST_CONTAINER_ARGS"
  if [ "${WARDEN_TEST_CONTAINER_WAIT:-}" = yes ]; then exec sleep 30; fi
  echo container-output
@@ -93,7 +107,7 @@ func TestShellContainerBoundary(t *testing.T) {
 	t.Setenv("WARDEN_TEST_CONTAINER_ARGS", argsFile)
 	t.Setenv("HOST_SECRET", "must-not-enter-container")
 	t.Setenv("WARDEN_SECRET", "must-not-enter-container")
-	selected := &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Environment: domain.ExecutionEnvironment{Runtime: "docker", Image: "checks:dev", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}
+	selected := &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Reference: testImageID, Environment: domain.ExecutionEnvironment{Runtime: "docker", Image: "checks:dev", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}
 	sc := application.StepContext{WorktreeDir: t.TempDir(), Hook: domain.PreCommit, Commands: map[string]string{"test": "printf literal; exit 0"}, Container: selected}
 	result, err := NewShellStep(domain.StepTest, "test").Run(context.Background(), sc)
 	if err != nil || result.Status != domain.StepPass || result.Environment == nil || result.Environment.ImageID != testImageID {
@@ -136,7 +150,7 @@ func TestContainerTimeoutRemovesContainer(t *testing.T) {
 	removed := filepath.Join(dir, "removed")
 	t.Setenv("WARDEN_TEST_CONTAINER_REMOVED", removed)
 	t.Setenv("WARDEN_TEST_CONTAINER_WAIT", "yes")
-	sc := application.StepContext{WorktreeDir: t.TempDir(), Container: &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
+	sc := application.StepContext{WorktreeDir: t.TempDir(), Container: &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Reference: testImageID, Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if _, err := runContainer(ctx, sc, sc.WorktreeDir, "sleep 30"); err == nil {
@@ -164,16 +178,30 @@ func TestContainerExecutionIntegration(t *testing.T) {
 	}
 	dir := t.TempDir()
 	t.Setenv("WARDEN_CONTAINER_TEST_SECRET", "host-only")
-	sc := application.StepContext{WorktreeDir: dir, Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": `test -z "$WARDEN_CONTAINER_TEST_SECRET" && test "$WARDEN_HOOK" = pre_commit && uname -s > observed-os && printf container > artifact`}}
+	sc := application.StepContext{WorktreeDir: dir, Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": `test -z "$WARDEN_CONTAINER_TEST_SECRET" && test "$WARDEN_HOOK" = pre_commit && tail -n +2 /proc/net/route > observed-routes && uname -s > observed-os && printf container > artifact`}}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := NewShellStep(domain.StepTest, "test").Run(ctx, sc)
 	if err != nil || result.Status != domain.StepPass {
 		t.Fatalf("result: %+v %v", result, err)
 	}
+	env := result.Environment
+	if env == nil || env.Runtime != runtimeName || env.Image != image || env.ImageID != selected.Environment.ImageID || !domain.ValidContainerImageID(env.ImageID) || env.Network != "none" || env.GuestOS != "linux" {
+		t.Fatalf("recorded environment: %+v", env)
+	}
 	artifact, err := os.ReadFile(filepath.Join(dir, "artifact"))
 	if err != nil || string(artifact) != "container" {
 		t.Fatal("missing artifact", string(artifact), err)
+	}
+	// The worktree write must belong to the invoking user, or the host cannot
+	// clean up after the check: rootless engines remap container UIDs.
+	assertOwnedByInvoker(t, filepath.Join(dir, "artifact"))
+	// network: none leaves the workload no IPv4 route at all. (Interface
+	// lists are not evidence: kernels add fallback tunnel devices to every
+	// namespace.)
+	routes, err := os.ReadFile(filepath.Join(dir, "observed-routes"))
+	if err != nil || strings.TrimSpace(string(routes)) != "" {
+		t.Fatal("container network was not disabled", string(routes), err)
 	}
 	platform, err := os.ReadFile(filepath.Join(dir, "observed-os"))
 	if err != nil || strings.TrimSpace(string(platform)) != "Linux" {
@@ -193,7 +221,7 @@ func TestContainerScannerVersionIsCheckedInsideImage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workflows, "ci.yml"), []byte("env:\n  NOX_VERSION: 1.15.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sc := application.StepContext{WorktreeDir: root, Commands: map[string]string{"security-scan": "nox scan . -severity-threshold high"}, Container: &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
+	sc := application.StepContext{WorktreeDir: root, Commands: map[string]string{"security-scan": "nox scan . -severity-threshold high"}, Container: &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Reference: testImageID, Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
 	result, err := NewSecurityScanStep(domain.StepSecurityScan).Run(context.Background(), sc)
 	if err != nil || result.Status != domain.StepFail || !strings.Contains(result.Summary, "container scanner version") {
 		t.Fatalf("unverifiable pinned version passed: %+v %v", result, err)
