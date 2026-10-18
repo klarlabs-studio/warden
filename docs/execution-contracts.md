@@ -78,10 +78,11 @@ recorded profile's digest against this warden's definition; its rank; that
 `credentials, lint, test, security-scan, review` each executed (cached and
 predicted results do not count); that `lint`, `test` and `security-scan` each
 have a complete Linux container record; that each of those ran with
-network `none`; and that no required approval was auto-approved. It does not
-check agent-step isolation or that a declared agent commit carries an Agent
-Trace: the note does not record those observations yet. A passing `verify`
-prints both lists.
+network `none`; that every agent step that executed was isolated with its
+tree unchanged and saw only the allowlisted environment; and that no required
+approval was auto-approved. It does not check that a declared agent commit
+carries an Agent Trace: the note does not record authorship yet. A passing
+`verify` prints both lists.
 
 A warden older than version 2 rejects such a file: its version check refuses
 `2` and its strict decoder refuses the unknown `profile` key. The action then
