@@ -6,6 +6,32 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Podman and nerdctl container execution works.** Both engines shipped in
+  0.34.0 with argument tests only, and neither could run a check. Podman prints
+  image IDs without the `sha256:` prefix, so every inspection was rejected.
+  nerdctl cannot run a config ID at all. warden now runs nerdctl's target
+  digest, after checking during discovery that it resolves to the recorded
+  config ID for the selected platform. The record is unchanged: it still
+  carries the config ID. (#286)
+- **Rootless engines can write the worktree.** Rootless Docker and nerdctl map
+  only container root to the invoking user, so a check running as the host UID
+  could not write the worktree. warden reads the engine's user-namespace mode
+  before selecting it and runs those checks as container root, which is the
+  invoking user on the host, with capabilities still dropped. Podman uses
+  `keep-id` only when rootless. An engine whose mode cannot be read is not
+  selected. (#286)
+
+### Changed
+
+- **Podman and nerdctl are live-tested.** CI runs the container integration
+  test and golden-fleet container scenarios against rootless Podman and
+  rootless nerdctl as well as Docker. Each run checks that host environment
+  does not leak in, that `network: none` leaves no route, the recorded image
+  identity, and that the check's output lands in the worktree owned by the
+  invoking user. (#286)
+
 ## [0.35.0] - 2026-10-18
 
 A minor release: `warden init` and `warden hooks enable` now refuse a
