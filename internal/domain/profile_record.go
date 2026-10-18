@@ -46,9 +46,12 @@ const StepPredicted StepOutcome = "predicted"
 
 // StepObservation is what warden observed of one step in a run.
 //
-// It deliberately carries no isolation or tree-guard claim. Agent steps are not
-// yet isolated from the canonical worktree, so a field saying they were would be
-// false; those observations arrive with the code that makes them true.
+// The agent boundary fields are pointers so that "not observed" and "observed
+// false" stay apart. Each is set only for an agent step that executed under a
+// profile, and only with what the runner actually saw: Isolated only when the
+// step ran in its own guarded clone, TreeUnchanged only when that guard ran
+// (true or false), EnvAllowlisted only when the agent process was given the
+// allowlisted environment. A nil field is never a claim, in either direction.
 type StepObservation struct {
 	// Outcome is executed, cached, predicted or skipped. It is the observed
 	// fact, not the verdict: a skipped step still passed the gate.
@@ -57,6 +60,33 @@ type StepObservation struct {
 	// agent ran it now: not an agent step, or an agent step that was skipped
 	// or cached. The agent the policy merely assigned is in RunRecord.Agent.
 	Agent string `json:"agent,omitempty"`
+	// Isolated: the agent step ran in its own disposable clone, not in the
+	// worktree whose tree is attested. Only ever set to true.
+	Isolated *bool `json:"isolated,omitempty"`
+	// TreeUnchanged: the tree guard compared HEAD, the index tree and tracked
+	// files of the clone and of the validated worktree before and after the
+	// step. Set only when the guard ran, to what it found.
+	TreeUnchanged *bool `json:"tree_unchanged,omitempty"`
+	// EnvAllowlisted: the agent process saw only the allowlisted environment.
+	// Only ever set to true.
+	EnvAllowlisted *bool `json:"env_allowlisted,omitempty"`
+}
+
+// observeAgentBoundary copies the runner's boundary observation for an agent
+// step onto obs, keeping only what was actually observed (see
+// StepObservation). A nil observation leaves every field unset.
+func (obs *StepObservation) observeAgentBoundary(b *AgentBoundaryObservation) {
+	if b == nil {
+		return
+	}
+	if b.Isolated {
+		isolated, unchanged := true, b.TreeUnchanged
+		obs.Isolated, obs.TreeUnchanged = &isolated, &unchanged
+	}
+	if b.EnvAllowlisted {
+		allowlisted := true
+		obs.EnvAllowlisted = &allowlisted
+	}
 }
 
 // ObservedOutcome is the outcome the signed record states for a step result.

@@ -129,8 +129,8 @@ func whyOutcomes(rec *domain.RunRecord) string {
 			return
 		}
 		part := string(s) + " " + string(obs.Outcome)
-		if obs.Agent != "" {
-			part += " (agent=" + obs.Agent + ")"
+		if detail := whyObservationDetail(obs); detail != "" {
+			part += " (" + detail + ")"
 		}
 		parts = append(parts, part)
 	}
@@ -146,6 +146,30 @@ func whyOutcomes(rec *domain.RunRecord) string {
 	slices.Sort(extra)
 	for _, s := range extra {
 		render(s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// whyObservationDetail names the agent and each agent boundary observation
+// the note records. An unobserved boundary is not mentioned, and an observed
+// false says so: "tree changed" is a finding, not a missing field.
+func whyObservationDetail(obs domain.StepObservation) string {
+	var parts []string
+	if obs.Agent != "" {
+		parts = append(parts, "agent="+obs.Agent)
+	}
+	if obs.Isolated != nil && *obs.Isolated {
+		parts = append(parts, "isolated")
+	}
+	if obs.TreeUnchanged != nil {
+		if *obs.TreeUnchanged {
+			parts = append(parts, "tree unchanged")
+		} else {
+			parts = append(parts, "tree changed")
+		}
+	}
+	if obs.EnvAllowlisted != nil && *obs.EnvAllowlisted {
+		parts = append(parts, "env allowlisted")
 	}
 	return strings.Join(parts, ", ")
 }
