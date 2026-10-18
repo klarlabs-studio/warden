@@ -6,6 +6,17 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Path rules see renamed and oddly named files.** The changed-path set came
+  from `git diff` in its default form, which reports a moved file as
+  `old/{a => b}/f` (or, for staged changes, only its new name) and C-quotes a
+  path with non-ASCII characters. Neither is a path, so a `match.paths` rule
+  for the directory a file moved out of, or for a file with an accented name,
+  did not fire, and `WARDEN_CHANGED_FILES` listed strings no step could open.
+  Changed paths are now read NUL-separated with rename detection off: a rename
+  lists both the old and the new path, and every name arrives as written.
+
 ## [0.35.0] - 2026-10-18
 
 A minor release: `warden init` and `warden hooks enable` now refuse a
