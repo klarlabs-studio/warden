@@ -802,7 +802,12 @@ keep its docs — give it an `auto_fix` budget or add it to `writes:`. Set
 
 On an interactive terminal the pre-push run shows a live TUI: a spinner and a
 counting-up timer per step, a tail of each running step's output as it streams,
-and the approval gate answered inline.
+and the approval gate answered inline. Under `git push` the hook's stdin is
+git's ref list, so warden asks the approval question on the controlling
+terminal (`/dev/tty`) instead; with no controlling terminal (CI, launchd) it
+declines, and an unanswered prompt declines after five minutes. A terminal
+answering does not prove a person did: an agent driving a pseudo-terminal can
+answer too.
 
 ### Step cache
 
@@ -978,7 +983,8 @@ Trust decides whether an agent may run the gate, not whether it may approve
 it. Under a `standard` or `strict`
 [compliance profile](docs/agent-profiles.md) these surfaces do not approve:
 a run that needs approval ends `needs_approval`, pushes nothing, writes no note,
-and tells the agent that a person must approve it from an interactive terminal.
+and tells the agent that a person must approve it by running `git push` from an
+interactive terminal.
 
 ## Custom steps
 

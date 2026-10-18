@@ -115,12 +115,22 @@ high-severity finding), it stops there:
 - the outcome is `needs_approval`, not `rejected`, because nobody declined;
 - nothing is pushed and no note is written;
 - the summary's `message` tells the agent that a person must approve, and how:
-  run the gate from an interactive terminal (`git push` or
-  `warden run pre-push`) and answer the approval prompt.
+  run `git push` from an interactive terminal and answer the approval prompt.
 
 `axi run-trigger` reports this, like every other outcome, in its output rather
 than its exit status. The CLI hook path exits 1, as for any run that does not
 pass.
+
+Under `git push`, git hands the hook its ref list on stdin, so warden asks on
+the controlling terminal (`/dev/tty`) instead, as git hooks conventionally do.
+A process with no controlling terminal (CI, launchd, a tool an agent runs
+without one) gets no prompt and the gate declines. On Windows the hook still
+declines when stdin is not a terminal. An unanswered prompt declines after five
+minutes.
+
+This shows that a terminal answered, not that a person did: an agent that
+drives a pseudo-terminal can type the answer. ADR 0007 records that limit, and
+it is why the agent surfaces themselves refuse rather than rely on the prompt.
 
 `permissive` keeps today's behavior, so a repository can record a profile
 before it changes who approves. Repositories without a profile are unchanged.

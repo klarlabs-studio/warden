@@ -35,8 +35,8 @@ All notable changes to warden are documented here. The format follows
   run they start that needs approval (a rule's `require_approval`, or a
   high-severity finding) ends with the new outcome `needs_approval`, pushes
   nothing and writes no note, and its message tells the agent that a person
-  must approve it from an interactive terminal (`git push` or
-  `warden run pre-push`). `axi run-trigger` reports the outcome in its output,
+  must approve it by running `git push` from an interactive terminal.
+  `axi run-trigger` reports the outcome in its output,
   as it does for a failed run; the CLI hook path exits 1. `permissive` and
   repositories without a profile still auto-approve on these surfaces. This
   extends `standard@1` and `strict@1` while the definitions are still in
@@ -51,6 +51,19 @@ All notable changes to warden are documented here. The format follows
   step with no agent, in the run output and on every surface that shows step
   outcomes. The verdict is unchanged, and an unprofiled note is unchanged. A
   skipped shell step is no longer written to the step cache.
+
+- **`git push` can answer the approval gate.** A rule with
+  `require_approval: true` could not be approved from `git push` at all: git
+  gives the pre-push hook its ref list on stdin, so warden saw no terminal,
+  showed no prompt, and declined every time, printing "Approve at a terminal or
+  via `warden axi`". The only way through was the agent surface, which a
+  profile now closes. warden now asks on the controlling terminal
+  (`/dev/tty`), as git hooks conventionally do. With no controlling terminal
+  (CI, launchd, a process an agent starts without one) it declines as before,
+  and an unanswered prompt declines after five minutes, so a terminal nobody
+  watches cannot hold the push open. Windows keeps the old behavior. A
+  terminal answering is not proof that a person did: an agent driving a
+  pseudo-terminal can answer, as ADR 0007 states.
 
 ## [0.36.0] - 2026-10-19
 
