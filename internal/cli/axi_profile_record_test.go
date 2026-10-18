@@ -22,8 +22,12 @@ func TestAddProfileObservations(t *testing.T) {
 			domain.StepReview: {Outcome: domain.StepExecuted, Agent: "claude"},
 			domain.StepLint:   {Outcome: domain.StepCached},
 		},
-		Approval: &domain.ApprovalRef{Required: true, Channel: domain.ApprovalTUI, Principal: "warden-tui"},
+		Approval:   &domain.ApprovalRef{Required: true, Channel: domain.ApprovalTUI, Principal: "warden-tui"},
+		Authorship: &domain.AuthorshipSignals{EnvMarkers: []domain.EnvMarkerDeclaration{{Name: "GEMINI_CLI", Agent: "gemini-cli"}}},
 	})
+	if a, ok := out["authorship"].(*domain.AuthorshipSignals); !ok || len(a.EnvMarkers) != 1 {
+		t.Errorf("authorship = %v", out["authorship"])
+	}
 	if out["profile"] != "standard@1" || out["profile_digest"] != "d" {
 		t.Errorf("profile = %v / %v", out["profile"], out["profile_digest"])
 	}

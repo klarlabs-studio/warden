@@ -21,7 +21,7 @@ import (
 const (
 	goldenPermissive1 = "sha256:85ae44054d6db52f954f7b575905d58dcabff4793fc52452f3030f1f13bca09d"
 	goldenStandard1   = "sha256:2e8d45308adf4c55d9ea918f35673f42b3e1223dc569766dd82bb6bd8937aeb9"
-	goldenStrict1     = "sha256:cbae9fa176a91ebf147f1eb1e180f0c6b91dcfc1ab30555ab83f8de8bef895eb"
+	goldenStrict1     = "sha256:a1cce735c807f3ff038a39d7f87b1c50a42f1ffe3ecba67d72634994b2e94af9"
 )
 
 func mustProfile(t *testing.T, s string) ComplianceProfile {

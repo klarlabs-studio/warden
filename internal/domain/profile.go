@@ -100,6 +100,11 @@ type profileDefinition struct {
 	AgentEnvAllowlist bool `json:"agent_env_allowlist,omitempty"`
 	// BundledAgentsOnly refuses an agent that is not a bundled preset.
 	BundledAgentsOnly bool `json:"bundled_agents_only,omitempty"`
+	// TraceForDeclaredAgents fails a run whose attested commits or gating
+	// environment declare a coding agent (see authorship.go) unless an Agent
+	// Trace was notarized into the record. The absence of a declaration
+	// relaxes nothing.
+	TraceForDeclaredAgents bool `json:"trace_for_declared_agents,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -140,6 +145,7 @@ var builtinProfiles = map[string]profileDefinition{
 		IsolateAgents:          true,
 		AgentEnvAllowlist:      true,
 		BundledAgentsOnly:      true,
+		TraceForDeclaredAgents: true,
 	},
 }
 
@@ -210,6 +216,12 @@ func (p ComplianceProfile) Lowers(other ComplianceProfile) bool {
 // that asked for a run cannot also be the human that approves it.
 func (p ComplianceProfile) AgentSurfaceMayApprove() bool {
 	return !p.def.NoAgentSurfaceApproval
+}
+
+// RequiresTraceForDeclaredAgents reports whether a run that declares a coding
+// agent must carry a notarized Agent Trace (strict@1).
+func (p ComplianceProfile) RequiresTraceForDeclaredAgents() bool {
+	return p.def.TraceForDeclaredAgents
 }
 
 // RequiredSteps returns the steps the profile requires for a hook.

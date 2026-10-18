@@ -59,6 +59,10 @@ type Git interface {
 	// PushSpanBase is the newest commit on branch the remote already has, so
 	// (base, tip] is what this push publishes — the span a run vouches for.
 	PushSpanBase(remote, branch string) (string, error)
+	// SpanTrailers returns the commit-message trailers of every commit in
+	// (base, head], merges included, as git parsed them; an empty base reads
+	// head alone. It feeds the authorship observation (ADR 0007 §4).
+	SpanTrailers(base, head string) ([]domain.CommitTrailers, error)
 	// UnmergedRemoteCommits lists commits on remote/branch that have NO
 	// patch-equivalent in the local branch — i.e. work a force-push would
 	// destroy, as opposed to our own commits the remote holds in a pre-rewrite

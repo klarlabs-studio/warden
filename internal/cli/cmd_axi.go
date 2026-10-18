@@ -417,6 +417,9 @@ func addProfileObservations(out map[string]any, rec *domain.RunRecord) {
 		out["approval_channel"] = string(a.Channel)
 		out["approval_principal"] = a.Principal
 	}
+	if a := rec.Authorship; a != nil {
+		out["authorship"] = a
+	}
 }
 
 func stepOutcomeMaps(notes map[domain.StepName]domain.OutcomeNote) []any {

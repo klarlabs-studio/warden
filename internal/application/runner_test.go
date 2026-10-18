@@ -65,6 +65,11 @@ type fakeGit struct {
 	rewritesErr     error
 	spanBase        string
 	spanBaseErr     error
+	// spanTrailers scripts SpanTrailers per "base..head" key; a missing key
+	// reads as commits with no trailers. spanTrailerReads records each read.
+	spanTrailers     map[string][]domain.CommitTrailers
+	spanTrailersErr  error
+	spanTrailerReads []string
 	// unmergedRemote is work that exists only on the remote — a colleague's
 	// commits on a shared branch, which a force-push would destroy.
 	unmergedRemote    []string
@@ -161,6 +166,12 @@ func (g *fakeGit) PushRewritesHistory(string, string) (bool, error) {
 // the run claims no span, matching a first push with nothing behind it.
 func (g *fakeGit) PushSpanBase(string, string) (string, error) {
 	return g.spanBase, g.spanBaseErr
+}
+
+func (g *fakeGit) SpanTrailers(base, head string) ([]domain.CommitTrailers, error) {
+	key := base + ".." + head
+	g.spanTrailerReads = append(g.spanTrailerReads, key)
+	return g.spanTrailers[key], g.spanTrailersErr
 }
 
 // UnmergedRemoteCommits scripts commits present only on the remote. Empty (the
@@ -329,6 +340,9 @@ func newRunner(t *testing.T, git *fakeGit, kernel *fakeKernel, approver Approver
 		Settings: Settings{Version: "test", Remote: "origin"},
 		Now:      func() time.Time { return time.Unix(0, 0).UTC() },
 		NewID:    func() string { return "run_test" },
+		// An empty environment: the test process may itself run under an
+		// agent harness, whose markers must not leak into the run.
+		Environ: func() []string { return nil },
 	}
 }
 
