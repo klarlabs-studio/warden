@@ -89,6 +89,17 @@ type profileDefinition struct {
 	// satisfying the approval gate: a run started there that needs approval
 	// ends needs_approval instead of being auto-approved.
 	NoAgentSurfaceApproval bool `json:"no_agent_surface_approval,omitempty"`
+	// RequireAgentExecution fails an agent step that has no agent or command
+	// to run, instead of passing it as skipped.
+	RequireAgentExecution bool `json:"require_agent_execution,omitempty"`
+	// IsolateAgents runs agent steps in a disposable clone, with a guard on
+	// the tracked tree, index and HEAD; a clone failure fails the step.
+	IsolateAgents bool `json:"isolate_agents,omitempty"`
+	// AgentEnvAllowlist gives agent steps only the base environment and their
+	// preset's documented credential variables.
+	AgentEnvAllowlist bool `json:"agent_env_allowlist,omitempty"`
+	// BundledAgentsOnly refuses an agent that is not a bundled preset.
+	BundledAgentsOnly bool `json:"bundled_agents_only,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -107,6 +118,8 @@ var builtinProfiles = map[string]profileDefinition{
 		AgentTimeout:           DefaultAgentTimeout,
 		SigningRequired:        true,
 		NoAgentSurfaceApproval: true,
+		RequireAgentExecution:  true,
+		IsolateAgents:          true,
 	},
 	"strict@1": {
 		Name: "strict", Version: 1, Level: ProfileStrict,
@@ -123,6 +136,10 @@ var builtinProfiles = map[string]profileDefinition{
 		AgentTimeoutRequired:   true,
 		SigningRequired:        true,
 		NoAgentSurfaceApproval: true,
+		RequireAgentExecution:  true,
+		IsolateAgents:          true,
+		AgentEnvAllowlist:      true,
+		BundledAgentsOnly:      true,
 	},
 }
 
@@ -286,6 +303,7 @@ const (
 	FloorNoAgentWrites   = "no-agent-writes"
 	FloorAgentTimeout    = "agent-timeout"
 	FloorSigningRequired = "signing-required"
+	FloorBundledAgents   = "bundled-agents"
 )
 
 // Floors lists the floors this profile checks at load, in a fixed order.
@@ -316,6 +334,9 @@ func (p ComplianceProfile) Floors() []ProfileFloor {
 	}
 	if d.SigningRequired {
 		out = append(out, ProfileFloor{FloorSigningRequired, "signing.required is true"})
+	}
+	if d.BundledAgentsOnly {
+		out = append(out, ProfileFloor{FloorBundledAgents, "every agent named is a bundled preset (" + strings.Join(BundledAgents(), ", ") + ")"})
 	}
 	return out
 }
@@ -361,6 +382,8 @@ func (p ComplianceProfile) checkFloor(id string, cfg Config) []FloorViolation {
 		return checkAgentWrites(cfg)
 	case FloorAgentTimeout:
 		return checkAgentTimeouts(cfg)
+	case FloorBundledAgents:
+		return checkBundledAgents(cfg)
 	case FloorSigningRequired:
 		if !cfg.Signing.Required {
 			return []FloorViolation{{Floor: id, Field: "signing.required", Message: "must be true"}}
@@ -539,6 +562,55 @@ func checkAgentTimeouts(cfg Config) []FloorViolation {
 		})
 	}
 	return out
+}
+
+// checkBundledAgents refuses every agent the config names that is not a bundled
+// preset: the top-level agent: and each rule's then.agent. A custom agent's
+// environment needs are unknown, so the allowlist cannot serve it (ADR 0007
+// Q7). Overriding a bundled preset's command with agent_commands is not
+// refused: the agent keeps its preset's name, and with it the preset's
+// credential table, in a reviewed config.
+func checkBundledAgents(cfg Config) []FloorViolation {
+	var out []FloorViolation
+	if a := cfg.Agent; a != "" && !IsBundledAgent(a) {
+		out = append(out, FloorViolation{
+			Floor: FloorBundledAgents, Field: "agent",
+			Message: fmt.Sprintf("is %q; name a bundled preset (%s): a custom agent's environment needs are unknown, so it cannot run under an allowlisted environment", a, strings.Join(BundledAgents(), ", ")),
+			SetBy:   func(c Config) bool { return c.Agent == a },
+		})
+	}
+	for i, r := range cfg.Rules {
+		for _, s := range sortedStepKeys(r.Then.Agent) {
+			a := r.Then.Agent[s]
+			if IsBundledAgent(a) {
+				continue
+			}
+			out = append(out, FloorViolation{
+				Floor: FloorBundledAgents, Field: fmt.Sprintf("rules[%d].then.agent.%s", i, s),
+				Message: fmt.Sprintf("is %q; name a bundled preset (%s)", a, strings.Join(BundledAgents(), ", ")),
+				SetBy: func(c Config) bool {
+					for _, r := range c.Rules {
+						if r.Then.Agent[s] == a {
+							return true
+						}
+					}
+					return false
+				},
+			})
+		}
+	}
+	return out
+}
+
+// AgentBoundary returns what the profile enforces around an agent step at run
+// time. Callers decide which steps are agent steps (ResolvedPolicy does).
+func (p ComplianceProfile) AgentBoundary() AgentBoundary {
+	return AgentBoundary{
+		Profile:          p.String(),
+		RequireExecution: p.def.RequireAgentExecution,
+		Isolate:          p.def.IsolateAgents,
+		EnvAllowlist:     p.def.AgentEnvAllowlist,
+	}
 }
 
 // agentSteps lists the steps an agent can run under cfg: the built-in agent

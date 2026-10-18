@@ -79,6 +79,7 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		stepSC.ConfigurationDigest = policy.ConfigurationDigest
 		stepSC.Agent = policy.AgentFor(name)
 		stepSC.AgentCommand = domain.ResolveAgentCommand(policy.AgentCommands, stepSC.Agent)
+		stepSC.AgentBoundary = policy.AgentBoundaryFor(name)
 		stepSC.AutoFixBudget = policy.AutoFixBudget(name)
 		stepSC.Timeout = policy.TimeoutFor(name)
 		// Bind the run's step-tagged output sink into this step's OnOutput, so a

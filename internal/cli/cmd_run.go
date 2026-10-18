@@ -35,7 +35,8 @@ const (
 	// machine-global lock, and it was still held when warden's wait budget ran
 	// out. EX_TEMPFAIL — the canonical "nothing is wrong, retry later".
 	exitContention = 75
-	// exitEnvironment: a step's toolchain or dependencies are not installed.
+	// exitEnvironment: a step's toolchain or dependencies are not installed,
+	// or the config cannot run a step its compliance profile requires.
 	// EX_CONFIG — deliberately NOT in the retryable range, because retrying an
 	// unprepared checkout produces the identical failure forever.
 	exitEnvironment = 78
@@ -66,7 +67,7 @@ func exitForBlocker(b domain.Blocker) int {
 	switch b {
 	case domain.BlockerContention:
 		return exitContention
-	case domain.BlockerEnvironment:
+	case domain.BlockerEnvironment, domain.BlockerConfig:
 		return exitEnvironment
 	default:
 		return 1

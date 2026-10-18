@@ -164,3 +164,69 @@ func TestAgentStep_NamesTheAgentItRan(t *testing.T) {
 		t.Errorf("a skipped agent step ran no agent, got %q", skipped.Agent)
 	}
 }
+
+// Under a profile that requires agent steps to execute, a missing agent or
+// command is a failure with a config blocker, naming the profile and the fix,
+// and never runs anything.
+func TestAgentStep_RequiredExecutionFailsWithConfigBlocker(t *testing.T) {
+	step := NewAgentStep(domain.StepReview, "review")
+	boundary := domain.AgentBoundary{Profile: "standard@1", RequireExecution: true}
+	for _, tc := range []struct {
+		sc   application.StepContext
+		want string
+	}{
+		{application.StepContext{WorktreeDir: t.TempDir(), AgentBoundary: boundary}, "set `agent: claude` or `agent: codex`"},
+		{application.StepContext{WorktreeDir: t.TempDir(), Agent: "faux", AgentBoundary: boundary}, "add agent_commands.faux"},
+	} {
+		res, err := step.Run(context.Background(), tc.sc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != domain.StepFail || res.Blocker != domain.BlockerConfig || res.ExecutionOutcome() != domain.StepSkipped {
+			t.Fatalf("want a config-blocked failure that did not execute, got %+v", res)
+		}
+		if !strings.Contains(res.Findings[0].Message, "profile standard@1 requires review to run") || !strings.Contains(res.Findings[0].Message, tc.want) {
+			t.Errorf("message must name the profile and the fix %q: %s", tc.want, res.Findings[0].Message)
+		}
+	}
+}
+
+// Under strict the agent sees only the allowlist: a token in warden's own
+// environment does not reach it, while its preset's documented key does.
+func TestAgentStep_EnvAllowlist(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("command assumes a POSIX shell")
+	}
+	t.Setenv("FAKE_TOKEN", "leak")
+	t.Setenv("ANTHROPIC_API_KEY", "key")
+	cmd := `test -z "$FAKE_TOKEN" && test "$ANTHROPIC_API_KEY" = key`
+	step := NewAgentStep(domain.StepReview, "review")
+	run := func(b domain.AgentBoundary) domain.StepResult {
+		res, err := step.Run(context.Background(), application.StepContext{WorktreeDir: t.TempDir(), Agent: "claude", AgentCommand: cmd, AgentBoundary: b})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := run(domain.AgentBoundary{Profile: "strict@1", EnvAllowlist: true, Isolate: true}); res.Status != domain.StepPass || res.AgentBoundary == nil || !res.AgentBoundary.EnvAllowlisted {
+		t.Errorf("strict: the agent must see only the allowlist: %+v", res)
+	}
+	if res := run(domain.AgentBoundary{}); res.Status != domain.StepFail || res.AgentBoundary != nil {
+		t.Errorf("without a profile the agent keeps the full environment, as before: %+v", res)
+	}
+}
+
+// A custom agent under an allowlisted environment is refused without running.
+func TestAgentStep_EnvAllowlistRefusesCustomAgent(t *testing.T) {
+	step := NewAgentStep(domain.StepReview, "review")
+	res, err := step.Run(context.Background(), application.StepContext{
+		WorktreeDir: t.TempDir(), Agent: "faux", AgentCommand: "touch ran",
+		AgentBoundary: domain.AgentBoundary{Profile: "strict@1", EnvAllowlist: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.StepFail || res.Blocker != domain.BlockerConfig || !strings.Contains(res.Summary, "not a bundled preset") {
+		t.Fatalf("custom agent under strict: %+v", res)
+	}
+}

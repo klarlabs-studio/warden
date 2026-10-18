@@ -1,12 +1,16 @@
 package git
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // Worktree is a disposable git worktree Warden validates in, isolated from the
@@ -372,6 +376,29 @@ func (w *Worktree) Remove() error {
 		return fmt.Errorf("git: remove worktree dir: %w", rmErr)
 	}
 	return nil
+}
+
+// TreeState captures the worktree's tracked state for the agent tree guard:
+// HEAD, the tree its index would write (`git write-tree`, the Husky bridge's
+// check), and a digest of the tracked files' unstaged changes. Untracked files
+// take no part, so an agent may leave generated output behind. write-tree
+// stores the index's tree object in the shared object database, which changes
+// no ref, index or file.
+func (w *Worktree) TreeState() (domain.TreeState, error) {
+	head, err := runIn(w.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		return domain.TreeState{}, err
+	}
+	index, err := runIn(w.Dir, "write-tree")
+	if err != nil {
+		return domain.TreeState{}, err
+	}
+	diff, err := runRawIn(w.Dir, "diff", "--binary", "--no-ext-diff", "--no-textconv")
+	if err != nil {
+		return domain.TreeState{}, err
+	}
+	sum := sha256.Sum256([]byte(diff))
+	return domain.TreeState{Head: head, Index: index, Unstaged: hex.EncodeToString(sum[:])}, nil
 }
 
 // TrackedDirty compares both index and working tree with the checked commit.
