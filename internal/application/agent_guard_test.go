@@ -183,3 +183,25 @@ func TestAgentGuard_KeptWritesAreNotIsolated(t *testing.T) {
 		t.Fatalf("kept writes were isolated: %d clones", len(wt.clones))
 	}
 }
+
+// The guard's observations are what the signed record's step outcomes carry:
+// a review that ran in a guarded clone under standard is recorded as isolated
+// with its tree unchanged, and with no environment claim, since standard does
+// not scrub the agent's environment.
+func TestAgentGuard_ObservationsReachTheRecordedOutcomes(t *testing.T) {
+	wt := &fakeWorktree{dir: "/wt", headSHA: "sha1"}
+	kernel := &fakeKernel{results: map[domain.StepName]domain.StepResult{
+		domain.StepReview: {Step: domain.StepReview, Status: domain.StepPass, Agent: "claude"},
+	}}
+	run := runGuardBatch(t, guardPolicy("standard@1", false, domain.StepReview, domain.StepTest), wt, kernel)
+	obs := run.StepOutcomes()[domain.StepReview]
+	if obs.Isolated == nil || !*obs.Isolated || obs.TreeUnchanged == nil || !*obs.TreeUnchanged {
+		t.Fatalf("review outcome lacks the guard's observations: %+v", obs)
+	}
+	if obs.EnvAllowlisted != nil {
+		t.Errorf("standard does not allowlist the environment, so nothing may claim it: %+v", obs)
+	}
+	if test := run.StepOutcomes()[domain.StepTest]; test.Isolated != nil || test.TreeUnchanged != nil {
+		t.Errorf("a shell step carries no agent boundary: %+v", test)
+	}
+}

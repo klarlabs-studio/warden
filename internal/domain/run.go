@@ -279,6 +279,11 @@ func (r *Run) StepOutcomes() map[StepName]StepObservation {
 		obs := StepObservation{Outcome: res.ObservedOutcome()}
 		if obs.Outcome == StepExecuted {
 			obs.Agent = res.Agent
+			// Only an agent that ran now has a boundary to report; a cached or
+			// skipped agent step ran nothing.
+			if res.Agent != "" {
+				obs.observeAgentBoundary(res.AgentBoundary)
+			}
 		}
 		out[res.Step] = obs
 	}
