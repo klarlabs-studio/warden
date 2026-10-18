@@ -21,6 +21,11 @@ func TestShellStep(t *testing.T) {
 		if res.Status != domain.StepPass {
 			t.Errorf("status = %s, want pass", res.Status)
 		}
+		// Nothing examined the change, so a profiled run's signed record must
+		// not say this step executed.
+		if res.Outcome != domain.StepSkipped || res.OutcomeReason != "no command configured" {
+			t.Errorf("an unconfigured shell step must be marked skipped, got %q (%q)", res.Outcome, res.OutcomeReason)
+		}
 	})
 
 	t.Run("zero exit passes", func(t *testing.T) {
