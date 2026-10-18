@@ -46,11 +46,14 @@ func (o stepObserver) OnStep(e application.StepEvent) {
 	if e.Phase != application.StepFinished {
 		return
 	}
+	n, _ := e.Result.Note()
 	o.onStep(mcpserver.StepProgress{
-		Step:     e.Step,
-		Status:   string(e.Result.Status),
-		Summary:  e.Result.Summary,
-		Findings: e.Result.Findings,
+		Step:          e.Step,
+		Status:        string(e.Result.Status),
+		Outcome:       string(e.Result.ExecutionOutcome()),
+		OutcomeReason: n.Reason,
+		Summary:       e.Result.Summary,
+		Findings:      e.Result.Findings,
 	})
 }
 
@@ -63,11 +66,12 @@ func (f facade) runTrigger(ctx context.Context, hook domain.Hook, onStep func(mc
 		return mcpserver.RunSummary{}, err
 	}
 	summary := mcpserver.RunSummary{
-		Outcome:  string(res.Outcome),
-		Hook:     string(res.Hook),
-		Steps:    res.Policy.Steps,
-		Findings: res.Findings,
-		Message:  res.Message,
+		Outcome:      string(res.Outcome),
+		Hook:         string(res.Hook),
+		Steps:        res.Policy.Steps,
+		StepOutcomes: res.StepNotes,
+		Findings:     res.Findings,
+		Message:      res.Message,
 		// Carry the blocker through: the run already decided whether the
 		// obstacle was the machine or the change, and an agent needs that
 		// verdict as data, not prose.

@@ -336,7 +336,11 @@ func (r *predictionReporter) OnStep(event application.StepEvent) {
 	if event.Result.Blocker != domain.BlockerNone {
 		r.blockers = append(r.blockers, event.Result.Blocker)
 	}
-	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", event.Result.Status, event.Result.Summary)
+	status := string(event.Result.Status)
+	if n, ok := event.Result.Note(); ok {
+		status += " (" + string(n.Outcome) + ")"
+	}
+	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", status, event.Result.Summary)
 	if event.Result.Status != domain.StepPass {
 		printFindings(r.w, event.Result.Findings)
 	}

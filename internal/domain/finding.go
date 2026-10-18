@@ -128,4 +128,74 @@ type StepResult struct {
 	// Blocker, when set, says the step FAILED WITHOUT RUNNING for an
 	// environmental reason. It is meaningful only alongside StepFail.
 	Blocker Blocker
+	// Outcome says whether the step actually EXECUTED, or passed without doing
+	// its work — served from the input cache, or skipped because nothing was
+	// configured to perform it. The zero value means executed. It is not a
+	// verdict: Status alone decides the gate. It exists so the people and
+	// agents reading a run are not told "review passed" about a review nobody
+	// performed. OutcomeReason is the short clause explaining a non-executed
+	// outcome ("no agent configured", "inputs unchanged").
+	//
+	// Neither field is part of the signed RunRecord or the evidence chain;
+	// they are read only by delivery surfaces.
+	Outcome       StepOutcome
+	OutcomeReason string
+}
+
+// StepOutcome classifies whether a passing (or failing) step did its work. See
+// StepResult.Outcome.
+type StepOutcome string
+
+const (
+	// StepExecuted is the ordinary case: the step ran its command or agent.
+	StepExecuted StepOutcome = "executed"
+	// StepCached means an identical earlier pass was reused; nothing ran now.
+	StepCached StepOutcome = "cached"
+	// StepSkipped means nothing was configured to perform the step, so it
+	// passed without examining the change.
+	StepSkipped StepOutcome = "skipped"
+)
+
+// ExecutionOutcome normalises Outcome for readers: an unset Outcome is
+// StepExecuted, and a result carrying prediction Reuse is StepCached even when
+// the step that produced it did not set the field.
+func (r StepResult) ExecutionOutcome() StepOutcome {
+	switch {
+	case r.Outcome != "":
+		return r.Outcome
+	case r.Reuse != nil:
+		return StepCached
+	default:
+		return StepExecuted
+	}
+}
+
+// OutcomeNote is the non-executed outcome of one step, as delivery surfaces
+// report it.
+type OutcomeNote struct {
+	Outcome StepOutcome `json:"outcome"`
+	Reason  string      `json:"reason,omitempty"`
+}
+
+// Note returns the step's outcome note, and false when the step executed (and
+// so has nothing to qualify).
+func (r StepResult) Note() (OutcomeNote, bool) {
+	o := r.ExecutionOutcome()
+	if o == StepExecuted {
+		return OutcomeNote{}, false
+	}
+	reason := r.OutcomeReason
+	if reason == "" && r.Reuse != nil {
+		reason = "matched a staged prediction"
+	}
+	return OutcomeNote{Outcome: o, Reason: reason}, true
+}
+
+// String renders the note as the clause that follows a step name:
+// "skipped, no agent configured".
+func (n OutcomeNote) String() string {
+	if n.Reason == "" {
+		return string(n.Outcome)
+	}
+	return string(n.Outcome) + ", " + n.Reason
 }

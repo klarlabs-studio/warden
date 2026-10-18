@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 
 	"go.klarlabs.de/axi/toon"
 
@@ -294,6 +295,10 @@ func axiRunTrigger(f facade, args []string, stdout, stderr io.Writer) int {
 		"provenance":     summary.Provenance,
 		"push_performed": summary.PushPerformed,
 		"warnings":       anyStrings(summary.Warnings),
+		// A step listed in policy but passed without executing (cached, or
+		// skipped for want of an agent) is named here, so an agent never reads
+		// a skipped review as one that ran.
+		"step_outcomes": stepOutcomeMaps(summary.StepOutcomes),
 		// findings/blocker/retryable are what make a failure actionable. Without
 		// them the verb reports only THAT something went wrong, leaving an agent
 		// to re-run the gate interactively to discover what — which is exactly
@@ -367,6 +372,22 @@ func anyStrings(ss []string) []any {
 	out := make([]any, len(ss))
 	for i, s := range ss {
 		out[i] = s
+	}
+	return out
+}
+
+// stepOutcomeMaps renders the non-executed steps as uniform rows for TOON, in a
+// stable (sorted) order so the output does not churn between identical runs.
+func stepOutcomeMaps(notes map[domain.StepName]domain.OutcomeNote) []any {
+	names := make([]string, 0, len(notes))
+	for s := range notes {
+		names = append(names, string(s))
+	}
+	sort.Strings(names)
+	out := make([]any, 0, len(names))
+	for _, s := range names {
+		n := notes[domain.StepName(s)]
+		out = append(out, map[string]any{"step": s, "outcome": string(n.Outcome), "reason": n.Reason})
 	}
 	return out
 }
