@@ -58,6 +58,15 @@ spec:
       description: Optional inspected sha256 image ID to require with container-steps.
       default: ''
       regex: '^(sha256:[0-9a-f]{64})?$'
+    min-profile:
+      description: >-
+        Optional minimum compliance profile (permissive, standard or strict,
+        optionally name@version) the note must conform to, recomputed from its
+        signed observations. Needs a warden-version that supports --min-profile;
+        an older one rejects the flag and the job fails as a configuration
+        error in both modes.
+      default: ''
+      regex: '^((permissive|standard|strict)(@[1-9][0-9]*)?)?$'
     warden-version:
       description: >-
         warden release to install (0.29.0 or newer: it must publish a cosign
@@ -186,6 +195,7 @@ warden-verify:
       in_requirements='$[[ inputs.requirements ]]'
       in_container_steps='$[[ inputs.container-steps ]]'
       in_container_image_id='$[[ inputs.container-image-id ]]'
+      in_min_profile='$[[ inputs.min-profile ]]'
       mode='$[[ inputs.on-unverified ]]'
 
       project_dir="${CI_PROJECT_DIR:-$PWD}"
@@ -245,6 +255,7 @@ warden-verify:
       [[ $keys =~ ^[A-Za-z0-9+/=,[:space:]]*$ ]] || config_error "key holds characters no key or fingerprint uses"
       [[ $in_container_steps =~ ^[A-Za-z0-9_.,-]*$ ]] || config_error "invalid container-steps"
       [[ $in_container_image_id =~ ^(sha256:[0-9a-f]{64})?$ ]] || config_error "invalid container-image-id"
+      [[ $in_min_profile =~ ^((permissive|standard|strict)(@[1-9][0-9]*)?)?$ ]] || config_error "invalid min-profile"
       if [ -z "${WARDEN_BIN_DIR:-}" ] || [ ! -x "$WARDEN_BIN_DIR/warden" ]; then
         config_error "no installed warden at \$WARDEN_BIN_DIR/warden"
       fi
@@ -300,6 +311,7 @@ warden-verify:
       if [ -n "$requirements" ]; then args+=(--requirements "$requirements"); fi
       if [ -n "$in_container_steps" ]; then args+=(--container-steps "$in_container_steps"); fi
       if [ -n "$in_container_image_id" ]; then args+=(--container-image-id "$in_container_image_id"); fi
+      if [ -n "$in_min_profile" ]; then args+=(--min-profile "$in_min_profile"); fi
       echo "+ warden ${args[*]}"
       set +e
       "$WARDEN_BIN_DIR/warden" "${args[@]}" </dev/null

@@ -622,3 +622,52 @@ func writeVerdict(t *testing.T, dir, validated, sha string) {
 		t.Fatal(err)
 	}
 }
+
+// min-profile is a fixed-text input: its regex admits only a known level with
+// an optional version, the job re-checks it, and it reaches the verifier as one
+// argument. A verifier that rejects the flag (exit 2) is a configuration error,
+// never a verdict.
+func TestGitLabTemplate_MinProfile(t *testing.T) {
+	requirePOSIX(t)
+	inputs, _ := loadGitLabTemplate(t)
+	re := regexp.MustCompile(inputs["min-profile"].Regex)
+	for _, ok := range []string{"", "permissive", "standard", "strict", "strict@1", "standard@12"} {
+		if !re.MatchString(ok) {
+			t.Errorf("min-profile regex rejects legitimate %q", ok)
+		}
+	}
+	for _, bad := range []string{"paranoid", "strict@0", "strict@", "@1", "Strict", "strict@1@2", "strict ", "$MIN_PROFILE"} {
+		if re.MatchString(bad) {
+			t.Errorf("min-profile regex accepts %q", bad)
+		}
+	}
+
+	const pin = "641e75b15812b7b6"
+	f := newVerifyFixture(t, true)
+	out, code := f.run(map[string]string{"key": pin, "min-profile": "strict@1"})
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if args, want := f.args(), []string{"verify", "--commit", f.sha, "--key", pin, "--min-profile", "strict@1"}; !reflect.DeepEqual(args, want) {
+		t.Fatalf("arguments %q, want %q", args, want)
+	}
+	if v := f.verdict(); v["WARDEN_VALIDATED"] != "true" {
+		t.Fatalf("verdict %v", v)
+	}
+
+	f = newVerifyFixture(t, true)
+	out, code = f.run(map[string]string{"key": pin, "min-profile": "strict", "on-unverified": "run-checks"}, "VERIFY_STATUS=2")
+	if v := f.verdict(); code != 2 || v["WARDEN_VALIDATED"] != "false" || v["WARDEN_VERDICT"] != "error" {
+		t.Fatalf("a verifier that cannot check the profile must be a configuration error (exit %d, %v): %s", code, v, out)
+	}
+
+	f = newVerifyFixture(t, true)
+	if _, code := f.run(map[string]string{"key": pin}); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, a := range f.args() {
+		if a == "--min-profile" {
+			t.Fatal("an empty min-profile must not pass the flag")
+		}
+	}
+}
