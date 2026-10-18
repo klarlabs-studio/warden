@@ -94,6 +94,11 @@ const (
 	// installed in the checkout (`sh: astro: command not found`). Retrying
 	// changes nothing; a human must run the remediation first.
 	BlockerEnvironment Blocker = "environment"
+	// BlockerConfig means the repository's own configuration cannot satisfy
+	// what its compliance profile requires of the step: an agent step the
+	// profile requires to run has no agent or command to run it. Retrying
+	// changes nothing; the config must change.
+	BlockerConfig Blocker = "config"
 )
 
 // Retryable reports whether re-running the same step unchanged could plausibly
@@ -106,6 +111,7 @@ func (b Blocker) Retryable() bool { return b == BlockerContention }
 var blockerReasons = map[Blocker]string{
 	BlockerContention:  "another process holds its lock",
 	BlockerEnvironment: "its toolchain or dependencies are not installed",
+	BlockerConfig:      "its compliance profile cannot run it as configured",
 }
 
 // Reason is the short human explanation of why the step never ran, or "" for
@@ -140,6 +146,12 @@ type StepResult struct {
 	// they are read only by delivery surfaces.
 	Outcome       StepOutcome
 	OutcomeReason string
+	// AgentBoundary is what warden observed about an agent step's execution
+	// boundary under a profile that enforces one (isolation, tree guard,
+	// environment); nil otherwise. Like Outcome it is not part of the signed
+	// RunRecord or the evidence chain today; it is the observation a record
+	// field can carry.
+	AgentBoundary *AgentBoundaryObservation
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See

@@ -34,8 +34,14 @@ type StepContext struct {
 	// Agent is the resolved coding-agent name for this step ("" = none).
 	Agent string
 	// AgentCommand is the resolved shell command template for Agent, or "" when
-	// no command is configured (the step then advisory-skips).
+	// no command is configured (the step then advisory-skips, unless
+	// AgentBoundary.RequireExecution makes that a failure).
 	AgentCommand string
+	// AgentBoundary is what the compliance profile enforces around this step
+	// when it is an agent step; the zero value (no profile, permissive, or not
+	// an agent step) enforces nothing. The runner owns isolation and the tree
+	// guard; the step owns required execution and the environment.
+	AgentBoundary domain.AgentBoundary
 	// AutoFixBudget bounds how many times an auto-fixing step may retry its
 	// fix within a single run (§5.4, resolved from auto_fix.<step>).
 	AutoFixBudget int

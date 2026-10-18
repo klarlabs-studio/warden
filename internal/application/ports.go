@@ -91,6 +91,9 @@ type Worktree interface {
 	// DiffSince returns a patch of everything changed in the worktree relative
 	// to the commit it was seeded from — used to re-apply pre-commit fixes.
 	DiffSince() (string, error)
+	// TreeState captures HEAD, the index tree and the tracked files' unstaged
+	// changes, for the guard around agent steps under a compliance profile.
+	TreeState() (domain.TreeState, error)
 	Remove() error
 }
 

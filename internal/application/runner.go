@@ -794,12 +794,35 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 // step up front so the UI shows them running together, and a finish event per
 // step as it completes.
 func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, batch []domain.StepName, wt Worktree, reg *worktreeRegistry, resolved domain.ResolvedPolicy) error {
+	// Agent steps a compliance profile isolates get their own guarded clone in
+	// either path below; without a profile this clones and captures nothing.
+	iso, failed, err := isolateAgents(batch, wt, reg, resolved)
+	defer func() {
+		iso.cleanup()
+		reg.reset()
+	}()
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		r.notify(StepEvent{Step: failed.Step, Phase: StepStarted})
+		if err := run.RecordStep(*failed); err != nil {
+			return err
+		}
+		r.notify(StepEvent{Step: failed.Step, Phase: StepFinished, Result: *failed})
+		return nil
+	}
+
 	if len(batch) == 1 {
 		step := batch[0]
 		r.notify(StepEvent{Step: step, Phase: StepStarted})
 		out, err := kernel.Execute(ctx, step)
 		if err != nil {
 			return fmt.Errorf("step %s: %w", step, err)
+		}
+		out.Result = iso.checkClone(step, out.Result)
+		if out.Result, err = iso.checkCanonical(step, out.Result); err != nil {
+			return err
 		}
 		if err := run.RecordStep(out.Result); err != nil {
 			return err
@@ -817,8 +840,10 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 	// plus its dep materialization entirely — the dominant cost on large JS repos,
 	// one node_modules copy per step. An all-read-only batch clones nothing. A
 	// clone failure is best-effort: the writer falls back to the canonical
-	// worktree. All clones are torn down and the registry cleared after the batch,
-	// discarding the steps' side-effects.
+	// worktree — except for an agent step a profile isolates, which isolateAgents
+	// already cloned and fails rather than falls back. All clones are torn down
+	// and the registry cleared after the batch, discarding the steps'
+	// side-effects.
 	// Container checks also install platform-specific untracked dependencies, so
 	// isolate every parallel check and fail if that isolation cannot be created.
 	if wt != nil {
@@ -827,9 +852,11 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 			for _, c := range clones {
 				_ = c.Remove()
 			}
-			reg.reset()
 		}()
 		for _, step := range batch {
+			if iso.isolated(step) {
+				continue // already in its own guarded clone
+			}
 			if !resolved.WritesTree(step) && !resolved.Execution.ContainerEnabled() {
 				continue // host read-only: share the canonical worktree, no clone
 			}
@@ -849,11 +876,31 @@ func (r *Runner) runBatch(ctx context.Context, run *domain.Run, kernel Kernel, b
 		r.notify(StepEvent{Step: step, Phase: StepStarted})
 	}
 	onFinish := func(step domain.StepName, out StepOutcome) {
+		if iso.isolated(step) {
+			// Reported below, once the validated worktree has been compared
+			// after the whole batch: until then its verdict is not known.
+			iso.checkClone(step, out.Result)
+			return
+		}
 		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: out.Result})
 	}
 	outcomes, err := kernel.ExecuteBatch(ctx, batch, onFinish)
 	if err != nil {
 		return err
+	}
+	for i := range outcomes {
+		step := outcomes[i].Result.Step
+		if step == "" && i < len(batch) {
+			step = batch[i]
+		}
+		if !iso.isolated(step) {
+			continue
+		}
+		outcomes[i].Result = iso.checkClone(step, outcomes[i].Result)
+		if outcomes[i].Result, err = iso.checkCanonical(step, outcomes[i].Result); err != nil {
+			return err
+		}
+		r.notify(StepEvent{Step: step, Phase: StepFinished, Result: outcomes[i].Result})
 	}
 	// Fold outcomes in declared order. A failing step terminates the run, so
 	// stop before recording into an already-terminal run — otherwise a second
