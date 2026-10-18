@@ -117,6 +117,10 @@ To require the exact inspected image, also pass
 record's `image_id`: a config digest for Docker-compatible engines or a platform
 manifest digest for Apple. It is not Apple's multi-platform index digest. These
 requirements apply to single-commit verification; `--range` does not accept them.
+`--container-steps` does not check the recorded network: a check that ran with
+`network: bridge` satisfies it. To require `network: none` as well, use
+`--requirements` or `--min-profile strict` (see
+[compliance profiles](agent-profiles.md#checking-a-profile-in-ci)).
 The GitHub `warden-verify` action also accepts `container-steps` and
 `container-image-id` inputs. Select a released Warden version that includes
 these flags; an older binary rejects them and the action runs CI checks.
