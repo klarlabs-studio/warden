@@ -77,15 +77,20 @@ type RangeVerifyRequest struct {
 
 // RunSummary is a delivery-neutral run result the MCP tool returns.
 type RunSummary struct {
-	Outcome       string            `json:"outcome"` // passed|failed|rejected|aborted
-	Hook          string            `json:"hook"`
-	Steps         []domain.StepName `json:"steps"`
-	Findings      []domain.Finding  `json:"findings"`
-	Message       string            `json:"message"`
-	RunID         string            `json:"run_id,omitempty"`
-	Provenance    string            `json:"provenance,omitempty"`
-	PushPerformed bool              `json:"push_performed"`
-	Warnings      []string          `json:"warnings,omitempty"`
+	Outcome string            `json:"outcome"` // passed|failed|rejected|aborted
+	Hook    string            `json:"hook"`
+	Steps   []domain.StepName `json:"steps"`
+	// StepOutcomes names the steps that passed WITHOUT executing — cached, or
+	// skipped because no agent was configured — with why. A step in Steps but
+	// absent here executed. Without it an agent reads a skipped review in
+	// Steps as a review that ran.
+	StepOutcomes  map[domain.StepName]domain.OutcomeNote `json:"step_outcomes,omitempty"`
+	Findings      []domain.Finding                       `json:"findings"`
+	Message       string                                 `json:"message"`
+	RunID         string                                 `json:"run_id,omitempty"`
+	Provenance    string                                 `json:"provenance,omitempty"`
+	PushPerformed bool                                   `json:"push_performed"`
+	Warnings      []string                               `json:"warnings,omitempty"`
 	// Blocker names the environmental obstacle that ended a failed run — a
 	// tool's lock, a missing toolchain — rather than the change itself; empty
 	// means the verdict is about the change. Retryable is the actionable half:

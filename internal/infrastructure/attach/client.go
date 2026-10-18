@@ -65,7 +65,11 @@ func render(w io.Writer, ev Event) {
 			if ev.Status == string(domain.StepFail) {
 				glyph = "✗"
 			}
-			_, _ = fmt.Fprintf(w, "%s %s\n", glyph, ev.Step)
+			line := glyph + " " + ev.Step
+			if ev.StepOutcome != "" {
+				line += ": " + domain.OutcomeNote{Outcome: domain.StepOutcome(ev.StepOutcome), Reason: ev.StepReason}.String()
+			}
+			_, _ = fmt.Fprintln(w, line)
 			for _, f := range ev.Findings {
 				loc := f.File
 				if f.Line > 0 {

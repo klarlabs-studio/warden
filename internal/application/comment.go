@@ -19,12 +19,35 @@ func prComment(res RunResult, branch string) string {
 	b.WriteString(commentMarker + "\n")
 	b.WriteString("### ✅ Warden gate passed\n\n")
 
-	steps := res.Policy.Steps
-	fmt.Fprintf(&b, "Pushed `%s` after running **%d step%s**", branch, len(steps), plural(len(steps)))
-	if len(steps) > 0 {
-		b.WriteString(": " + codeList(steps))
+	// "after running" counts only steps that executed. A step that passed
+	// without executing (cached, or skipped for want of an agent) is listed
+	// separately with why: a reviewer reading `review` in the ran-list would
+	// assume a review was performed.
+	var ran, notRan []domain.StepName
+	for _, s := range res.Policy.Steps {
+		if _, ok := res.StepNotes[s]; ok {
+			notRan = append(notRan, s)
+		} else {
+			ran = append(ran, s)
+		}
+	}
+	fmt.Fprintf(&b, "Pushed `%s` after running **%d step%s**", branch, len(ran), plural(len(ran)))
+	if len(ran) > 0 {
+		b.WriteString(": " + codeList(ran))
 	}
 	b.WriteString(".\n\n")
+	if len(notRan) > 0 {
+		b.WriteString("Passed without running:\n")
+		for _, s := range notRan {
+			n := res.StepNotes[s]
+			fmt.Fprintf(&b, "- `%s`: **%s**", s, n.Outcome)
+			if n.Reason != "" {
+				b.WriteString(" — " + n.Reason)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if rec := res.Record; rec != nil {
 		fmt.Fprintf(&b, "**Provenance:** `%s` · chain-intact", rec.RunID)

@@ -40,6 +40,9 @@ type stepView struct {
 	// lastLine is the most recent output line the step emitted, shown as a live
 	// tail beneath a running step.
 	lastLine string
+	// note qualifies a finished step that passed without executing, e.g.
+	// "skipped, no agent configured". Empty when the step executed.
+	note string
 }
 
 // elapsed returns how long the step has run (live if still running).
@@ -159,6 +162,9 @@ func (m *model) applyStep(e application.StepEvent) {
 		} else {
 			m.steps[i].status = stepPass
 		}
+		if n, ok := e.Result.Note(); ok {
+			m.steps[i].note = n.String()
+		}
 		m.findings = append(m.findings, e.Result.Findings...)
 		return
 	}
@@ -215,6 +221,9 @@ func (m model) View() string {
 			}
 		} else {
 			line = "  " + m.stepGlyph(s.status) + " " + string(s.name)
+			if s.note != "" { // passed without executing: say so, never a bare ✓
+				line += styMuted.Render(": " + s.note)
+			}
 			if !s.finished.IsZero() { // completed → show how long it took
 				line += styMuted.Render("  " + fmtDur(s.elapsed(m.now)))
 			}

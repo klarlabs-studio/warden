@@ -60,6 +60,8 @@ func TestServerClientRoundTrip(t *testing.T) {
 	srv.OnStep(application.StepEvent{Step: "test", Phase: application.StepOutput, Line: "=== RUN"})
 	srv.OnStep(application.StepEvent{Step: "test", Phase: application.StepFinished,
 		Result: domain.StepResult{Step: "test", Status: domain.StepPass}})
+	srv.OnStep(application.StepEvent{Step: "review", Phase: application.StepFinished,
+		Result: domain.StepResult{Step: "review", Status: domain.StepPass, Outcome: domain.StepSkipped, OutcomeReason: "no agent configured"}})
 	srv.OnStep(application.StepEvent{Step: "lint", Phase: application.StepFinished,
 		Result: domain.StepResult{Step: "lint", Status: domain.StepFail,
 			Findings: []domain.Finding{{Severity: domain.SeverityHigh, File: "a.go", Line: 3, Message: "bad"}}}})
@@ -75,7 +77,7 @@ func TestServerClientRoundTrip(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"▶ test", "=== RUN", "✓ test", "✗ lint", "a.go:3", "bad", "passed", "pushed"} {
+	for _, want := range []string{"▶ test", "=== RUN", "✓ test\n", "✓ review: skipped, no agent configured", "✗ lint", "a.go:3", "bad", "passed", "pushed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stream missing %q:\n%s", want, out)
 		}

@@ -45,6 +45,24 @@ func TestModel_StepTransitions(t *testing.T) {
 	}
 }
 
+func TestModel_SkippedStepIsLabelled(t *testing.T) {
+	events := make(chan tea.Msg, 8)
+	m := newModel(domain.PrePush, []domain.StepName{"lint", "review"}, events)
+	next, _ := m.Update(stepMsg{Step: "lint", Phase: application.StepFinished,
+		Result: domain.StepResult{Step: "lint", Status: domain.StepPass}})
+	m = next.(model)
+	next, _ = m.Update(stepMsg{Step: "review", Phase: application.StepFinished,
+		Result: domain.StepResult{Step: "review", Status: domain.StepPass, Outcome: domain.StepSkipped, OutcomeReason: "no agent configured"}})
+	m = next.(model)
+	view := m.View()
+	if !strings.Contains(view, "review: skipped, no agent configured") {
+		t.Errorf("view must label the skipped review:\n%s", view)
+	}
+	if strings.Contains(view, "lint:") {
+		t.Errorf("an executed step must carry no label:\n%s", view)
+	}
+}
+
 func TestModel_ApprovalFlow(t *testing.T) {
 	events := make(chan tea.Msg, 8)
 	m := newModel(domain.PrePush, []domain.StepName{"review"}, events)

@@ -204,7 +204,8 @@ func (r *Run) addFindings(fs []Finding) {
 // ExecutionEnvironments reports only environments observed by executed steps.
 func (r *Run) ExecutionEnvironments() map[StepName]ExecutionEnvironment {
 	var out map[StepName]ExecutionEnvironment
-	for _, res := range r.results {
+	for i := range r.results {
+		res := &r.results[i]
 		if res.Environment != nil && res.Reuse == nil {
 			if out == nil {
 				out = make(map[StepName]ExecutionEnvironment)
@@ -242,6 +243,23 @@ func (r *Run) ExecutionReuses() map[StepName]ExecutionReuse {
 				out = make(map[StepName]ExecutionReuse)
 			}
 			out[res.Step] = *res.Reuse
+		}
+	}
+	return out
+}
+
+// StepNotes reports the steps that passed through the run WITHOUT executing —
+// cached or skipped — with why. A step absent from the map executed. Delivery
+// surfaces use it so a skipped review is never presented as a review that ran;
+// it is deliberately not part of the signed record (see StepResult.Outcome).
+func (r *Run) StepNotes() map[StepName]OutcomeNote {
+	var out map[StepName]OutcomeNote
+	for i := range r.results {
+		if n, ok := r.results[i].Note(); ok {
+			if out == nil {
+				out = make(map[StepName]OutcomeNote)
+			}
+			out[r.results[i].Step] = n
 		}
 	}
 	return out

@@ -53,6 +53,14 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	_, _ = fmt.Fprintln(stdout)
+	// The note lists the steps the policy gated, not whether each one did its
+	// work: a step served from the input cache, or an agent step skipped because
+	// no agent was configured, is recorded exactly like one that executed. Say
+	// so rather than let "steps run" vouch for a review nobody performed. The
+	// live run output (and axi/MCP results) name skipped and cached steps.
+	if len(rec.StepsRun) > 0 {
+		_, _ = fmt.Fprintln(stdout, whyOutcomesCaveat)
+	}
 
 	if len(rec.MatchedRules) > 0 {
 		_, _ = fmt.Fprintf(stdout, "matched rules: %s\n", strings.Join(rec.MatchedRules, ", "))
@@ -84,6 +92,10 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
+
+// whyOutcomesCaveat qualifies the step list read from a note, which does not
+// record whether a step executed, was cached, or was skipped.
+const whyOutcomesCaveat = "outcomes:      not recorded in the note — a cached step, or an agent step skipped for want of an agent, is listed like one that executed"
 
 func chainState(intact bool) string {
 	if intact {

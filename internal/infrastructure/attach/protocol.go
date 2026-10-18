@@ -34,13 +34,17 @@ type Event struct {
 	Status   string           `json:"status,omitempty"`
 	Line     string           `json:"line,omitempty"`
 	Findings []domain.Finding `json:"findings,omitempty"`
-	Outcome  string           `json:"outcome,omitempty"`
-	Message  string           `json:"message,omitempty"`
+	// StepOutcome/StepReason qualify a finished step that passed without
+	// executing ("skipped", "no agent configured"); empty when it executed.
+	StepOutcome string `json:"step_outcome,omitempty"`
+	StepReason  string `json:"step_reason,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 // eventFromStep projects a StepEvent onto the wire form.
 func eventFromStep(e application.StepEvent) Event {
-	return Event{
+	ev := Event{
 		Type:     "step",
 		Step:     string(e.Step),
 		Phase:    string(e.Phase),
@@ -48,6 +52,12 @@ func eventFromStep(e application.StepEvent) Event {
 		Line:     e.Line,
 		Findings: e.Result.Findings,
 	}
+	if e.Phase == application.StepFinished {
+		if n, ok := e.Result.Note(); ok {
+			ev.StepOutcome, ev.StepReason = string(n.Outcome), n.Reason
+		}
+	}
+	return ev
 }
 
 // doneEvent is the terminal message a run publishes when it finishes.

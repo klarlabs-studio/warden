@@ -22,8 +22,9 @@ import (
 // {prompt}/{step}/{repo} — Warden never guesses an agent CLI contract. The
 // subprocess is flaky by nature (network, rate limits), so it runs behind a
 // fortify retry + circuit-breaker chain (§4.4 resilience). When no agent is
-// resolved, or no command is configured for it, the step is an advisory pass —
-// a repo can run the deterministic steps (lint/test) without any agent.
+// resolved, or no command is configured for it, the step passes marked
+// StepSkipped — a repo can run the deterministic steps (lint/test) without any
+// agent, and no surface will claim the agent step ran.
 type AgentStep struct {
 	name   domain.StepName
 	prompt string
@@ -39,10 +40,19 @@ func (s AgentStep) Name() domain.StepName { return s.name }
 func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
 	command := expandTemplate(sc.AgentCommand, s.prompt, s.name, sc.WorktreeDir)
 	if sc.Agent == "" || strings.TrimSpace(command) == "" {
+		// Still a pass — an unconfigured agent step must not fail a repo that
+		// runs only deterministic checks — but marked as SKIPPED, so no surface
+		// reports it as a review (or intent check, or doc pass) that happened.
+		reason := "no agent configured"
+		if sc.Agent != "" {
+			reason = "no command configured for agent " + sc.Agent
+		}
 		return domain.StepResult{
-			Step:    s.name,
-			Status:  domain.StepPass,
-			Summary: string(s.name) + ": no agent command configured, skipped",
+			Step:          s.name,
+			Status:        domain.StepPass,
+			Outcome:       domain.StepSkipped,
+			OutcomeReason: reason,
+			Summary:       string(s.name) + ": skipped (" + reason + ")",
 		}, nil
 	}
 
