@@ -101,6 +101,30 @@ does not match every push.
 
 `permissive` has no floors.
 
+### Approval on the agent surfaces (runtime)
+
+The MCP `run_trigger` tool and `warden axi run-trigger` have no person at a
+prompt, so without a profile they approve the gate themselves, as
+`warden-auto`. That means a rule with `require_approval: true` is met by the
+same agent that started the run.
+
+Under `standard` and `strict` these surfaces do not approve. When a run they
+started reaches an approval gate (a rule's `require_approval`, or a
+high-severity finding), it stops there:
+
+- the outcome is `needs_approval`, not `rejected`, because nobody declined;
+- nothing is pushed and no note is written;
+- the summary's `message` tells the agent that a person must approve, and how:
+  run the gate from an interactive terminal (`git push` or
+  `warden run pre-push`) and answer the approval prompt.
+
+`axi run-trigger` reports this, like every other outcome, in its output rather
+than its exit status. The CLI hook path exits 1, as for any run that does not
+pass.
+
+`permissive` keeps today's behavior, so a repository can record a profile
+before it changes who approves. Repositories without a profile are unchanged.
+
 ### Profiles and `extends:`
 
 `profile` ratchets through `extends:`. The effective profile is the highest one
@@ -131,7 +155,6 @@ add. In this release a profile does **not**:
 - run agent steps in a clone with a guard on the canonical tree and HEAD;
 - reduce the environment an agent step sees;
 - refuse a custom agent under strict;
-- stop the MCP and axi surfaces from satisfying `require_approval`;
 - record the profile, step outcomes, approval channel or authorship signals in
   the signed note;
 - give CI a way to demand a minimum profile (`verify --min-profile`, the range

@@ -973,6 +973,12 @@ Two narrower grants also work:
 Grant trust only for repositories whose `.warden.yaml` you have reviewed. The
 normal interactive `warden` flow is unaffected — it still prompts a human.
 
+Trust decides whether an agent may run the gate, not whether it may approve
+it. Under a `standard` or `strict`
+[compliance profile](docs/agent-profiles.md) these surfaces do not approve:
+a run that needs approval ends `needs_approval`, pushes nothing, writes no note,
+and tells the agent that a person must approve it from an interactive terminal.
+
 ## Custom steps
 
 Two ways, easy first.
