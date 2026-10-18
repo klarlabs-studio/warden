@@ -6,6 +6,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -89,6 +90,12 @@ type Step interface {
 // to assemble the actions for a run; an unknown built-in name is a
 // configuration error surfaced early.
 type Registry map[domain.StepName]Step
+
+// ErrContainerUnavailable is returned (wrapped) when a container-configured run
+// finds no reachable engine with the image present. It describes the machine,
+// not the change, so a background watcher retries instead of recording it as
+// the snapshot's result.
+var ErrContainerUnavailable = errors.New("container execution unavailable")
 
 // ContainerExecution carries the selected engine and inspected image identity.
 // Binary is the discovered CLI path; Environment is signed only for checks that
