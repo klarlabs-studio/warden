@@ -10,14 +10,16 @@ import "maps"
 // concatenate (base first, then child) so an org base can set broad policy and
 // a repo append stricter rules. The signing, agent_trace, forge, status and push
 // blocks merge per field (child wins), except that signing.required and
-// agent_trace.required only ratchet up. This backs `extends:` — the
-// org-policy-sync mechanism (§5.2).
+// agent_trace.required only ratchet up. The profile ratchets too: the higher of
+// base and child wins (the loader refuses a child that names a lower one). This
+// backs `extends:` — the org-policy-sync mechanism (§5.2).
 //
 // Every Config field needs a decision here: TestOverlayOnto_EveryConfigFieldHasAMergeDecision
 // fails when one is added without one, because a field this function forgets is
 // silently dropped from every repo that extends a base.
 func (c Config) OverlayOnto(base Config) Config {
 	out := base
+	out.Profile = mergeProfile(base.Profile, c.Profile)
 	if c.PredictiveCache != nil {
 		out.PredictiveCache = c.PredictiveCache
 	}

@@ -1,6 +1,10 @@
 package cli
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+
+	"go.klarlabs.de/warden/internal/infrastructure/config"
+)
 
 // Version is the warden version, set at build time via -ldflags.
 //
@@ -13,6 +17,10 @@ import "runtime/debug"
 //
 // So when ldflags did not set it, ask the binary what it was built from.
 var Version = resolveVersion(defaultVersion, debug.ReadBuildInfo)
+
+// The config loader names the running version when it meets a key it does not
+// know, since the usual cause is a config written for a newer release.
+func init() { config.ReaderVersion = Version }
 
 // defaultVersion is what a source tree that was never stamped reports.
 const defaultVersion = "0.9.0"

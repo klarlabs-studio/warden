@@ -242,13 +242,25 @@ func axiPolicyExplain(f facade, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return emitTOON(stdout, stderr, map[string]any{
+	out := map[string]any{
 		"hook":             string(resolved.Hook),
 		"risk":             string(resolved.Risk),
 		"require_approval": resolved.RequireApproval,
 		"steps":            stepStrings(resolved.Steps),
 		"matched_rules":    anyStrings(resolved.MatchedRules),
-	})
+	}
+	if p := resolved.Profile; p != nil {
+		unmet := []any{}
+		for _, f := range p.Floors {
+			if !f.Satisfied {
+				unmet = append(unmet, f.ID)
+			}
+		}
+		out["profile"] = p.Name
+		out["profile_digest"] = p.Digest
+		out["profile_floors_unmet"] = unmet
+	}
+	return emitTOON(stdout, stderr, out)
 }
 
 func axiSteps(f facade, stdout, stderr io.Writer) int {

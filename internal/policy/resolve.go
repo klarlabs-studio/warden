@@ -95,6 +95,7 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 	res.MaterializeDeps = cfg.SymlinkDeps == nil || !*cfg.SymlinkDeps
 	res.WriteSteps = stepSet(cfg.Writes)
 	resolveOverlays(&res, matches)
+	resolveProfile(&res, cfg)
 
 	for _, m := range matches {
 		res.MatchedRules = append(res.MatchedRules, m.name)
@@ -256,6 +257,40 @@ func resolveOverlays(res *domain.ResolvedPolicy, matches []matched) {
 		maps.Copy(res.AutoFix, t.AutoFix)
 		if t.RequireApproval != nil {
 			res.RequireApproval = *t.RequireApproval
+		}
+	}
+}
+
+// resolveProfile records the compliance profile in force and applies the
+// top-level `agent:` under it.
+//
+// `agent:` has been parsed and merged since the start but never applied: only
+// rules[].then.agent selected an agent. Turning it on for every repo would start
+// model calls on every push in repos that set it long ago and forgot, so it
+// applies only where a profile is in force — a deliberate, reviewed opt-in —
+// and only when it names a bundled preset, whose command and behavior warden
+// knows. "auto" and custom agents stay inert. A rule's per-step agent still
+// wins over it.
+func resolveProfile(res *domain.ResolvedPolicy, cfg domain.Config) {
+	if cfg.Profile == "" {
+		return
+	}
+	p, err := domain.ParseComplianceProfile(cfg.Profile)
+	if err != nil {
+		return // Validate rejects this at load; a hand-built config gets no profile
+	}
+	res.Profile = &domain.ResolvedProfile{
+		Name:   p.String(),
+		Level:  p.Level().String(),
+		Digest: p.Digest(),
+		Floors: p.FloorStatus(cfg),
+	}
+	if domain.AgentPreset(cfg.Agent) == "" {
+		return
+	}
+	for _, s := range res.Steps {
+		if s.IsAgentStep() && res.Agents[s] == "" {
+			res.Agents[s] = cfg.Agent
 		}
 	}
 }
