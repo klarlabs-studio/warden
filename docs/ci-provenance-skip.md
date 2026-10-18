@@ -49,6 +49,10 @@ The action returns `validated=false` when `key` is omitted, blank, or contains
 only separators. This intentionally changes the earlier unsigned-skip behavior:
 existing callers must pin a trusted key before they can skip jobs again.
 
+On GitLab, use the `templates/verify.yml` component instead. GitLab cannot
+evaluate a job's verdict in `rules:`, so downstream jobs start and then exit
+early; [GitLab CI](gitlab-ci.md) explains how.
+
 Locally, the same primitive is one command:
 
 ```bash
