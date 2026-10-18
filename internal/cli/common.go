@@ -113,7 +113,7 @@ func mustCwd() string {
 type autoApprover struct{}
 
 func (autoApprover) Approve(_ context.Context, _ application.ApprovalRequest) (application.Decision, error) {
-	return application.Decision{Approved: true, Principal: "warden-auto"}, nil
+	return application.Decision{Approved: true, Principal: "warden-auto", Channel: domain.ApprovalAuto}, nil
 }
 
 // splitList parses a comma-separated flag value into trimmed, non-empty parts.

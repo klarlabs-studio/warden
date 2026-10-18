@@ -144,3 +144,23 @@ func TestAgentStepName(t *testing.T) {
 		t.Error("Name mismatch")
 	}
 }
+
+// The agent a step names in its result is the one it actually invoked: set on
+// a run that reached the agent, absent on a skip.
+func TestAgentStep_NamesTheAgentItRan(t *testing.T) {
+	step := NewAgentStep(domain.StepReview, "review this")
+	ran, err := step.Run(context.Background(), application.StepContext{WorktreeDir: t.TempDir(), Agent: "faux", AgentCommand: "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran.Status != domain.StepPass || ran.Agent != "faux" {
+		t.Errorf("an executed agent step must name its agent, got %+v", ran)
+	}
+	skipped, err := step.Run(context.Background(), application.StepContext{WorktreeDir: t.TempDir(), Agent: "faux"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped.Agent != "" {
+		t.Errorf("a skipped agent step ran no agent, got %q", skipped.Agent)
+	}
+}

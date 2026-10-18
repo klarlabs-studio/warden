@@ -133,6 +133,22 @@ type RunRecord struct {
 	// signer rejects a claim it cannot understand, by construction. That is why
 	// IsExternal records MUST be signed (see Validate).
 	ExternalRun *ExternalRunRef `json:"external_run,omitempty"`
+	// Profile, StepOutcomes and Approval are written only when a compliance
+	// profile is in force (ADR 0007). All three are inside the signed payload
+	// and omitempty, so a note written without a profile is byte-identical to
+	// one written before they existed — and an older verifier that meets a
+	// profiled note drops them, recomputes a different payload and fails the
+	// signature, so a pinned older verifier fails closed. See profile_record.go.
+	//
+	// Profile is the profile the run was gated under, with the digest of the
+	// definition the writer had built in.
+	Profile *ProfileRef `json:"profile,omitempty"`
+	// StepOutcomes is what warden observed of each step that ran through the
+	// gate: executed, cached, predicted or skipped, and the agent it invoked.
+	// StepsRun lists what the policy planned; this says what happened.
+	StepOutcomes map[StepName]StepObservation `json:"step_outcomes,omitempty"`
+	// Approval records how the run's approval gate was answered.
+	Approval *ApprovalRef `json:"approval,omitempty"`
 	// PublicKey is the signer's public key (§9). Its encoding follows Algorithm:
 	// a base64 ed25519 key for warden's own signer, or an authorized_keys-style
 	// "ssh-ed25519 AAAA…" line for an SSH signer. It is covered by Signature, so

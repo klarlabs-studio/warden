@@ -11,6 +11,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"go.klarlabs.de/warden/internal/application"
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // terminalApprover resolves the run's approval gate interactively. Clean runs
@@ -49,5 +50,6 @@ func (a terminalApprover) Approve(_ context.Context, req application.ApprovalReq
 		Approved:  yes,
 		Principal: "warden-cli",
 		Rationale: "interactive terminal decision",
+		Channel:   domain.ApprovalTTY,
 	}, nil
 }

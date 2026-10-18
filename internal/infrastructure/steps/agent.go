@@ -68,12 +68,14 @@ func (s AgentStep) Run(ctx context.Context, sc application.StepContext) (domain.
 				Message:  string(s.name) + " agent (" + sc.Agent + ") failed: " + strings.TrimSpace(err.Error()),
 			}},
 			Summary: string(s.name) + " failed",
+			Agent:   sc.Agent,
 		}, nil
 	}
 	return domain.StepResult{
 		Step:    s.name,
 		Status:  domain.StepPass,
 		Summary: string(s.name) + " (" + sc.Agent + ") passed: " + firstLine(out),
+		Agent:   sc.Agent,
 	}, nil
 }
 

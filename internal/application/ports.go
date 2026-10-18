@@ -168,6 +168,20 @@ type Decision struct {
 	Approved  bool
 	Principal string
 	Rationale string
+	// Channel says how the answer was obtained: an interactive terminal, the
+	// TUI, or automatically. Each approver sets its own. An approver that
+	// leaves it empty is recorded as domain.ApprovalAuto — the weakest claim —
+	// because nothing says anyone was asked.
+	Channel domain.ApprovalChannel
+}
+
+// approvalRef is the record of an approval gate that required a decision.
+func (d Decision) approvalRef() domain.ApprovalRef {
+	ch := d.Channel
+	if ch == "" || ch == domain.ApprovalNone {
+		ch = domain.ApprovalAuto
+	}
+	return domain.ApprovalRef{Required: true, Channel: ch, Principal: d.Principal}
 }
 
 // StepCache memoizes passing steps by their declared inputs so an unchanged
