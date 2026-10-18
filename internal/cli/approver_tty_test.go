@@ -47,8 +47,8 @@ func TestTerminalApprover_AsksOnTheControllingTerminal(t *testing.T) {
 		if d.Approved != c.want {
 			t.Errorf("answer %q: approved = %v, want %v", c.answer, d.Approved, c.want)
 		}
-		if c.want && d.Rationale != "controlling terminal decision" {
-			t.Errorf("rationale = %q", d.Rationale)
+		if c.want && (d.Rationale != "controlling terminal decision" || d.Channel != domain.ApprovalTTY) {
+			t.Errorf("an answer at the terminal is a tty decision: %+v", d)
 		}
 		if !strings.Contains(tty.out.String(), "approve? [y/N]") || !strings.Contains(tty.out.String(), "x.go:3") {
 			t.Errorf("the prompt and findings belong on the terminal: %q", tty.out.String())

@@ -222,6 +222,19 @@ func TestGoldenFleet_GitPushAsksOnTheControllingTerminal(t *testing.T) {
 			case !c.pushed && got != before:
 				t.Errorf("a declined push moved the remote %s -> %s\n%s", before, got, log)
 			}
+			if !c.pushed {
+				return
+			}
+			// The profiled note says how the gate was answered: a terminal, and
+			// no stronger claim than that.
+			show := exec.Command("git", "-C", g.dir, "notes", "--ref=warden", "show", head)
+			note, err := show.CombinedOutput()
+			if err != nil {
+				t.Fatalf("an approved push wrote no note: %v %s", err, note)
+			}
+			if !strings.Contains(string(note), `"channel":"tty"`) {
+				t.Errorf("the note must record the approval channel as tty: %s", note)
+			}
 		})
 	}
 }
