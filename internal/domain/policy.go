@@ -50,6 +50,20 @@ type ResolvedPolicy struct {
 	// They run as sequential barriers, never in a parallel batch — the escape
 	// hatch for a custom step (codegen, formatter) that writes the worktree.
 	WriteSteps map[StepName]bool
+	// Profile is the compliance profile in force, or nil when the config names
+	// none. The JSON tag keeps the MCP policy_explain output of an unprofiled
+	// repo exactly as it was.
+	Profile *ResolvedProfile `json:"Profile,omitempty"`
+}
+
+// ResolvedProfile is the compliance profile a policy was resolved under, with
+// each floor's status against the effective config, for `policy explain`.
+type ResolvedProfile struct {
+	// Name is the canonical "name@version", e.g. "strict@1".
+	Name   string
+	Level  string
+	Digest string
+	Floors []ProfileFloorStatus
 }
 
 // CachePaths returns the declared input globs for a step, or nil.

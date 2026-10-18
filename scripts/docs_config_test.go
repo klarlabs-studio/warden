@@ -34,7 +34,12 @@ const (
 )
 
 // yamlTag finds the struct tags that define the config surface.
-var yamlTag = regexp.MustCompile(`yaml:"([a-z0-9_]+)"`)
+//
+// Options after the name (`yaml:"profile,omitempty"`) must not hide a key: a
+// pattern that required the closing quote right after the name skipped every
+// tagged-with-options field, so a key could ship undocumented just by being
+// omitempty.
+var yamlTag = regexp.MustCompile(`yaml:"([a-z0-9_]+)[,"]`)
 
 // documentedAs matches a key written as YAML — `field:` — not merely the word.
 //

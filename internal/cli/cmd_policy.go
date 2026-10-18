@@ -105,4 +105,26 @@ func printPolicy(w io.Writer, p domain.ResolvedPolicy) {
 	} else {
 		_, _ = fmt.Fprintln(w, "matched rules:   (none)")
 	}
+	printProfile(w, p.Profile)
+}
+
+// printProfile shows the compliance profile in force and each floor's status.
+// It prints nothing without a profile, so an unprofiled repo's explain output
+// is unchanged.
+func printProfile(w io.Writer, prof *domain.ResolvedProfile) {
+	if prof == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "profile:         %s (%s)\n", prof.Name, prof.Digest)
+	_, _ = fmt.Fprintln(w, "floors:")
+	for _, f := range prof.Floors {
+		mark := "ok  "
+		if !f.Satisfied {
+			mark = "FAIL"
+		}
+		_, _ = fmt.Fprintf(w, "  %s %s: %s\n", mark, f.ID, f.Description)
+		for _, problem := range f.Problems {
+			_, _ = fmt.Fprintf(w, "       %s\n", problem)
+		}
+	}
 }

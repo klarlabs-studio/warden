@@ -16,6 +16,19 @@ type Config struct {
 	// only what it needs.
 	Extends string `yaml:"extends"`
 
+	// Profile selects a built-in compliance profile: permissive, standard or
+	// strict, optionally pinned as name@version (a bare name always means
+	// version 1). The profile's defaults become the lowest layer under the
+	// extends chain and its floors are checked against the merged result, so
+	// neither extends nor rules can lower it (ADR 0007). Requires warden >=
+	// 0.36.0: older releases reject the key.
+	//
+	// omitempty matters here, in both encodings. Save must not write
+	// `profile: ""` into a config, because a warden that predates the key
+	// rejects it; and the configuration digest of a repo without a profile is
+	// part of signed execution contracts, so it must not change.
+	Profile string `yaml:"profile,omitempty" json:"Profile,omitempty"`
+
 	// Agent is the default coding-agent selection ("auto" or a binary name).
 	Agent string `yaml:"agent"`
 
@@ -230,6 +243,11 @@ func isFingerprint(s string) bool {
 func (c Config) Validate() error {
 	if err := c.Execution.Validate(); err != nil {
 		return err
+	}
+	if c.Profile != "" {
+		if _, err := ParseComplianceProfile(c.Profile); err != nil {
+			return err
+		}
 	}
 	for _, name := range c.PredictiveCache {
 		if !StepName(name).Valid() {

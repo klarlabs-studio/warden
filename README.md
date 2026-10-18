@@ -709,7 +709,11 @@ what carries the guarantee, and that holds whatever the schema becomes.
 
 ```yaml
 extends: ../.warden.base.yaml   # optional — inherit an org base config; this file overrides it
-agent: auto
+profile: standard   # optional — permissive|standard|strict (or name@1): built-in defaults and floors that
+                    # extends: and rules: cannot lower. Requires warden >= 0.36.0; older releases reject
+                    # the key. See docs/agent-profiles.md for what each level enforces today
+agent: claude   # default agent for intent/review/document — applied only under a profile, and only
+                # when it names a bundled preset (claude, codex); otherwise inert
 hooks: { pre_commit: true, pre_push: true }
 commands:
   lint: "golangci-lint run ./..."
@@ -758,6 +762,21 @@ All matching rules stack: per field the most specific wins (ties broken by
 declaration order); step `add`/`skip` are unioned. `warden policy explain`
 prints the result — the intended mitigation for a rule that misconfigures the
 gate — including a `schedule:` line that shows exactly which steps run at once.
+
+### Compliance profiles
+
+`profile: permissive|standard|strict` names a built-in set of defaults and
+floors for repositories where agents commit. The defaults sit under your whole
+`extends:` chain; the floors (required steps that no rule may skip, commands for
+them, and under strict a network-less container and no agent auto-fix) are
+checked against the merged config, so a config that falls short fails to load
+and names the field and file. A child cannot name a lower profile than it
+inherits. `warden policy explain` shows the profile, its digest and each floor.
+The key needs warden 0.36.0 or later on every machine and CI runner that reads
+the config. Profiles are a preview: the levels gain floors as later releases
+land, until the release that signs the profile into notes freezes `@1`. [Compliance profiles](docs/agent-profiles.md) lists what each level
+enforces in this release and what comes later;
+[ADR 0007](docs/adr/0007-agent-compliance-profiles.md) is the design.
 
 ### Parallel steps
 

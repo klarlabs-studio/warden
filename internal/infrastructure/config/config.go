@@ -6,6 +6,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,7 +42,11 @@ func NewRepository(root string) *Repository { return &Repository{root: root} }
 // file is not an error: it yields a zero Config so callers fall back to
 // documented defaults.
 func (r *Repository) Load() (domain.Config, error) {
-	return loadFrom(r.root, filepath.Join(r.root, FileName), nil)
+	cfg, layers, err := loadFrom(r.root, filepath.Join(r.root, FileName), nil)
+	if err != nil {
+		return domain.Config{}, err
+	}
+	return applyProfile(cfg, layers)
 }
 
 // Exists reports whether the repo has a .warden.yaml at all.
@@ -62,28 +67,30 @@ const maxExtends = 10
 // loadFrom parses the config at path and, if it extends a base, loads that base
 // and overlays this config on top. root is the repository root every config in
 // the chain must stay within; seen carries the chain so far to detect cycles
-// and cap depth.
-func loadFrom(root, path string, seen []string) (domain.Config, error) {
+// and cap depth. It also returns each file's own parsed config, child first, so
+// a profile floor violation can name the file that set the offending value.
+func loadFrom(root, path string, seen []string) (domain.Config, []layer, error) {
 	data, err := readConfigFile(path)
 	if os.IsNotExist(err) {
-		return domain.Config{}, nil
+		return domain.Config{}, nil, nil
 	}
 	if err != nil {
-		return domain.Config{}, err
+		return domain.Config{}, nil, err
 	}
 	cfg, err := Parse(data)
 	if err != nil {
-		return domain.Config{}, err
+		return domain.Config{}, nil, err
 	}
 	if err := cfg.Validate(); err != nil {
-		return domain.Config{}, fmt.Errorf("%s: %w", path, err)
+		return domain.Config{}, nil, fmt.Errorf("%s: %w", path, err)
 	}
+	self := layer{name: displayName(root, path), cfg: cfg}
 	if cfg.Extends == "" {
-		return cfg, nil
+		return cfg, []layer{self}, nil
 	}
 
 	if len(seen) >= maxExtends {
-		return domain.Config{}, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, path)
+		return domain.Config{}, nil, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, path)
 	}
 	basePath := cfg.Extends
 	if !filepath.IsAbs(basePath) {
@@ -96,19 +103,22 @@ func loadFrom(root, path string, seen []string) (domain.Config, error) {
 	// `extends: /etc/x.yaml` or `../../shared.yaml`, or read an arbitrary file.
 	// Inherited policy must be committed to the repo, not pulled from outside.
 	if !within(root, basePath) {
-		return domain.Config{}, fmt.Errorf("extends target %s escapes repo root %s", basePath, root)
+		return domain.Config{}, nil, fmt.Errorf("extends target %s escapes repo root %s", basePath, root)
 	}
 	chain := make([]string, 0, len(seen)+1)
 	chain = append(chain, seen...)
 	chain = append(chain, filepath.Clean(path))
 	if slices.Contains(chain, basePath) {
-		return domain.Config{}, fmt.Errorf("extends cycle: %s already in the chain", basePath)
+		return domain.Config{}, nil, fmt.Errorf("extends cycle: %s already in the chain", basePath)
 	}
-	base, err := loadFrom(root, basePath, chain)
+	base, baseLayers, err := loadFrom(root, basePath, chain)
 	if err != nil {
-		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
+		return domain.Config{}, nil, fmt.Errorf("load extends base %s: %w", basePath, err)
 	}
-	return cfg.OverlayOnto(base), nil
+	if err := checkProfileRatchet(self, base, baseLayers); err != nil {
+		return domain.Config{}, nil, err
+	}
+	return cfg.OverlayOnto(base), append([]layer{self}, baseLayers...), nil
 }
 
 // FileReaderAtRef reads a repo-relative path as committed at some fixed git ref,
@@ -124,48 +134,56 @@ type FileReaderAtRef func(repoRelPath string) (data []byte, found bool, err erro
 // trusted-signer roster from the trusted base rather than the head it is
 // checking. A ref with no root config yields a zero Config.
 func ResolveAtRef(read FileReaderAtRef) (domain.Config, error) {
-	return resolveAtRef(read, FileName, nil)
-}
-
-func resolveAtRef(read FileReaderAtRef, relPath string, seen []string) (domain.Config, error) {
-	data, found, err := read(relPath)
+	cfg, layers, err := resolveAtRef(read, FileName, nil)
 	if err != nil {
 		return domain.Config{}, err
 	}
+	return applyProfile(cfg, layers)
+}
+
+func resolveAtRef(read FileReaderAtRef, relPath string, seen []string) (domain.Config, []layer, error) {
+	data, found, err := read(relPath)
+	if err != nil {
+		return domain.Config{}, nil, err
+	}
 	if !found {
-		return domain.Config{}, nil
+		return domain.Config{}, nil, nil
 	}
 	if len(data) > maxConfigBytes {
-		return domain.Config{}, fmt.Errorf("read %s at ref: config exceeds %d bytes", relPath, maxConfigBytes)
+		return domain.Config{}, nil, fmt.Errorf("read %s at ref: config exceeds %d bytes", relPath, maxConfigBytes)
 	}
 	cfg, err := Parse(data)
 	if err != nil {
-		return domain.Config{}, err
+		return domain.Config{}, nil, err
 	}
 	if err := cfg.Validate(); err != nil {
-		return domain.Config{}, fmt.Errorf("%s: %w", relPath, err)
+		return domain.Config{}, nil, fmt.Errorf("%s: %w", relPath, err)
 	}
+	self := layer{name: relPath, cfg: cfg}
 	if cfg.Extends == "" {
-		return cfg, nil
+		return cfg, []layer{self}, nil
 	}
 	if len(seen) >= maxExtends {
-		return domain.Config{}, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, relPath)
+		return domain.Config{}, nil, fmt.Errorf("extends chain too deep (>%d) at %s", maxExtends, relPath)
 	}
 	basePath, ok := resolveRelExtends(relPath, cfg.Extends)
 	if !ok {
-		return domain.Config{}, fmt.Errorf("extends target %q escapes repo root", cfg.Extends)
+		return domain.Config{}, nil, fmt.Errorf("extends target %q escapes repo root", cfg.Extends)
 	}
 	chain := make([]string, 0, len(seen)+1)
 	chain = append(chain, seen...)
 	chain = append(chain, pathpkg.Clean(relPath))
 	if slices.Contains(chain, basePath) {
-		return domain.Config{}, fmt.Errorf("extends cycle: %s already in the chain", basePath)
+		return domain.Config{}, nil, fmt.Errorf("extends cycle: %s already in the chain", basePath)
 	}
-	base, err := resolveAtRef(read, basePath, chain)
+	base, baseLayers, err := resolveAtRef(read, basePath, chain)
 	if err != nil {
-		return domain.Config{}, fmt.Errorf("load extends base %s: %w", basePath, err)
+		return domain.Config{}, nil, fmt.Errorf("load extends base %s: %w", basePath, err)
 	}
-	return cfg.OverlayOnto(base), nil
+	if err := checkProfileRatchet(self, base, baseLayers); err != nil {
+		return domain.Config{}, nil, err
+	}
+	return cfg.OverlayOnto(base), append([]layer{self}, baseLayers...), nil
 }
 
 // resolveRelExtends joins a repo-relative extends target against the directory
@@ -464,7 +482,41 @@ func Parse(data []byte) (domain.Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
+		if unknownField(err) {
+			return domain.Config{}, fmt.Errorf("parse config: %w\n%s", err, newerReleaseHint())
+		}
 		return domain.Config{}, fmt.Errorf("parse config: %w", err)
 	}
 	return cfg, nil
+}
+
+// ReaderVersion is the running warden's version, for the unknown-key hint. The
+// CLI sets it at start-up; empty reads as "this warden".
+var ReaderVersion string
+
+// unknownField reports whether a decode failed on a key the Config type does
+// not have.
+func unknownField(err error) bool {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return false
+	}
+	for _, e := range te.Errors {
+		if strings.Contains(e, "not found in type") {
+			return true
+		}
+	}
+	return false
+}
+
+// newerReleaseHint explains the most common cause of an unknown key once the
+// typo is ruled out: the config was written for a newer warden. Every new key
+// breaks older readers hard, so saying so turns a baffling parse error into an
+// upgrade instruction.
+func newerReleaseHint() string {
+	v := strings.TrimPrefix(strings.TrimSpace(ReaderVersion), "v")
+	if v == "" {
+		return "hint: if the key is spelled correctly, it may need a newer warden than this one"
+	}
+	return "hint: if the key is spelled correctly, it may need a newer warden than v" + v
 }

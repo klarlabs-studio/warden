@@ -12,6 +12,7 @@ import (
 // forge, agent_trace, status and push blocks vanish without a trace.
 var mergeDecisions = map[string]string{
 	"Extends":         "resolved by the loader; cleared in the result",
+	"Profile":         "ratchets: the higher of base and child; the loader refuses a lower child",
 	"Agent":           "child wins when set",
 	"Hooks":           "child replaces when any hook is named",
 	"Execution":       "field level, child wins",
