@@ -159,9 +159,12 @@ func TestGoldenFleet_MinProfileStrictPassesOnARealStrictNote(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("a real strict note must conform to strict: %d %s", code, out)
 	}
-	for _, want := range []string{"conforms to strict@1", "network none", "allowlisted environment", "not checked by this release: a declared agent commit carries a notarized Agent Trace"} {
+	for _, want := range []string{"conforms to strict@1", "network none", "allowlisted environment", "carries a notarized Agent Trace"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("strict pass must mention %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "not checked by this release") {
+		t.Errorf("strict checks every clause it defines, so nothing is deferred:\n%s", out)
 	}
 }
