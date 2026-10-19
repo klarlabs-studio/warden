@@ -6,6 +6,30 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`warden watch --staged` re-checks when the image moves.** A staged
+  prediction is bound to the image ID its check ran under, but the watcher
+  fingerprinted only the index and the configuration. Rebuilding or retagging
+  the configured image (`docker build -t team-checks:local .`) left the last
+  line reading "staged checks passed" for an image a commit would no longer
+  run, and the next pre-commit missed the cache. The watcher now inspects the
+  configured image at most every 15 s (`image inspect` only: no engine `info`,
+  no pull, no container) and folds the runtime, image ID and platform into
+  its snapshot, so a retag, a switch of runtime, or an engine coming back
+  starts a new evaluation. A slow inspection keeps the previous answer rather
+  than cancelling a running check.
+- **The staged watcher shows what its checks ran in.** It prints the sampled
+  environment when it starts and when it changes, and each finished step
+  prints the runtime, image ID and platform it actually ran under.
+- **The staged watcher yields to a gate run.** The watcher and a hook ran
+  container checks at the same time. While a gate run in the same worktree
+  is in progress, the watcher now cancels its own work, prints that it is
+  paused, and evaluates again once the run ends. To make that visible, every
+  non-interactive gate run, pre-commit included, now publishes on the
+  `warden attach` socket (previously only pre-push did), and a second run no
+  longer removes the socket of a run still in progress.
+
 ## [0.37.0] - 2026-10-19
 
 A minor release that completes compliance profiles. A profiled note now

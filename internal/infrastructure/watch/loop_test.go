@@ -199,3 +199,55 @@ func TestBlockedWrapping(t *testing.T) {
 		t.Fatal("an ordinary error is not blocked")
 	}
 }
+
+// While Hold reports a gate run, the loop must stop competing with it: the
+// running evaluation is cancelled without completing its snapshot, nothing new
+// starts, and once the hold lifts the same snapshot is evaluated again.
+func TestLoopYieldsWhileHeld(t *testing.T) {
+	var held atomic.Bool
+	var started, cancelled atomic.Int32
+	var finishNext atomic.Bool
+	var got events
+	runLoop(t, Loop{
+		Interval:    2 * time.Millisecond,
+		Fingerprint: func(context.Context) (string, error) { return "snapshot", nil },
+		Evaluate: func(ctx context.Context) error {
+			started.Add(1)
+			if finishNext.Load() {
+				return nil
+			}
+			<-ctx.Done()
+			cancelled.Add(1)
+			return ctx.Err()
+		},
+		Report: got.add,
+		Hold:   func(context.Context) bool { return held.Load() },
+	})
+	eventually(t, "the first evaluation", func() bool { return started.Load() == 1 })
+	held.Store(true)
+	eventually(t, "the running evaluation to be cancelled", func() bool { return cancelled.Load() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if n := started.Load(); n != 1 {
+		t.Fatalf("%d evaluations started while held", n)
+	}
+	finishNext.Store(true)
+	held.Store(false)
+	eventually(t, "completion after the hold", func() bool {
+		for _, e := range got.snapshot() {
+			if e.State == StateComplete {
+				return true
+			}
+		}
+		return false
+	})
+	var states []State
+	for _, e := range got.snapshot() {
+		states = append(states, e.State)
+	}
+	if fmt.Sprint(states) != fmt.Sprint([]State{StateYielded, StateResumed, StateComplete}) {
+		t.Fatalf("reported %v", states)
+	}
+	if started.Load() != 2 {
+		t.Fatalf("expected exactly one re-evaluation, got %d evaluations", started.Load())
+	}
+}

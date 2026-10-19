@@ -54,6 +54,11 @@ const (
 	StateBlocked State = "blocked"
 	// StateError: the snapshot could not be sampled at all.
 	StateError State = "error"
+	// StateYielded: Hold reported something more important running (a gate
+	// run); in-flight work was cancelled and nothing starts until it ends.
+	StateYielded State = "yielded"
+	// StateResumed: Hold released; the snapshot is sampled afresh.
+	StateResumed State = "resumed"
 )
 
 // Event is one report from the loop.
@@ -74,6 +79,11 @@ type Loop struct {
 	Evaluate    func(context.Context) error
 	// Report is optional.
 	Report func(Event)
+	// Hold is optional. While it returns true the loop yields: the running
+	// evaluation is cancelled (and not reported, so its snapshot is not
+	// completed) and no new one starts. It is asked on every tick, so it must
+	// be cheap.
+	Hold func(context.Context) bool
 	// RetryMin and RetryMax bound the backoff for blocked evaluations; zero
 	// means DefaultRetryMin / DefaultRetryMax.
 	RetryMin, RetryMax time.Duration
@@ -86,6 +96,7 @@ type loopState struct {
 	lastError                string
 	blocked                  string
 	backoff                  time.Duration
+	holding                  bool
 	retryAt                  time.Time
 	runContext               context.Context
 	cancel                   context.CancelFunc
@@ -132,6 +143,9 @@ func (s *loopState) report(e Event) {
 }
 
 func (s *loopState) sample(ctx context.Context) {
+	if s.yield(ctx) {
+		return
+	}
 	value, err := s.l.Fingerprint(ctx)
 	if err != nil {
 		if ctx.Err() == nil && s.lastError != err.Error() {
@@ -163,6 +177,30 @@ func (s *loopState) sample(ctx context.Context) {
 	s.done = make(chan error, 1)
 	done := s.done
 	go func() { done <- s.l.Evaluate(child) }()
+}
+
+// yield applies Hold, reporting each transition once. After a hold the
+// snapshot must again be seen by two agreeing samples before work starts: the
+// gate that held the loop may well have changed it (a commit moves HEAD).
+func (s *loopState) yield(ctx context.Context) bool {
+	if s.l.Hold == nil {
+		return false
+	}
+	if s.l.Hold(ctx) {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if !s.holding {
+			s.holding = true
+			s.report(Event{State: StateYielded})
+		}
+		return true
+	}
+	if s.holding {
+		s.holding, s.last = false, ""
+		s.report(Event{State: StateResumed})
+	}
+	return false
 }
 
 func (s *loopState) finish(err error) {

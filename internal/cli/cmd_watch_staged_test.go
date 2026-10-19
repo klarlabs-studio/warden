@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/attach"
 )
 
 func TestWatchStagedInvocation(t *testing.T) {
@@ -85,10 +87,13 @@ commands: {test: 'true'}
 // fakeDocker configures a fake Docker CLI. With engineUp set, `info` succeeds
 // only while that file exists (engine down until the test creates it). With
 // started set, `run` touches that file before sleeping for runSeconds.
+// With imageID set, `image inspect` answers the config ID that file holds, so
+// a test can retag the configured image.
 type fakeDocker struct {
 	engineUp   string
 	started    string
 	runSeconds int
+	imageID    string
 }
 
 func installFakeDocker(t *testing.T, f fakeDocker) {
@@ -104,6 +109,10 @@ func installFakeDocker(t *testing.T, f fakeDocker) {
 	if f.engineUp != "" {
 		info = "[ -f '" + f.engineUp + "' ] || exit 1; " + info
 	}
+	image := imageID
+	if f.imageID != "" {
+		image = "$(cat '" + f.imageID + "')"
+	}
 	run := "echo checked; exit 0"
 	if f.started != "" {
 		run = "touch '" + f.started + "'; sleep " + fmt.Sprint(f.runSeconds) + "; echo checked; exit 0"
@@ -111,7 +120,7 @@ func installFakeDocker(t *testing.T, f fakeDocker) {
 	script := `#!/bin/sh
 case "$1" in
 info) ` + info + `;;
-image) printf '%s' '[{"Id":"` + imageID + `","Os":"linux","Architecture":"arm64"}]';;
+image) printf '%s' '[{"Id":"'"` + image + `"'","Os":"linux","Architecture":"arm64"}]';;
 run) ` + run + `;;
 rm) exit 0;;
 *) exit 1;;
@@ -278,6 +287,125 @@ func TestWatchStagedCommitDuringCheck(t *testing.T) {
 	})
 	if indexDigest(t, dir) != committed {
 		t.Fatal("the watcher changed the index after the commit")
+	}
+	if code := stop(); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+}
+
+// predictedImageIDs returns the image ID each saved prediction is bound to.
+func predictedImageIDs(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, ".git", "warden", "predictions", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p domain.Prediction
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatal(err)
+		}
+		ids[p.Contract.Environment.ImageID] = true
+	}
+	return ids
+}
+
+// Rebuilding or retagging the configured image moves the image ID a prediction
+// is bound to. The watcher used to fingerprint only the index and the
+// configuration, so it never re-evaluated and its last line kept reporting a
+// pass for an image that was no longer the one a commit would run. The
+// environment is now part of the snapshot: the move is reported, the staged
+// inputs are evaluated again under the new image, and a prediction bound to
+// the new ID is saved.
+func TestWatchStagedReEvaluatesWhenTheImageMoves(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	ttl := environmentSampleTTL
+	environmentSampleTTL = 50 * time.Millisecond
+	t.Cleanup(func() { environmentSampleTTL = ttl })
+	dir := repoWithConfig(t, stagedWatchConfig)
+	oldID, newID := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
+	idFile := filepath.Join(t.TempDir(), "image-id")
+	if err := os.WriteFile(idFile, []byte(oldID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installFakeDocker(t, fakeDocker{imageID: idFile})
+	stageFile(t, dir, "sample", "staged\n")
+
+	stdout, stderr, stop := startStagedWatch(t, dir)
+	waitFor(t, 20*time.Second, "the first evaluation", func() bool {
+		return strings.Contains(stdout.String(), "staged checks passed")
+	})
+	for _, want := range []string{
+		"warden: environment: runtime docker, image checks:local (" + oldID + "), platform linux/arm64",
+		"    in runtime docker, image checks:local (" + oldID + "), platform linux/arm64",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if err := os.WriteFile(idFile, []byte(newID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, "the evaluation under the retagged image", func() bool {
+		return strings.Count(stdout.String(), "staged checks passed") >= 2
+	})
+	out := stdout.String()
+	if !strings.Contains(out, "warden: environment changed: runtime docker, image checks:local ("+newID+")") {
+		t.Fatalf("retag not reported:\n%s", out)
+	}
+	if !strings.Contains(out, "    in runtime docker, image checks:local ("+newID+")") {
+		t.Fatalf("re-evaluation did not run under the new image:\n%s", out)
+	}
+	if code := stop(); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if ids := predictedImageIDs(t, dir); !ids[newID] {
+		t.Fatalf("no prediction bound to the retagged image: %v", ids)
+	}
+}
+
+// A gate run in this worktree publishes on the attach socket. While it does,
+// the watcher must not start container work of its own, and once it ends the
+// staged inputs are evaluated.
+func TestWatchStagedYieldsToAGateRun(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	dir := repoWithConfig(t, stagedWatchConfig)
+	started := filepath.Join(t.TempDir(), "started")
+	installFakeDocker(t, fakeDocker{started: started})
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, err := svc.GitDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := attach.NewServer(gitDir)
+	if gate == nil {
+		t.Fatal("could not publish a gate socket")
+	}
+	defer gate.Close()
+	stageFile(t, dir, "sample", "staged\n")
+
+	stdout, stderr, stop := startStagedWatch(t, dir)
+	waitFor(t, 20*time.Second, "the watcher to yield", func() bool {
+		return strings.Contains(stdout.String(), "a gate run is in progress")
+	})
+	time.Sleep(time.Second)
+	if _, err := os.Stat(started); !os.IsNotExist(err) {
+		t.Fatalf("a check ran while the gate was running:\n%s", stdout.String())
+	}
+	gate.Close()
+	waitFor(t, 20*time.Second, "the evaluation after the gate run", func() bool {
+		return strings.Contains(stdout.String(), "staged checks passed")
+	})
+	if !strings.Contains(stdout.String(), "background checks resumed") {
+		t.Fatalf("resume not reported:\n%s", stdout.String())
 	}
 	if code := stop(); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())

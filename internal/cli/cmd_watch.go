@@ -16,7 +16,9 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/attach"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
+	"go.klarlabs.de/warden/internal/infrastructure/steps"
 	"go.klarlabs.de/warden/internal/infrastructure/watch"
 	"go.klarlabs.de/warden/internal/service"
 )
@@ -123,12 +125,12 @@ type namedCommand struct {
 // steps with no command (agent steps and unconfigured ones don't fit a fast
 // save-loop).
 func watchCommands(cfg domain.Config) []namedCommand {
-	steps := cfg.Steps["pre_commit"]
-	if len(steps) == 0 {
-		steps = domain.DefaultSteps(domain.PreCommit)
+	names := cfg.Steps["pre_commit"]
+	if len(names) == 0 {
+		names = domain.DefaultSteps(domain.PreCommit)
 	}
 	var out []namedCommand
-	for _, s := range steps {
+	for _, s := range names {
 		if cmd := strings.TrimSpace(cfg.Commands[string(s)]); cmd != "" {
 			out = append(out, namedCommand{step: s, command: cmd})
 		}
@@ -195,7 +197,7 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	if once {
 		return reportStagedOnce(evaluate(ctx), stdout, stderr)
 	}
-	gate, err := stagedGate(ctx, svc, dir)
+	snapshot, err := newStagedSnapshot(ctx, svc, dir, stdout)
 	if err != nil && ctx.Err() == nil {
 		return fail(stderr, err)
 	}
@@ -206,9 +208,10 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	_, _ = fmt.Fprintln(stdout, "warden: watching staged inputs (ctrl+c to stop); checks run in disposable container worktrees")
 	watch.Loop{
 		Interval:    pollInterval,
-		Fingerprint: gate.Fingerprint,
+		Fingerprint: snapshot.Fingerprint,
 		Evaluate:    evaluate,
 		Report:      func(e watch.Event) { reportStagedEvent(e, stdout, stderr) },
+		Hold:        gateRunning(svc),
 		RetryMin:    stagedRetryMin,
 		RetryMax:    stagedRetryMax,
 	}.Run(ctx)
@@ -256,15 +259,51 @@ func firstBlocker(blockers ...domain.Blocker) domain.Blocker {
 	return domain.BlockerNone
 }
 
-// stagedGate fingerprints the staged inputs plus the configuration, hashing
-// the index and loading the configuration only when a stat of their files
-// changes (or the backstop elapses).
-func stagedGate(ctx context.Context, svc *service.Service, dir string) (*watch.StatGate, error) {
+// Bounds for sampling the container environment. Variables so tests need not
+// wait out the production TTL.
+var (
+	// environmentSampleTTL: see watch.DefaultSampleTTL for why 15 s.
+	environmentSampleTTL = watch.DefaultSampleTTL
+	// environmentSampleTimeout bounds one inspection. The sample runs on the
+	// watcher's polling goroutine, so it is shorter than the 10 s an
+	// evaluation's own resolution allows; a slower answer is inconclusive and
+	// keeps the previous observation.
+	environmentSampleTimeout = 5 * time.Second
+)
+
+// environmentUnavailable is the sampled environment when no runtime's local
+// store answered with a usable image: the engine is stopped, or the image is
+// missing. It is a value of its own so that the engine coming back (or the
+// image being built) is itself a change that starts an evaluation.
+const environmentUnavailable = "unavailable"
+
+// stagedSnapshot identifies what a staged evaluation would check: the staged
+// inputs, the configuration, and the container environment the checks would
+// run in. The environment is part of the snapshot because a prediction is
+// bound to the image ID it ran under. Rebuilding or retagging the configured
+// image, or switching runtimes, moves that ID, so a pass for the previous
+// environment no longer describes what a commit would run, and the watcher
+// must evaluate again rather than leave the old pass on screen.
+type stagedSnapshot struct {
+	gate *watch.StatGate
+	env  *watch.Sampler
+	// execution is the configuration's execution block as of the last full
+	// fingerprint; the sampler is keyed on it.
+	execution domain.ExecutionConfig
+	shown     string
+	out       io.Writer
+}
+
+// newStagedSnapshot hashes the index and loads the configuration only when a
+// stat of their files changes (or the backstop elapses), and inspects the
+// environment at most once per environmentSampleTTL.
+func newStagedSnapshot(ctx context.Context, svc *service.Service, dir string, out io.Writer) (*stagedSnapshot, error) {
 	key, err := watch.StagedStatKey(ctx, dir, config.FileName)
 	if err != nil {
 		return nil, err
 	}
-	return &watch.StatGate{
+	s := &stagedSnapshot{out: out}
+	s.gate = &watch.StatGate{
 		Key: key,
 		Full: func(ctx context.Context) (string, error) {
 			index, err := watch.StagedFingerprint(ctx, dir)
@@ -279,9 +318,82 @@ func stagedGate(ctx context.Context, svc *service.Service, dir string) (*watch.S
 			if err != nil {
 				return "", err
 			}
+			s.execution = cfg.Execution
 			return index + configDigest, nil
 		},
-	}, nil
+	}
+	s.env = &watch.Sampler{
+		TTL:    environmentSampleTTL,
+		Sample: func(ctx context.Context) (string, error) { return sampleEnvironment(ctx, s.execution) },
+	}
+	return s, nil
+}
+
+// Fingerprint is the loop's snapshot identity. It also reports the sampled
+// environment whenever it changes, so the developer can see which runtime,
+// image and platform background checks are running against.
+func (s *stagedSnapshot) Fingerprint(ctx context.Context) (string, error) {
+	inputs, err := s.gate.Fingerprint(ctx)
+	if err != nil {
+		return "", err
+	}
+	key, err := domain.DigestJSON(s.execution)
+	if err != nil {
+		return "", err
+	}
+	env := s.env.Value(ctx, key)
+	if env != s.shown && env != "" {
+		switch {
+		case env == environmentUnavailable:
+			_, _ = fmt.Fprintln(s.out, "warden: environment: no container engine has execution.image available")
+		case s.shown == "" || s.shown == environmentUnavailable:
+			_, _ = fmt.Fprintln(s.out, "warden: environment:", env)
+		default:
+			_, _ = fmt.Fprintln(s.out, "warden: environment changed:", env)
+		}
+		s.shown = env
+	}
+	return inputs + "\x00environment:" + env, nil
+}
+
+// sampleEnvironment inspects the configured image without resolving a
+// runtime's engine state, pulling, or running anything.
+func sampleEnvironment(ctx context.Context, execution domain.ExecutionConfig) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, environmentSampleTimeout)
+	defer cancel()
+	env, err := steps.SampleEnvironment(ctx, execution)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", err // timed out or stopping: inconclusive
+		}
+		return environmentUnavailable, nil
+	}
+	return describeEnvironment(env), nil
+}
+
+// describeEnvironment names the runtime, image ID and platform checks run in.
+func describeEnvironment(env domain.ExecutionEnvironment) string {
+	if env.Runtime == "" {
+		return "host"
+	}
+	text := fmt.Sprintf("runtime %s, image %s (%s), platform %s", env.Runtime, env.Image, env.ImageID, env.Platform)
+	if env.ImageIndexDigest != "" {
+		text += ", index " + env.ImageIndexDigest
+	}
+	return text
+}
+
+// gateRunning is the staged watcher's yield probe: a gate run in this
+// worktree publishes on the attach socket, and while it does the watcher
+// stops competing with it for the container engine. The hook never waits on
+// the watcher, so this removes contention, not a deadlock. Without a git dir
+// there is nothing to probe.
+func gateRunning(svc *service.Service) func(context.Context) bool {
+	gitDir, err := svc.GitDir()
+	if err != nil {
+		return nil
+	}
+	return func(context.Context) bool { return attach.Live(gitDir) }
 }
 
 func reportStagedOnce(err error, stdout, stderr io.Writer) int {
@@ -306,6 +418,10 @@ func reportStagedEvent(e watch.Event, stdout, stderr io.Writer) {
 		_, _ = fmt.Fprintln(stdout, "warden: nothing staged; no checks run")
 	case watch.StateBlocked:
 		_, _ = fmt.Fprintf(stderr, "warden: blocked: %v; retrying in %s\n", e.Err, e.RetryIn)
+	case watch.StateYielded:
+		_, _ = fmt.Fprintln(stdout, "warden: a gate run is in progress; background checks paused")
+	case watch.StateResumed:
+		_, _ = fmt.Fprintln(stdout, "warden: gate run finished; background checks resumed")
 	default:
 		if e.Err != nil {
 			_, _ = fmt.Fprintln(stderr, "warden:", e.Err)
@@ -341,6 +457,9 @@ func (r *predictionReporter) OnStep(event application.StepEvent) {
 		status += " (" + string(n.Outcome) + ")"
 	}
 	_, _ = fmt.Fprintf(r.w, "  %s: %s\n", status, event.Result.Summary)
+	if env := event.Result.Environment; env != nil {
+		_, _ = fmt.Fprintf(r.w, "    in %s\n", describeEnvironment(*env))
+	}
 	if event.Result.Status != domain.StepPass {
 		printFindings(r.w, event.Result.Findings)
 	}
