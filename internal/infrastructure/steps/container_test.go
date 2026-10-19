@@ -179,6 +179,13 @@ func TestContainerExecutionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The background watcher's inspect-only sample must name exactly the
+	// environment a real engine resolves; Apple's inspection schema differs
+	// from the Docker-compatible engines', so this is checked on each.
+	sampled, err := SampleEnvironment(context.Background(), domain.ExecutionConfig{Runtime: runtimeName, Image: image})
+	if err != nil || sampled != selected.Environment {
+		t.Fatalf("sampled environment %+v (%v) differs from resolution %+v", sampled, err, selected.Environment)
+	}
 	dir := t.TempDir()
 	t.Setenv("WARDEN_CONTAINER_TEST_SECRET", "host-only")
 	sc := application.StepContext{WorktreeDir: dir, Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": `test -z "$WARDEN_CONTAINER_TEST_SECRET" && test "$WARDEN_HOOK" = pre_commit && tail -n +2 /proc/net/route > observed-routes && uname -s > observed-os && printf container > artifact`}}

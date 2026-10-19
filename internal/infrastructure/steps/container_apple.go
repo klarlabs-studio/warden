@@ -38,7 +38,13 @@ func resolveAppleContainer(bin string, cfg domain.ExecutionConfig) (*application
 	if _, err := containerProbe(bin, "system", "status"); err != nil {
 		return nil, fmt.Errorf("system unavailable")
 	}
-	data, err := containerProbe(bin, "image", "inspect", cfg.Image)
+	return inspectAppleImage(containerProbe, bin, cfg)
+}
+
+// inspectAppleImage binds the configured image to the platform manifest Apple
+// would run, from `image inspect` alone.
+func inspectAppleImage(probe probeFunc, bin string, cfg domain.ExecutionConfig) (*application.ContainerExecution, error) {
+	data, err := probe(bin, "image", "inspect", cfg.Image)
 	if err != nil {
 		return nil, fmt.Errorf("image not available locally")
 	}

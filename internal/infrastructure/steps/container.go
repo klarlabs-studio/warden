@@ -29,45 +29,111 @@ func ResolveContainer(cfg domain.ExecutionConfig) (*application.ContainerExecuti
 	if !cfg.ContainerEnabled() {
 		return nil, nil
 	}
-	runtimes := []string{"docker", "podman", "nerdctl"}
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		runtimes = append([]string{"apple"}, runtimes...)
-	}
-	if cfg.Runtime != "" && cfg.Runtime != "auto" {
-		runtimes = []string{cfg.Runtime}
-	}
 	var problems []string
-	for _, runtimeName := range runtimes {
-		executable := runtimeName
-		if runtimeName == "apple" {
-			executable = "container"
-		}
-		bin, err := exec.LookPath(executable)
+	for _, runtimeName := range containerRuntimes(cfg) {
+		bin, err := exec.LookPath(runtimeExecutable(runtimeName))
 		if err != nil {
 			problems = append(problems, runtimeName+": not installed")
 			continue
 		}
+		var selected *application.ContainerExecution
 		if runtimeName == "apple" {
-			selected, err := resolveAppleContainer(bin, cfg)
-			if err == nil {
-				return selected, nil
-			}
-			problems = append(problems, "apple: "+err.Error())
-			continue
+			selected, err = resolveAppleContainer(bin, cfg)
+		} else {
+			selected, err = resolveCompatContainer(runtimeName, bin, cfg)
 		}
-		selected, err := resolveCompatContainer(runtimeName, bin, cfg)
 		if err != nil {
 			problems = append(problems, runtimeName+": "+err.Error())
 			continue
 		}
 		return selected, nil
 	}
-	return nil, fmt.Errorf("%w (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", application.ErrContainerUnavailable, strings.Join(problems, "; "))
+	return nil, unavailable(problems)
 }
+
+// SampleEnvironment reports the execution environment ResolveContainer would
+// bind (runtime, image ID, platform) by inspecting the configured image only.
+// It never probes the engine's info or system status, never pulls and never
+// creates or runs a container, so a background watcher can afford to call it
+// repeatedly. It walks the same runtimes in the same order as ResolveContainer
+// and returns the first whose local store holds a usable image; it is an
+// observation for change detection, not a selection: an evaluation still
+// resolves the runtime itself, and only the environment a step actually ran
+// in is ever recorded. A host-mode configuration has no environment to sample
+// and returns the zero value.
+func SampleEnvironment(ctx context.Context, cfg domain.ExecutionConfig) (domain.ExecutionEnvironment, error) {
+	if err := cfg.Validate(); err != nil {
+		return domain.ExecutionEnvironment{}, err
+	}
+	if !cfg.ContainerEnabled() {
+		return domain.ExecutionEnvironment{}, nil
+	}
+	probe := func(bin string, args ...string) ([]byte, error) {
+		return containerProbeContext(ctx, bin, args...)
+	}
+	var problems []string
+	for _, runtimeName := range containerRuntimes(cfg) {
+		bin, err := exec.LookPath(runtimeExecutable(runtimeName))
+		if err != nil {
+			problems = append(problems, runtimeName+": not installed")
+			continue
+		}
+		var env domain.ExecutionEnvironment
+		if runtimeName == "apple" {
+			var selected *application.ContainerExecution
+			if selected, err = inspectAppleImage(probe, bin, cfg); err == nil {
+				env = selected.Environment
+			}
+		} else {
+			_, env, err = inspectCompatImage(probe, runtimeName, bin, cfg)
+		}
+		if ctx.Err() != nil {
+			return domain.ExecutionEnvironment{}, ctx.Err()
+		}
+		if err != nil {
+			problems = append(problems, runtimeName+": "+err.Error())
+			continue
+		}
+		return env, nil
+	}
+	return domain.ExecutionEnvironment{}, unavailable(problems)
+}
+
+// containerRuntimes is the order runtimes are tried in: Apple's first on Apple
+// silicon, then the Docker-compatible engines, or only the configured one.
+func containerRuntimes(cfg domain.ExecutionConfig) []string {
+	if cfg.Runtime != "" && cfg.Runtime != "auto" {
+		return []string{cfg.Runtime}
+	}
+	runtimes := []string{"docker", "podman", "nerdctl"}
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		runtimes = append([]string{"apple"}, runtimes...)
+	}
+	return runtimes
+}
+
+// runtimeExecutable is the CLI a runtime is driven through.
+func runtimeExecutable(runtimeName string) string {
+	if runtimeName == "apple" {
+		return "container"
+	}
+	return runtimeName
+}
+
+func unavailable(problems []string) error {
+	return fmt.Errorf("%w (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", application.ErrContainerUnavailable, strings.Join(problems, "; "))
+}
+
+// probeFunc runs one read-only engine CLI query.
+type probeFunc func(bin string, args ...string) ([]byte, error)
 
 func containerProbe(bin string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	return containerProbeContext(ctx, bin, args...)
+}
+
+func containerProbeContext(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = scrubbedEnv()
 	proc.Isolate(cmd)
