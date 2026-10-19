@@ -23,6 +23,38 @@ All notable changes to warden are documented here. The format follows
   `profile:` writes exactly the note it wrote before. A warden older than this
   release reports a profiled note's signature as invalid, so a verifier that
   pins a key rejects it: upgrade verifiers before adopting a profile.
+- **Profiled notes record each agent step's boundary, signed.** The runner
+  observed whether an agent step ran in its own guarded clone, whether the
+  tree guard found a change, and whether the agent saw only the allowlisted
+  environment, but the note kept none of it, so a verifier could not tell an
+  isolated review from one that ran in the attested worktree. A profiled
+  note's `step_outcomes` now carries `isolated`, `tree_unchanged` and
+  `env_allowlisted` for an agent step that executed, inside the signature,
+  and only as observed: a field nobody observed is left out rather than
+  written as `false`. `warden reattest` carries them, `warden why` and
+  `warden axi verify` show them, and a note without a profile is unchanged.
+- **CI can demand a minimum profile, checked from the evidence (preview).** A
+  profiled note named its profile, but nothing let CI require one, and the
+  name alone proves nothing about what ran. `warden verify --min-profile
+  <level> --key …` passes only when the trusted, commit-bound note records a
+  profile identical to this warden's built-in definition (an unknown version
+  or a different digest fails), ranked at least `<level>`, and its signed
+  observations meet that level: each required pre-push step has an outcome
+  that counts (strict: executed only, so cached and predicted results fail;
+  standard also counts them; skipped never counts), under strict each
+  required shell step has a Linux container record with network `none`
+  (`--container-steps` alone accepts `network: bridge`), from standard up
+  every agent step that ran was isolated with its tree unchanged (strict:
+  and saw only the allowlisted environment), and from standard up no required
+  approval was auto-approved, and under strict a note that records an agent
+  declaration also records a notarized Agent Trace. A pass prints what was
+  checked. The flag needs an explicit `--key` and is single-commit only.
+  A version 2 requirements file (`{"version":2,"profile":{"min":"strict"}}`,
+  `steps` optional) demands the same from protected policy; version 1 files
+  are unchanged, and an older warden refuses version 2, so CI runs its checks.
+  The `warden-verify` and `warden-gate` actions and the GitLab component gain
+  a `min-profile` input. On `warden-gate` it fails the gate for now, since no
+  release checks a profile across a range yet.
 
 - **Agent declarations are bound into profiled notes, and strict requires an
   Agent Trace for them** (preview). An agent's own declaration that it took

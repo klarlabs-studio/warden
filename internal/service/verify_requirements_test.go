@@ -81,3 +81,52 @@ func TestVerifyRequirementsTrustedContract(t *testing.T) {
 	}
 	verify(false)
 }
+
+// A version 2 requirements file's profile is enforced alongside --min-profile,
+// with no steps required.
+func TestVerifyRequirementsV2EnforcesProfile(t *testing.T) {
+	svc, err := New(initRepo(t), "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	rec := strictConformingRecord(t, head)
+	rec.PublicKey = base64.StdEncoding.EncodeToString(pub)
+	ref := domain.NewProfileRef(mustProfile(t, "standard"))
+	rec.Profile = &ref
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	if err := svc.Repo().WriteNote(head, rec); err != nil {
+		t.Fatal(err)
+	}
+	fp := rec.SignerFingerprint()
+	for _, tt := range []struct {
+		fileMin string
+		flag    []domain.ComplianceProfile
+		want    bool
+	}{
+		{"standard", nil, true},
+		{"strict", nil, false},
+		{"standard", []domain.ComplianceProfile{mustProfile(t, "strict")}, false},
+		{"permissive", []domain.ComplianceProfile{mustProfile(t, "standard")}, true},
+	} {
+		req := domain.ExecutionRequirements{Version: 2, Profile: &domain.ProfileRequirement{Min: tt.fileMin}}
+		res, err := svc.VerifyRequirementsWithProfiles(head, ExternalReject, req, tt.flag, fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Validated != tt.want {
+			t.Errorf("file %s + flag %v: validated=%v want %v (%v)", tt.fileMin, tt.flag, res.Validated, tt.want, res.RequirementFailures)
+		}
+		if len(res.Conformance) != 1+len(tt.flag) {
+			t.Errorf("want a report per minimum, got %d", len(res.Conformance))
+		}
+	}
+}

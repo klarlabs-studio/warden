@@ -51,6 +51,44 @@ files touched, and lines changed. Expectations are exact: different contextual
 inputs require different reviewed expectations. There is no automatic assertion
 that a local command is equivalent to a remote CI stage.
 
+## Version 2: a minimum profile
+
+Version 2 adds an optional `profile` clause. The note must then conform to at
+least that [compliance profile](agent-profiles.md#checking-a-profile-in-ci),
+exactly as `--min-profile` checks it: recomputed from the note's signed step
+outcomes, execution environments and approval record, never from the profile
+name it carries. `steps` becomes optional when `profile` is present, and
+anything in it is checked exactly as in version 1:
+
+```json
+{
+  "version": 2,
+  "profile": {"min": "strict"},
+  "steps": {}
+}
+```
+
+`min` is `permissive`, `standard` or `strict`, optionally `name@version`. A
+version 2 file must name a profile, at least one step, or both. A version 1 file
+that names a profile is refused. A file that demands a profile needs an
+explicit `--key`. Passing `--min-profile` as well demands both minimums.
+
+For `strict`, this release checks: trusted commit-bound local provenance; the
+recorded profile's digest against this warden's definition; its rank; that
+`credentials, lint, test, security-scan, review` each executed (cached and
+predicted results do not count); that `lint`, `test` and `security-scan` each
+have a complete Linux container record; that each of those ran with
+network `none`; that every agent step that executed was isolated with its
+tree unchanged and saw only the allowlisted environment; that no required
+approval was auto-approved; and that a note recording an agent declaration
+also records a notarized Agent Trace. A passing `verify` prints the clauses it
+checked.
+
+A warden older than version 2 rejects such a file: its version check refuses
+`2` and its strict decoder refuses the unknown `profile` key. The action then
+reports `validated=false` and CI runs its checks. Version 1 files behave
+exactly as before.
+
 ## Capture limits
 
 Only shell checks freshly executed in containers with `network: none` qualify.

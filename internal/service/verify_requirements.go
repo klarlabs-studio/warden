@@ -10,6 +10,13 @@ import (
 // VerifyRequirements narrows single-commit verification to fresh observations
 // matching protected consumer expectations. It never widens Attests or trust.
 func (s *Service) VerifyRequirements(commit string, policy ExternalPolicy, requirements domain.ExecutionRequirements, keys ...string) (VerifyResult, error) {
+	return s.VerifyRequirementsWithProfiles(commit, policy, requirements, nil, keys...)
+}
+
+// VerifyRequirementsWithProfiles is VerifyRequirements that also requires
+// conformance to each profile in mins (from --min-profile), on top of any
+// minimum a version 2 requirements file names. Every minimum must hold.
+func (s *Service) VerifyRequirementsWithProfiles(commit string, policy ExternalPolicy, requirements domain.ExecutionRequirements, mins []domain.ComplianceProfile, keys ...string) (VerifyResult, error) {
 	if err := requirements.Validate(); err != nil {
 		return VerifyResult{}, err
 	}
@@ -22,6 +29,10 @@ func (s *Service) VerifyRequirements(commit string, policy ExternalPolicy, requi
 		result.RequirementFailures = []string{"trusted, commit-bound local provenance is required"}
 		return result, nil
 	}
+	if p, ok := requirements.MinProfile(); ok {
+		mins = append(slices.Clip(mins), p)
+	}
+	applyConformance(&result, mins)
 	tree, err := s.repo.TreeSHA(result.SHA)
 	if err != nil {
 		return VerifyResult{}, fmt.Errorf("resolve required commit tree: %w", err)

@@ -24,6 +24,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	requirementsFile := fs.String("requirements", "", "protected JSON execution requirements (single-commit only)")
 	containerSteps := fs.String("container-steps", "", "require trusted container execution for these comma-separated steps (single-commit only)")
 	containerImageID := fs.String("container-image-id", "", "require this inspected sha256 image ID for --container-steps")
+	minProfile := fs.String("min-profile", "", "require conformance to at least this compliance profile (permissive, standard, strict), recomputed from the note's signed observations (single-commit only; needs --key)")
 	commit := fs.String("commit", "HEAD", "commit to verify")
 	rangeSpec := fs.String("range", "", "gate every commit in a BASE..HEAD range (e.g. origin/main..HEAD); exits non-zero if any commit lacks trusted provenance")
 	requireSigned := fs.Bool("require-signed", false, "require each note to carry a signature that verifies (implied by --key)")
@@ -46,12 +47,15 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 
 	requirementsSet := false
 	containerStepsSet := false
+	minProfileSet := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "requirements" {
+		switch f.Name {
+		case "requirements":
 			requirementsSet = true
-		}
-		if f.Name == "container-steps" {
+		case "container-steps":
 			containerStepsSet = true
+		case "min-profile":
+			minProfileSet = true
 		}
 	})
 	var requiredContainerSteps []domain.StepName
@@ -80,6 +84,10 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	mins, code := parseMinProfile(minProfileSet, *minProfile, *rangeSpec, *keys, requirements, stderr)
+	if code != 0 {
+		return code
+	}
 	svc, err := newService(autoApprover{})
 	if err != nil {
 		return fail(stderr, err)
@@ -99,9 +107,12 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	// roster, so a repo enforces trusted provenance without passing fingerprints.
 	trusted, fromRoster := resolveTrustedKeys(svc, *keys)
 	var res service.VerifyResult
-	if requirementsSet {
-		res, err = svc.VerifyRequirements(*commit, policy, requirements, trusted...)
-	} else {
+	switch {
+	case requirementsSet:
+		res, err = svc.VerifyRequirementsWithProfiles(*commit, policy, requirements, mins, trusted...)
+	case len(mins) > 0:
+		res, err = svc.VerifyMinProfile(*commit, policy, mins, trusted...)
+	default:
 		res, err = svc.VerifyWithPolicy(*commit, policy, trusted...)
 	}
 	if err != nil {
@@ -128,12 +139,57 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintf(stdout, "unverified %s — a valid signature is required\n", short(res.SHA))
 		default:
 			printVerify(stdout, res, len(trusted) > 0)
+			if res.Validated {
+				printConformance(stdout, res.Conformance)
+			}
 		}
 	}
 	if res.Validated {
 		return 0
 	}
 	return 1
+}
+
+// parseMinProfile resolves --min-profile and refuses the invocations a minimum
+// profile cannot be checked under. It returns a non-zero exit code on refusal.
+//
+// A minimum profile is a consumer-side control, so it demands an explicitly
+// pinned --key: the roster fallback reads .warden.yaml from the checkout under
+// test, which is the input being judged. The same holds for a version 2
+// requirements file that names a profile. Range verification does not check
+// profiles in this release, and accepting the flag there would let a green
+// range read as profile-checked.
+func parseMinProfile(set bool, value, rangeSpec, keys string, requirements domain.ExecutionRequirements, stderr io.Writer) (mins []domain.ComplianceProfile, code int) {
+
+	if set {
+		p, err := domain.ParseComplianceProfile(value)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "warden: invalid --min-profile: %v\n", err)
+			return nil, 2
+		}
+		if rangeSpec != "" {
+			_, _ = fmt.Fprintln(stderr, "warden: --min-profile is single-commit only; this release does not check profiles across a --range")
+			return nil, 2
+		}
+		mins = append(mins, p)
+	}
+	if (len(mins) > 0 || requirements.Profile != nil) && len(splitList(keys)) == 0 {
+		_, _ = fmt.Fprintln(stderr, "warden: a minimum profile needs a pinned --key; a roster read from the checkout under test cannot vouch for that checkout")
+		return nil, 2
+	}
+	return mins, 0
+}
+
+// printConformance lists, for a passing note, exactly which profile clauses
+// were checked and which this release leaves unchecked, so a pass is never
+// read as covering more than it did.
+func printConformance(w io.Writer, reports []service.ConformanceReport) {
+	for _, r := range reports {
+		_, _ = fmt.Fprintf(w, "  conforms to %s; checked: %s\n", r.Min, strings.Join(r.Checked, "; "))
+		if len(r.Deferred) > 0 {
+			_, _ = fmt.Fprintf(w, "  not checked by this release: %s\n", strings.Join(r.Deferred, "; "))
+		}
+	}
 }
 
 // resolveTrustedKeys returns the effective trusted-signer set for a

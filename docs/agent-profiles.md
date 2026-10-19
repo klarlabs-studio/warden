@@ -194,8 +194,8 @@ model. See "What strict does not prove" below.
 
 Each agent step under standard or strict reports what warden observed:
 whether it was isolated, whether the tree was unchanged, and whether its
-environment was allowlisted. In this release that report is on the step
-result, not in the signed note.
+environment was allowlisted. The signed note records it (see
+[What the signed note records](#what-the-signed-note-records)).
 
 ### Profiles and `extends:`
 
@@ -228,15 +228,20 @@ fourth, `authorship`, described below):
 - `step_outcomes`: for each step that ran through the gate, whether it was
   `executed`, `cached` (the host input cache), `predicted` (a matching staged
   prediction) or `skipped` (nothing was configured to perform it), and the
-  agent warden invoked when an agent executed it.
+  agent warden invoked when an agent executed it. For an agent step that
+  executed, it also records the boundary warden observed: `isolated: true`
+  when the step ran in its own guarded clone, `tree_unchanged` with what the
+  tree guard found, and `env_allowlisted: true` when the agent saw only the
+  allowlisted environment.
 - `approval`: whether the approval gate needed a decision, and if so the
   channel that answered it (`tty`, `tui` or `auto`) and the name the approver
   gave itself. `none` means no decision was needed.
 
-They state only what warden observed. The agent step boundary observations
-(isolated, tree unchanged, environment allowlisted) are not in the note yet;
-they are reported on the step result only. `warden why`, MCP
-`verify` and `warden axi verify` show the three fields.
+They state only what warden observed. A boundary field that was not observed
+is left out, never written as `false`: an agent step that was not isolated
+has no `isolated` or `tree_unchanged` key at all, and a step whose agent did
+not run now (cached, skipped) has none of them. `warden why`, MCP `verify` and
+`warden axi verify` show all of it.
 
 ### Agent declarations
 
@@ -296,16 +301,70 @@ the fields it does not know, computes a different payload and reports the
 signature as invalid. A verifier that pins a key therefore rejects a profiled
 note it cannot read, so upgrade verifiers before adopting a profile.
 
+## Checking a profile in CI
+
+A profile name in a note is a claim. `warden verify --min-profile` does not
+take the claim; it recomputes conformance from what the note's signature
+covers:
+
+```bash
+warden verify --key '<trusted-fingerprint>' --min-profile strict
+```
+
+It exits 0 only when every clause below holds for the exact commit, and 1
+otherwise, listing each clause that failed. It refuses to run (exit 2) without
+an explicit `--key`: the `.warden.yaml` roster lives in the checkout being
+judged, so it cannot vouch for that checkout. It is single-commit only; with
+`--range` it exits 2.
+
+| Clause | permissive | standard | strict |
+|---|---|---|---|
+| The note attests this commit, is signed by a pinned key, and is not an external-run attestation | yes | yes | yes |
+| The note records a profile whose name, version and digest match this warden's built-in definition. An unknown version or a different digest fails | yes | yes | yes |
+| The recorded profile ranks at least the minimum | yes | yes | yes |
+| Each required pre-push step (`credentials, lint, test`; strict adds `security-scan, review`) has a recorded outcome that counts | | executed, cached or predicted | executed only |
+| Each required shell step (`lint`, `test`, `security-scan`) has a complete Linux container execution record | | | yes |
+| Each required shell step ran with network `none` | | | yes |
+| Every agent step that executed has `isolated: true` and `tree_unchanged: true` | | yes | yes |
+| Every agent step that executed has `env_allowlisted: true` | | | yes |
+| Where the approval gate needed a decision, it was answered by `tty` or `tui`, not `auto` | | yes | yes |
+| Where the note records an agent declaration (`authorship`), it also records a notarized Agent Trace | | | yes |
+
+The network clause is checked separately from the container record:
+`--container-steps` accepts a container check that ran with `network: bridge`,
+and strict does not.
+
+A cached or predicted result reuses a pass recorded for identical inputs on an
+earlier run, so standard counts it. Strict does not: the note does not
+describe that earlier run.
+
+An agent step is one the note says an agent ran, a built-in agent step, or a
+step the policy handed to an agent. A missing boundary observation fails the
+same way a `false` one does.
+
+The trace clause reads the same `authorship` field the push-time rule
+writes. A profiled note without it means no declaration in the built-in
+tables was seen, so the clause holds; it does not mean a person wrote the
+change.
+
+A [version 2 requirements file](execution-contracts.md#version-2-a-minimum-profile)
+can demand the same minimum from protected CI policy. The GitHub
+`warden-verify` action and the GitLab component take a `min-profile` input.
+A warden release older than this feature rejects the flag, so the GitHub action
+reports `validated=false` and CI runs its checks. The `warden-gate` action
+accepts `min-profile` too, but it gates a range, which no release checks a
+profile across yet, so setting it fails the gate.
+
 ## Not yet enforced
 
 These parts of the design need runtime or verifier work that later releases
 add. In this release a profile does **not**:
 
-- record agent isolation (the boundary observations above) in the signed
-  note;
-- give CI a way to demand a minimum profile (`verify --min-profile`, the range
-  gate, the action inputs);
-- refuse host cache hits or predictions for required steps.
+- check a minimum profile across a range (`verify --range`, the
+  `warden-gate` action); only single-commit `verify --min-profile` exists;
+- refuse host cache hits or predictions for required steps while the gate
+  runs. `verify --min-profile strict` refuses them afterwards (see
+  [Checking a profile in CI](#checking-a-profile-in-ci)).
 
 Until the release that records the profile in signed notes, a later release may
 add the checks above to the existing `standard@1` and `strict@1` definitions.

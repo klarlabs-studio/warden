@@ -427,3 +427,28 @@ func TestComplianceProfile_AgentSurfaceMayApprove(t *testing.T) {
 		}
 	}
 }
+
+func TestComplianceProfileVerifierAccessors(t *testing.T) {
+	strict, _ := ParseComplianceProfile("strict")
+	if got := JoinSteps(strict.RequiredShellSteps(PrePush)); got != "lint, test, security-scan" {
+		t.Errorf("strict required shell steps = %q", got)
+	}
+	if !strict.RequiresContainer() || !strict.RequiresNetworkNone() {
+		t.Error("strict requires a network-less container")
+	}
+	standard, _ := ParseComplianceProfile("standard")
+	if standard.RequiresContainer() || standard.RequiresNetworkNone() {
+		t.Error("standard requires no container")
+	}
+	if got, ok := LookupComplianceProfile("strict", 1); !ok || got.Digest() != strict.Digest() {
+		t.Error("lookup of strict@1 must return the built-in definition")
+	}
+	for _, c := range []struct {
+		name    string
+		version int
+	}{{"strict", 2}, {"paranoid", 1}, {"", 1}, {"strict", 0}} {
+		if _, ok := LookupComplianceProfile(c.name, c.version); ok {
+			t.Errorf("lookup of %s@%d must fail", c.name, c.version)
+		}
+	}
+}

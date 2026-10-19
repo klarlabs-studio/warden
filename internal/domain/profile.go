@@ -683,3 +683,36 @@ func mergeProfile(base, child string) string {
 	}
 	return child
 }
+
+// LookupComplianceProfile returns the built-in definition for name@version, and
+// false when this warden has none. A verifier uses it to compare a recorded
+// ProfileRef with its own table: an unknown version is not an error to recover
+// from but a definition this binary cannot vouch for.
+func LookupComplianceProfile(name string, version int) (ComplianceProfile, bool) {
+	def, ok := builtinProfiles[name+"@"+strconv.Itoa(version)]
+	if !ok {
+		return ComplianceProfile{}, false
+	}
+	return ComplianceProfile{def: def}, true
+}
+
+// RequiredShellSteps returns the required steps for a hook that run a
+// configured command (and so can run in a container), in definition order.
+// Native steps (credentials, rebase, push) and agent steps are excluded.
+func (p ComplianceProfile) RequiredShellSteps(h Hook) []StepName {
+	var out []StepName
+	for _, s := range p.def.RequiredSteps[h.ConfigKey()] {
+		if needsCommand(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// RequiresContainer reports whether the profile requires shell checks to run
+// in a container.
+func (p ComplianceProfile) RequiresContainer() bool { return p.def.ContainerExecution }
+
+// RequiresNetworkNone reports whether the profile requires shell checks to run
+// with network none.
+func (p ComplianceProfile) RequiresNetworkNone() bool { return p.def.NetworkNone }

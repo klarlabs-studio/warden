@@ -138,6 +138,7 @@ func TestVerifyActionContainerRequirements(t *testing.T) {
 		"WARDEN_REQUIREMENTS="+requirements,
 		"WARDEN_CONTAINER_STEPS=lint,test",
 		"WARDEN_CONTAINER_IMAGE_ID="+image,
+		"WARDEN_MIN_PROFILE=strict",
 		"VERIFY_ARGS="+argsFile,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -147,8 +148,162 @@ func TestVerifyActionContainerRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"verify", "--commit", "tip", "--key", actionTestPin, "--requirements", requirements, "--container-steps", "lint,test", "--container-image-id", image, "--quiet"}
+	want := []string{"verify", "--commit", "tip", "--key", actionTestPin, "--requirements", requirements, "--container-steps", "lint,test", "--container-image-id", image, "--min-profile", "strict", "--quiet"}
 	if got := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments: %q want %q", got, want)
+	}
+}
+
+// The min-profile input reaches the verifier through the environment, never
+// inline, and a verifier that rejects the flag (an older release, exit 2)
+// leaves validated=false so CI runs its checks.
+func TestVerifyActionMinProfile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX action")
+	}
+	data, err := os.ReadFile(repoFile(t, ".github/actions/warden-verify/action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Inputs map[string]struct {
+			Default string `yaml:"default"`
+		} `yaml:"inputs"`
+		Runs struct {
+			Steps []struct {
+				ID  string            `yaml:"id"`
+				Env map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(data, &action); err != nil {
+		t.Fatal(err)
+	}
+	if in, ok := action.Inputs["min-profile"]; !ok || in.Default != "" {
+		t.Fatal("min-profile must be an optional input defaulting to empty")
+	}
+	passed := false
+	for _, step := range action.Runs.Steps {
+		if step.ID == "check" && step.Env["WARDEN_MIN_PROFILE"] == "${{ inputs.min-profile }}" {
+			passed = true
+		}
+	}
+	if !passed {
+		t.Fatal("min-profile must reach the check step through WARDEN_MIN_PROFILE")
+	}
+	for _, tc := range []struct {
+		profile, status, want string
+		wantFlag              bool
+	}{
+		{"", "0", "validated=true\n", false},
+		{"strict", "0", "validated=true\n", true},
+		{"strict", "2", "validated=false\n", true},
+		{"strict", "1", "validated=false\n", true},
+	} {
+		dir := t.TempDir()
+		mock := "#!/bin/sh\nprintf '%s\\000' \"$@\" > \"$VERIFY_ARGS\"\nexit \"$VERIFY_STATUS\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "warden"), []byte(mock), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		argsFile, output := filepath.Join(dir, "args"), filepath.Join(dir, "output")
+		cmd := exec.Command("bash", repoFile(t, ".github/actions/warden-verify/verify.sh"))
+		cmd.Env = append(os.Environ(),
+			"PATH="+dir+":"+os.Getenv("PATH"),
+			"GITHUB_OUTPUT="+output,
+			"WARDEN_COMMIT=tip",
+			"WARDEN_TRUSTED_KEYS="+actionTestPin,
+			"WARDEN_MIN_PROFILE="+tc.profile,
+			"VERIFY_ARGS="+argsFile,
+			"VERIFY_STATUS="+tc.status,
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("script: %v %s", err, out)
+		}
+		if got, _ := os.ReadFile(output); string(got) != tc.want {
+			t.Errorf("profile %q status %s: output %q want %q", tc.profile, tc.status, got, tc.want)
+		}
+		args, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(args), "--min-profile\x00"+tc.profile+"\x00"); got != tc.wantFlag {
+			t.Errorf("profile %q: --min-profile passed=%v want %v (%q)", tc.profile, got, tc.wantFlag, args)
+		}
+	}
+}
+
+// warden-gate forwards min-profile to the range verifier. A binary that cannot
+// check it exits 2, and the gate fails rather than passing an unchecked range.
+func TestGateActionMinProfileFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX action")
+	}
+	data, err := os.ReadFile(repoFile(t, ".github/actions/warden-gate/action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Runs struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(data, &action); err != nil {
+		t.Fatal(err)
+	}
+	var gate string
+	for _, step := range action.Runs.Steps {
+		if step.Name == "Gate the range" {
+			gate = step.Run
+			if step.Env["MIN_PROFILE"] != "${{ inputs.min-profile }}" {
+				t.Fatal("min-profile must reach the gate through MIN_PROFILE")
+			}
+		}
+	}
+	if gate == "" || strings.Contains(gate, "${{") {
+		t.Fatal("missing gate step or inline expression in shell")
+	}
+	for _, tc := range []struct {
+		profile, status string
+		wantCode        int
+		wantFlag        bool
+	}{
+		{"", "0", 0, false},
+		{"strict", "2", 2, true},
+	} {
+		dir := t.TempDir()
+		mock := "#!/bin/sh\nprintf '%s\\000' \"$@\" > \"$VERIFY_ARGS\"\nexit \"$VERIFY_STATUS\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "warden"), []byte(mock), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		argsFile := filepath.Join(dir, "args")
+		cmd := exec.Command("bash", "-c", gate)
+		cmd.Env = append(os.Environ(),
+			"PATH="+dir+":"+os.Getenv("PATH"),
+			"GITHUB_STEP_SUMMARY="+filepath.Join(dir, "summary"),
+			"IN_BASE=base", "IN_HEAD=head", "REQUIRE_SIGNED=false", "SKIP_MERGES=true",
+			"KEY="+actionTestPin, "MIN_PROFILE="+tc.profile,
+			"VERIFY_ARGS="+argsFile, "VERIFY_STATUS="+tc.status,
+		)
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if code != tc.wantCode {
+			t.Errorf("profile %q: exit %d want %d: %s", tc.profile, code, tc.wantCode, out)
+		}
+		args, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(string(args), "--min-profile\x00"+tc.profile+"\x00"); got != tc.wantFlag {
+			t.Errorf("profile %q: --min-profile passed=%v want %v (%q)", tc.profile, got, tc.wantFlag, args)
+		}
 	}
 }
