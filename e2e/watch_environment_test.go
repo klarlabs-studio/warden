@@ -174,9 +174,10 @@ func engineImageID(t *testing.T, engine, cli, ref string) string {
 }
 
 // retag points tag at a new image derived from the one it names, without the
-// network: the Docker-compatible engines commit a stopped container with a
-// changed CMD (the one --change directive all three accept); Apple has no
-// commit, so its saved OCI layout is rewritten with a changed config and
+// network: the Docker-compatible engines commit a container with a changed CMD
+// (the one --change directive all three accept; nerdctl commits only a
+// container with a running task, so it is started and kept alive); Apple has
+// no commit, so its saved OCI layout is rewritten with a changed config and
 // loaded back under the same name.
 func retag(t *testing.T, engine, cli, tag, nonce string) {
 	t.Helper()
@@ -185,7 +186,7 @@ func retag(t *testing.T, engine, cli, tag, nonce string) {
 		return
 	}
 	name := "warden-e2e-retag-" + nonce
-	engineRun(t, cli, "create", "--name", name, tag, "true")
+	engineRun(t, cli, "run", "-d", "--network", "none", "--name", name, tag, "sleep", "300")
 	defer func() { _ = exec.Command(cli, "rm", "-f", name).Run() }()
 	engineRun(t, cli, "commit", "--change", `CMD ["/bin/sh","-c","echo `+nonce+`"]`, name, tag)
 }
