@@ -46,9 +46,11 @@ func TestGoldenFleet_UnprofiledNoteWithNoOpStepsIsUnchanged(t *testing.T) {
 		t.Fatalf("trust add: %d %s", code, out)
 	}
 	g.git("add", ".warden.yaml")
-	g.git("commit", "--no-verify", "-m", "adopt warden")
+	// The commit declares an agent and the gate runs under an agent marker:
+	// without a profile neither is read, so the note is still the golden.
+	g.git("commit", "--no-verify", "-m", "adopt warden\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_golden")
 
-	if out, code := g.warden("run", "pre-push"); code != 0 && code != 3 {
+	if out, code := g.wardenEnv([]string{"CLAUDE_CODE_CHILD_SESSION=1", "GEMINI_CLI=1"}, "run", "pre-push"); code != 0 && code != 3 {
 		t.Fatalf("an unprofiled gate must pass as before, got %d: %s", code, out)
 	}
 	note := g.readNote()
@@ -65,7 +67,7 @@ func TestGoldenFleet_UnprofiledNoteWithNoOpStepsIsUnchanged(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("the note of an unprofiled repo changed:\n got: %s\nwant: %s", got, want)
 	}
-	for _, leak := range []string{"profile", "step_outcomes", "approval", "skipped", "executed"} {
+	for _, leak := range []string{"profile", "step_outcomes", "approval", "skipped", "executed", "authorship", "anthropic", "GEMINI"} {
 		if strings.Contains(note, leak) {
 			t.Errorf("an unprofiled note carries %q: %s", leak, note)
 		}

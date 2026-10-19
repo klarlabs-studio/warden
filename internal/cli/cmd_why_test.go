@@ -245,6 +245,8 @@ func TestCmdWhy_RendersProfileObservations(t *testing.T) {
 		"outcomes:      lint cached, review executed (agent=claude), test not observed, extra predicted",
 		"profile:       strict@1 (definition matches this warden's)",
 		"approval:      required, answered via tty (warden-cli)",
+		// No declaration is stated as that, never as a person's commit.
+		"authorship:    no agent declaration observed (this does not say a person wrote it)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
@@ -267,5 +269,17 @@ func TestWhyProfileAndApprovalStates(t *testing.T) {
 	}
 	if got := whyApproval(domain.ApprovalRef{Required: true, Channel: domain.ApprovalAuto}); got != "required, answered via auto" {
 		t.Errorf("approval = %q", got)
+	}
+}
+
+func TestWhyAuthorship(t *testing.T) {
+	got := whyAuthorship(&domain.AuthorshipSignals{
+		Trailers:   []domain.TrailerDeclaration{{Commit: "0123456789abcdef", Agent: "claude-code", Trailer: "Claude-Session: u"}},
+		EnvMarkers: []domain.EnvMarkerDeclaration{{Name: "GEMINI_CLI", Agent: "gemini-cli"}},
+	})
+	for _, want := range []string{"agent declared: ", `carries "Claude-Session: u"`, "gated under GEMINI_CLI (gemini-cli)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("authorship %q must contain %q", got, want)
+		}
 	}
 }

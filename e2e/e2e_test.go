@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.klarlabs.de/warden/internal/domain"
 )
 
 // wardenBin is the path to the warden binary built once for the whole suite.
@@ -108,8 +110,23 @@ func (h *harness) wardenIn(stdin string, args ...string) (string, int) {
 // gate through whatever warden the developer (or the runner image) happens to
 // have installed — testing a released binary instead of this working tree, and
 // reporting its behavior as if it were ours.
+//
+// It also drops the agent harness markers warden reads under a profile (see
+// domain.AgentEnvMarkerRules). The suite is often run from inside a coding
+// agent, and an inherited marker would turn every profiled scenario into a
+// declared-agent run; a scenario that wants a marker passes it explicitly.
 func hookEnv() []string {
-	return append(os.Environ(), "PATH="+filepath.Dir(wardenBin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	markers := map[string]bool{}
+	for _, r := range domain.AgentEnvMarkerRules() {
+		markers[r.Name] = true
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); !markers[name] {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "PATH="+filepath.Dir(wardenBin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // gitTry runs git and returns (combined output, exit code) instead of failing

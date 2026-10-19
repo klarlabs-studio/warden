@@ -59,6 +59,10 @@ type VerifyOutput struct {
 	Profile      *domain.ProfileRef                         `json:"profile,omitempty"`
 	StepOutcomes map[domain.StepName]domain.StepObservation `json:"step_outcomes,omitempty"`
 	Approval     *domain.ApprovalRef                        `json:"approval,omitempty"`
+	// Authorship lists the agent declarations a profiled gate observed:
+	// trailers on the attested commits and harness markers in its
+	// environment. Declarations, not authorship; absent when none matched.
+	Authorship *domain.AuthorshipSignals `json:"authorship,omitempty"`
 }
 
 // RangeVerifyOutput gates a whole base..head span — the shape a PR check needs.
@@ -235,6 +239,7 @@ func newVerifyOutput(sha string, r ProvenanceRecord) VerifyOutput {
 		out.Profile = r.Record.Profile
 		out.StepOutcomes = r.Record.StepOutcomes
 		out.Approval = r.Record.Approval
+		out.Authorship = r.Record.Authorship
 	}
 	return out
 }

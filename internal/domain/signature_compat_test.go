@@ -181,12 +181,12 @@ func TestRootFlattensReattestationChains(t *testing.T) {
 
 // preProfileVerify verifies a note the way a warden from before the profile
 // fields does: it decodes into a struct that has every RunRecord field EXCEPT
-// profile, step_outcomes and approval — built by reflection from RunRecord
+// profile, step_outcomes, approval and authorship — built by reflection from RunRecord
 // itself, so it cannot drift from the real struct in any other way — recomputes
 // the signing payload from that, and checks the ed25519 signature over it.
 func preProfileVerify(t *testing.T, note []byte) bool {
 	t.Helper()
-	newFields := map[string]bool{"Profile": true, "StepOutcomes": true, "Approval": true}
+	newFields := map[string]bool{"Profile": true, "StepOutcomes": true, "Approval": true, "Authorship": true}
 	rt := reflect.TypeOf(RunRecord{})
 	var fields []reflect.StructField
 	for i := 0; i < rt.NumField(); i++ {
@@ -257,7 +257,7 @@ func TestSigningPayload_UnprofiledNoteVerifiesForAPreProfileWarden(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"profile", "step_outcomes", "approval"} {
+	for _, key := range []string{"profile", "step_outcomes", "approval", "authorship"} {
 		if strings.Contains(string(payload), key) {
 			t.Fatalf("an unprofiled payload must not mention %q: %s", key, payload)
 		}
@@ -283,6 +283,9 @@ func TestSigningPayload_ProfiledNoteFailsAPreProfileWarden(t *testing.T) {
 			r.StepOutcomes = map[StepName]StepObservation{StepReview: {Outcome: StepSkipped}}
 		},
 		"approval": func(r *RunRecord) { r.Approval = &ApprovalRef{Channel: ApprovalNone} },
+		"authorship": func(r *RunRecord) {
+			r.Authorship = &AuthorshipSignals{EnvMarkers: []EnvMarkerDeclaration{{Name: "GEMINI_CLI", Agent: "gemini-cli"}}}
+		},
 	}
 	for name, set := range cases {
 		t.Run(name, func(t *testing.T) {
