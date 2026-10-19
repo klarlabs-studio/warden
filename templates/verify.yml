@@ -62,8 +62,8 @@ spec:
       description: >-
         Optional minimum compliance profile (permissive, standard or strict,
         optionally name@version) the note must conform to, recomputed from its
-        signed observations. Needs a warden-version that supports --min-profile;
-        an older one rejects the flag and the job fails as a configuration
+        signed observations. Needs warden-version 0.37.0 or newer; an older
+        one rejects the flag and the job fails as a configuration
         error in both modes.
       default: ''
       regex: '^((permissive|standard|strict)(@[1-9][0-9]*)?)?$'
@@ -71,7 +71,7 @@ spec:
       description: >-
         warden release to install (0.29.0 or newer: it must publish a cosign
         bundle for checksums.txt). An exact version; "latest" is not accepted.
-      default: '0.36.0'
+      default: '0.37.0'
       regex: '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
     on-unverified:
       description: >-
