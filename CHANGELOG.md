@@ -46,9 +46,9 @@ All notable changes to warden are documented here. The format follows
   (`--container-steps` alone accepts `network: bridge`), from standard up
   every agent step that ran was isolated with its tree unchanged (strict:
   and saw only the allowlisted environment), and from standard up no required
-  approval was auto-approved. One strict clause is not checked, because the
-  note does not record authorship yet: an Agent Trace for a declared agent
-  commit. A pass prints what was checked and what was not. The flag needs an explicit `--key` and is single-commit only.
+  approval was auto-approved, and under strict a note that records an agent
+  declaration also records a notarized Agent Trace. A pass prints what was
+  checked. The flag needs an explicit `--key` and is single-commit only.
   A version 2 requirements file (`{"version":2,"profile":{"min":"strict"}}`,
   `steps` optional) demands the same from protected policy; version 1 files
   are unchanged, and an older warden refuses version 2, so CI runs its checks.

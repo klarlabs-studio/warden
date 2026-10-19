@@ -328,6 +328,7 @@ judged, so it cannot vouch for that checkout. It is single-commit only; with
 | Every agent step that executed has `isolated: true` and `tree_unchanged: true` | | yes | yes |
 | Every agent step that executed has `env_allowlisted: true` | | | yes |
 | Where the approval gate needed a decision, it was answered by `tty` or `tui`, not `auto` | | yes | yes |
+| Where the note records an agent declaration (`authorship`), it also records a notarized Agent Trace | | | yes |
 
 The network clause is checked separately from the container record:
 `--container-steps` accepts a container check that ran with `network: bridge`,
@@ -341,11 +342,10 @@ An agent step is one the note says an agent ran, a built-in agent step, or a
 step the policy handed to an agent. A missing boundary observation fails the
 same way a `false` one does.
 
-**Not checked in this release.** strict@1 also requires that a commit that
-declares an agent carries a notarized Agent Trace. The signed note does not
-record authorship signals yet, so `--min-profile strict` does not check it,
-and its output says so on every pass. It becomes checkable when the note
-records them.
+The trace clause reads the same `authorship` field the push-time rule
+writes. A profiled note without it means no declaration in the built-in
+tables was seen, so the clause holds; it does not mean a person wrote the
+change.
 
 A [version 2 requirements file](execution-contracts.md#version-2-a-minimum-profile)
 can demand the same minimum from protected CI policy. The GitHub
