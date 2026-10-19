@@ -110,6 +110,15 @@ func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trus
 		}
 		res.Validated = res.Validated && res.Trusted
 	}
+	// A signature that is present but does not verify means the note was edited
+	// after it was signed. An unsigned note may still validate without a pinned
+	// key (pinning is what makes provenance trusted), but a broken signature is
+	// positive evidence of tampering, so it never validates. A re-attestation
+	// whose trust comes from the carried original is the one exception the
+	// pinned branch above already decided.
+	if res.Signed && !res.SignatureValid && !res.CarriedTrust {
+		res.Validated = false
+	}
 
 	// The external-run policy is applied LAST, over an otherwise-decided result,
 	// so "this note is fine but you did not ask for this kind" stays reportable
