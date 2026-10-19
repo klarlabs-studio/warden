@@ -13,11 +13,9 @@ import (
 // place would make every older note look forged, or every newer one honored by
 // an older verifier that means something else by the same name.
 //
-// One window is open, and ADR 0007 records it: until the release that first
-// writes the profile into signed notes, the PRs that add the remaining parts
-// of standard@1 and strict@1 (agent isolation, environment, approval,
-// authorship) extend these definitions and re-pin these digests on purpose.
-// Once a note can carry a digest, that window closes for good.
+// ADR 0007 kept one window open: until the release that first wrote the
+// profile into signed notes, PRs could extend standard@1 and strict@1 and
+// re-pin these digests. That release was 0.37.0, and the window is closed.
 const (
 	goldenPermissive1 = "sha256:85ae44054d6db52f954f7b575905d58dcabff4793fc52452f3030f1f13bca09d"
 	goldenStandard1   = "sha256:2e8d45308adf4c55d9ea918f35673f42b3e1223dc569766dd82bb6bd8937aeb9"

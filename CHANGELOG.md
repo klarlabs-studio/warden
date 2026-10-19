@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-19
+
+A minor release that completes compliance profiles. A profiled note now
+records, inside its signature, the profile it was gated under, what each step
+actually did, how agent steps were contained, how the approval gate was
+answered, and which agents declared themselves. CI can require a minimum
+profile on a commit or across a range, and the verdict is recomputed from
+those observations, not from the profile's name. This release freezes
+`permissive@1`, `standard@1` and `strict@1`. Repositories without `profile:`
+write the same notes as before. Upgrade every verifier before adopting a
+profile: an older warden reports a profiled note's signature as invalid.
+
 ### Added
 
 - **Profiled notes record what happened, signed.** A note listed the steps the
@@ -33,7 +45,7 @@ All notable changes to warden are documented here. The format follows
   and only as observed: a field nobody observed is left out rather than
   written as `false`. `warden reattest` carries them, `warden why` and
   `warden axi verify` show them, and a note without a profile is unchanged.
-- **CI can demand a minimum profile, checked from the evidence (preview).** A
+- **CI can demand a minimum profile, checked from the evidence.** A
   profiled note named its profile, but nothing let CI require one, and the
   name alone proves nothing about what ran. `warden verify --min-profile
   <level> --key …` passes only when the trusted, commit-bound note records a
@@ -54,7 +66,7 @@ All notable changes to warden are documented here. The format follows
   are unchanged, and an older warden refuses version 2, so CI runs its checks.
   The `warden-verify` and `warden-gate` actions and the GitLab component gain
   a `min-profile` input.
-- **The range gate enforces the base ref's profile (preview).** `verify
+- **The range gate enforces the base ref's profile.** `verify
   --range` checked provenance but not profiles, so a pull request could be
   gated under `permissive`, or lower `profile:` in its own head, and still
   pass a gate on a `strict` branch. The range gate now reads `profile:` from
@@ -74,7 +86,7 @@ All notable changes to warden are documented here. The format follows
   input now forwards to the range gate instead of failing it.
 
 - **Agent declarations are bound into profiled notes, and strict requires an
-  Agent Trace for them** (preview). An agent's own declaration that it took
+  Agent Trace for them**. An agent's own declaration that it took
   part, the `Co-Authored-By` trailer Claude Code writes or the marker a harness
   sets for the commands it starts, never reached the record, so strict could
   not ask more of an agent-written change than of any other. Under a
@@ -92,6 +104,10 @@ All notable changes to warden are documented here. The format follows
 
 ### Changed
 
+- **`standard@1` and `strict@1` are final.** In 0.36.0 the definitions were a
+  preview and this release added floors to them, so their digests differ from
+  0.36.0's. From this release on a published definition never changes: a
+  stricter level ships as `@2` and a repository adopts it by naming it.
 - **Under a compliance profile, an agent can no longer approve its own run.**
   The MCP `run_trigger` tool and `warden axi run-trigger` answered the approval
   gate themselves, as `warden-auto`, because no person sits at a prompt there.

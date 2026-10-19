@@ -4,30 +4,30 @@ A compliance profile is a named, built-in set of defaults and floors for a
 repository where coding agents commit and push. You pick one with a single key:
 
 ```yaml
-profile: standard   # Requires warden >= 0.36.0: older releases reject the key
+profile: standard   # Requires warden >= 0.37.0 on every machine and CI runner
 ```
 
 The decision record is [ADR 0007](adr/0007-agent-compliance-profiles.md). This
-page covers what you can rely on **in the current release**. Several parts of
-the design land in later releases, and this page says so wherever that applies.
+page covers what you can rely on **in the current release**, and says so
+where a part of the design is not enforced yet.
 
-> **Preview.** Until warden records the profile in signed notes, the
-> definitions are not frozen: `standard@1` and `strict@1` gain floors as the
-> later parts land, so a repository that adopts a level now will get a
-> stricter gate on some upgrades. Each addition is listed in the changelog.
-> The release that first signs the profile into notes freezes `@1` and its
-> digest; from then on a stricter level ships as `@2` and is never adopted
-> automatically.
+> **Frozen since 0.37.0.** `permissive@1`, `standard@1` and `strict@1` never
+> change again, and neither do their digests. A stricter level ships as `@2`
+> and is never adopted automatically. In 0.36.0 the definitions were a
+> preview, and 0.37.0 added floors to them.
 
 ## Before you add the key: upgrade every reader first
 
 warden refuses a config that contains a key it does not know. A warden older
 than 0.36.0 reading `profile:` fails every hook with a parse error. From 0.36.0
-on, that error also says the key may need a newer warden.
+on, that error also says the key may need a newer warden. 0.36.0 itself reads
+the key but writes notes without a profile, and its verifier reports a
+profiled note's signature as invalid, so a fleet that mixes it with 0.37.0
+fails the profile gate.
 
 So the order matters:
 
-1. Pin warden 0.36.0 or later in CI (`warden-version` inputs, the GitLab
+1. Pin warden 0.37.0 or later in CI (`warden-version` inputs, the GitLab
    component) and update developer machines (npm, brew).
 2. Only then commit `profile:`. Put the release next to the key, as above, so
    the next reader knows why a hook broke on an old machine.
@@ -219,7 +219,7 @@ they did before.
 
 ## What the signed note records
 
-Starting with the first release after 0.36.0, every note the gate writes under
+Starting with 0.37.0, every note the gate writes under
 a profile carries three more fields, all inside the signed payload (and a
 fourth, `authorship`, described below):
 
@@ -411,16 +411,12 @@ the input.
 
 ## Not yet enforced
 
-These parts of the design need runtime or verifier work that later releases
-add. In this release a profile does **not**:
-
-- refuse host cache hits or predictions for required steps while the gate
-  runs. `verify --min-profile strict` refuses them afterwards (see
-  [Checking a profile in CI](#checking-a-profile-in-ci)).
-
-Until the release that records the profile in signed notes, a later release may
-add the checks above to the existing `standard@1` and `strict@1` definitions.
-From that release on, a published definition never changes again.
+A profile does **not** yet refuse host cache hits or predictions for required
+steps while the gate runs. `verify --min-profile strict` refuses them
+afterwards (see [Checking a profile in CI](#checking-a-profile-in-ci)), and
+under strict the required shell steps run in a container, where the cache is
+off. Refusing them at run time is gate behaviour, not part of a definition,
+so adding it later leaves `strict@1` unchanged.
 
 ## What strict does not prove
 
