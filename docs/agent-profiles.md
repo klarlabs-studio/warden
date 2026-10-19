@@ -312,10 +312,11 @@ warden verify --key '<trusted-fingerprint>' --min-profile strict
 ```
 
 It exits 0 only when every clause below holds for the exact commit, and 1
-otherwise, listing each clause that failed. It refuses to run (exit 2) without
-an explicit `--key`: the `.warden.yaml` roster lives in the checkout being
-judged, so it cannot vouch for that checkout. It is single-commit only; with
-`--range` it exits 2.
+otherwise, listing each clause that failed. For a single commit it refuses to
+run (exit 2) without an explicit `--key`: the `.warden.yaml` roster lives in
+the checkout being judged, so it cannot vouch for that checkout. A range is
+checked against its base ref's profile; see
+[Checking a profile across a range](#checking-a-profile-across-a-range).
 
 | Clause | permissive | standard | strict |
 |---|---|---|---|
@@ -351,17 +352,68 @@ A [version 2 requirements file](execution-contracts.md#version-2-a-minimum-profi
 can demand the same minimum from protected CI policy. The GitHub
 `warden-verify` action and the GitLab component take a `min-profile` input.
 A warden release older than this feature rejects the flag, so the GitHub action
-reports `validated=false` and CI runs its checks. The `warden-gate` action
-accepts `min-profile` too, but it gates a range, which no release checks a
-profile across yet, so setting it fails the gate.
+reports `validated=false` and CI runs its checks. The `warden-gate` action's
+`min-profile` input is covered in the next section.
+
+## Checking a profile across a range
+
+`warden verify --range BASE..HEAD` enforces the profile of the branch a change
+is merged into. It reads `profile:` from the **base** ref's `.warden.yaml`,
+through its `extends:` chain at that same ref, the way it already reads
+`trusted_keys`. A pull request that lowers `profile:` in its own head is still
+judged by the base's profile. Every noted commit in the range must pass the
+clauses in the table above for that profile, recomputed from its own signed
+observations:
+
+```bash
+warden verify --range origin/main..HEAD
+warden verify --range origin/main..HEAD --min-profile strict   # also demand strict
+```
+
+- **`--min-profile` adds a minimum; it does not replace the base's.** Both
+  apply, and a commit must conform to each. A flag cannot lower the base's
+  profile.
+- **The base profile is read on every range gate**, with or without `--key`,
+  because it is policy, not a trust anchor. A base config that does not load,
+  names an unknown profile, or misses its profile's floors fails the gate
+  (exit 1, with the error) rather than dropping to no profile.
+- **Conformance needs trusted signers.** A note counts as trusted when its
+  signature verifies against the pinned `--key` set or, without `--key`, the
+  base ref's `trusted_keys` roster. With a profile in force and neither, every
+  noted commit fails the trust clause, and the message says a profile needs a
+  pinned key or a base roster.
+- **Span coverage.** A commit without a note of its own, inside a gated push's
+  signed span, is judged by the covering note. That note must conform too, or
+  it covers nothing.
+- **Forge-accepted commits are not profile-checked.** A commit the forge
+  authored and the base config accepts (`forge.accept_authored`) has no warden
+  record whose observations could be recomputed. It stays accepted, since the
+  base config made that decision explicitly, and is marked
+  `profile_unchecked: true` in `--json`, MCP `verify_range` and
+  `warden axi verify-range`; the human summary counts it as not
+  profile-checked.
+- **Bootstrap.** Until the base carries a profile, and without `--min-profile`,
+  no profile is enforced: the gate is exactly what it was, and its output does
+  not mention a profile. The first pull request that introduces `profile:` is
+  therefore not checked against it, as with the roster.
+
+A failing commit reports reason `profile` with `profile_failures`, one entry
+per clause that did not hold (`profile standard@1: <clause>: <reason>`). The
+`--json` export, MCP `verify_range` and `warden axi verify-range` also list
+each enforced profile with `from_base` and `from_flag`. MCP `verify_range`
+takes `min_profile`, and `warden axi verify-range` takes `--min-profile`.
+
+The `warden-gate` action forwards its `min-profile` input to
+`verify --range --min-profile`. A warden release that predates range checking
+refuses that combination, or the flag, so the gate fails rather than passing a
+range it did not check. Pin a `warden-version` with range checking when you set
+the input.
 
 ## Not yet enforced
 
 These parts of the design need runtime or verifier work that later releases
 add. In this release a profile does **not**:
 
-- check a minimum profile across a range (`verify --range`, the
-  `warden-gate` action); only single-commit `verify --min-profile` exists;
 - refuse host cache hits or predictions for required steps while the gate
   runs. `verify --min-profile strict` refuses them afterwards (see
   [Checking a profile in CI](#checking-a-profile-in-ci)).

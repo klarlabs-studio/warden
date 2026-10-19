@@ -284,10 +284,11 @@ func TestVerifyRange_ForgeAcceptRefusesASignatureItCannotVerify(t *testing.T) {
 	}
 }
 
-// commitFile writes a file, stages it, and commits — used to put a
-// .warden.yaml at a BASE commit, which is where the gate reads policy from.
-func commitFile(t *testing.T, dir, name, content, msg string) string {
+// commitConfig writes .warden.yaml, stages it, and commits — used to put a
+// config at a BASE commit, which is where the gate reads policy from.
+func commitConfig(t *testing.T, dir, content, msg string) string {
 	t.Helper()
+	const name = ".warden.yaml"
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +323,7 @@ func TestVerifyRange_ForgePolicyComesFromTheBaseRefConfig(t *testing.T) {
 	fpr := gpgSigner(t, dir)
 
 	cfg := "hooks: {pre_commit: false, pre_push: false}\nforge:\n  accept_authored: true\n  keys: [\"" + fpr + "\"]\n"
-	base := commitFile(t, dir, ".warden.yaml", cfg, "base: enable forge acceptance")
+	base := commitConfig(t, dir, cfg, "base: enable forge acceptance")
 	head := commit(t, dir, svc, "a commit the forge made")
 
 	// UseRoster is what makes the service read config from the base ref; no
@@ -348,10 +349,10 @@ func TestVerifyRange_AHeadCannotEnableForgeAcceptanceForItself(t *testing.T) {
 	fpr := gpgSigner(t, dir)
 
 	// BASE has no forge config at all.
-	base := commitFile(t, dir, ".warden.yaml",
+	base := commitConfig(t, dir,
 		"hooks: {pre_commit: false, pre_push: false}\n", "base: no forge policy")
 	// The HEAD turns it on — the move this rule exists to refuse.
-	head := commitFile(t, dir, ".warden.yaml",
+	head := commitConfig(t, dir,
 		"hooks: {pre_commit: false, pre_push: false}\nforge:\n  accept_authored: true\n  keys: [\""+fpr+"\"]\n",
 		"head: enable forge acceptance for myself")
 

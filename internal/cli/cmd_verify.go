@@ -24,7 +24,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	requirementsFile := fs.String("requirements", "", "protected JSON execution requirements (single-commit only)")
 	containerSteps := fs.String("container-steps", "", "require trusted container execution for these comma-separated steps (single-commit only)")
 	containerImageID := fs.String("container-image-id", "", "require this inspected sha256 image ID for --container-steps")
-	minProfile := fs.String("min-profile", "", "require conformance to at least this compliance profile (permissive, standard, strict), recomputed from the note's signed observations (single-commit only; needs --key)")
+	minProfile := fs.String("min-profile", "", "require conformance to at least this compliance profile (permissive, standard, strict), recomputed from the note's signed observations (a single commit needs --key; a --range also enforces its base ref's profile)")
 	commit := fs.String("commit", "HEAD", "commit to verify")
 	rangeSpec := fs.String("range", "", "gate every commit in a BASE..HEAD range (e.g. origin/main..HEAD); exits non-zero if any commit lacks trusted provenance")
 	requireSigned := fs.Bool("require-signed", false, "require each note to carry a signature that verifies (implied by --key)")
@@ -100,7 +100,8 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	// A range gate resolves its roster from the BASE ref (the trusted side), so it
 	// gets its own resolution path — see runVerifyRange.
 	if *rangeSpec != "" {
-		return runVerifyRange(svc, *rangeSpec, *keys, *requireSigned, *skipMerges, *jsonOut, *quiet, stdout, stderr, policy)
+		return runVerifyRange(svc, rangeRequest{spec: *rangeSpec, keys: *keys, requireSigned: *requireSigned, skipMerges: *skipMerges, mins: mins, policy: policy},
+			*jsonOut, *quiet, stdout, stderr)
 	}
 
 	// An explicit --key wins; otherwise fall back to the committed .warden.yaml
@@ -153,25 +154,24 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 // parseMinProfile resolves --min-profile and refuses the invocations a minimum
 // profile cannot be checked under. It returns a non-zero exit code on refusal.
 //
-// A minimum profile is a consumer-side control, so it demands an explicitly
-// pinned --key: the roster fallback reads .warden.yaml from the checkout under
-// test, which is the input being judged. The same holds for a version 2
-// requirements file that names a profile. Range verification does not check
-// profiles in this release, and accepting the flag there would let a green
-// range read as profile-checked.
+// A minimum profile is a consumer-side control, so for a single commit it
+// demands an explicitly pinned --key: the roster fallback reads .warden.yaml
+// from the checkout under test, which is the input being judged. The same holds
+// for a version 2 requirements file that names a profile. A --range is
+// different: it reads its roster from the BASE ref, the trusted side, so it
+// takes the flag without --key; with neither a key nor a base roster every
+// noted commit fails the profile's trust clause, and says so.
 func parseMinProfile(set bool, value, rangeSpec, keys string, requirements domain.ExecutionRequirements, stderr io.Writer) (mins []domain.ComplianceProfile, code int) {
-
 	if set {
 		p, err := domain.ParseComplianceProfile(value)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "warden: invalid --min-profile: %v\n", err)
 			return nil, 2
 		}
-		if rangeSpec != "" {
-			_, _ = fmt.Fprintln(stderr, "warden: --min-profile is single-commit only; this release does not check profiles across a --range")
-			return nil, 2
-		}
 		mins = append(mins, p)
+	}
+	if rangeSpec != "" {
+		return mins, 0
 	}
 	if (len(mins) > 0 || requirements.Profile != nil) && len(splitList(keys)) == 0 {
 		_, _ = fmt.Fprintln(stderr, "warden: a minimum profile needs a pinned --key; a roster read from the checkout under test cannot vouch for that checkout")
@@ -221,18 +221,19 @@ func resolveTrustedKeys(svc *service.Service, keyFlag string) (keys []string, fr
 // pre-receive hook wraps — see docs/adr/0002. The CLI passes intent (an explicit
 // --key, or "use the committed roster"); the service resolves the roster from the
 // trusted BASE ref, so the trust invariant lives in the core, not here.
-func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, skipMerges, jsonOut, quiet bool, stdout, stderr io.Writer, policy service.ExternalPolicy) int {
-	base, head, ok := parseRange(spec)
+func runVerifyRange(svc *service.Service, req rangeRequest, jsonOut, quiet bool, stdout, stderr io.Writer) int {
+	base, head, ok := parseRange(req.spec)
 	if !ok {
-		_, _ = fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", spec)
+		_, _ = fmt.Fprintf(stderr, "warden: --range must be BASE..HEAD (two-dot), e.g. origin/main..HEAD; got %q\n", req.spec)
 		return 2
 	}
 	opts := service.RangeVerifyOptions{
-		RequireSigned: requireSigned,
-		SkipMerges:    skipMerges,
+		RequireSigned:  req.requireSigned,
+		SkipMerges:     req.skipMerges,
+		ExternalPolicy: req.policy,
+		MinProfiles:    req.mins,
 	}
-	opts.ExternalPolicy = policy
-	if k := strings.TrimSpace(keyFlag); k != "" {
+	if k := strings.TrimSpace(req.keys); k != "" {
 		opts.TrustedKeys = splitList(k) // explicit pin wins outright
 	} else {
 		opts.UseRoster = true // let the service read the roster from the base ref
@@ -244,6 +245,11 @@ func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, s
 	if !quiet {
 		if res.RosterFromBase && !jsonOut {
 			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from %s:.warden.yaml (%d key(s))\n", base, len(res.Effective.TrustedKeys))
+		}
+		if !jsonOut {
+			for _, p := range res.Profiles {
+				_, _ = fmt.Fprintf(stdout, "warden: requiring compliance profile %s (%s)\n", p.Profile, profileSource(p, base))
+			}
 		}
 		if jsonOut {
 			if code := printRangeJSON(stdout, stderr, res); code != 0 {
@@ -257,6 +263,28 @@ func runVerifyRange(svc *service.Service, spec, keyFlag string, requireSigned, s
 		return 0
 	}
 	return 1
+}
+
+// rangeRequest is what `verify --range` asks the range gate for.
+type rangeRequest struct {
+	spec, keys    string
+	requireSigned bool
+	skipMerges    bool
+	mins          []domain.ComplianceProfile
+	policy        service.ExternalPolicy
+}
+
+// profileSource says where a range gate's profile came from, for the human
+// report.
+func profileSource(p service.RangeProfile, base string) string {
+	switch {
+	case p.FromBase && p.FromFlag:
+		return "from " + base + ":.warden.yaml and --min-profile"
+	case p.FromBase:
+		return "from " + base + ":.warden.yaml"
+	default:
+		return "from --min-profile"
+	}
 }
 
 // parseRange splits a two-dot "BASE..HEAD" spec. It rejects the three-dot
@@ -366,6 +394,8 @@ func reasonHint(r domain.VerifyReason) string {
 		return "note is unsigned or its signature does not verify"
 	case domain.ReasonUntrusted:
 		return "signed by a key outside the trusted set"
+	case domain.ReasonProfile:
+		return "provenance is sound, but the note does not conform to a required compliance profile"
 	case domain.ReasonForgeAuthored:
 		return "authored by the forge (squash merge, web edit, or a bot), signed by its key — no developer machine was in this commit's path, so no local gate could have run; allow these with forge.accept_authored in .warden.yaml"
 	default:
@@ -379,6 +409,18 @@ func countCovered(res service.RangeVerifyResult) int {
 	n := 0
 	for i := range res.Commits {
 		if res.Commits[i].CoveredBy != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// countProfileUnchecked tallies commits that passed while a profile applied
+// without being checked against it (forge-accepted: no record to recompute).
+func countProfileUnchecked(res service.RangeVerifyResult) int {
+	n := 0
+	for i := range res.Commits {
+		if res.Commits[i].ProfileUnchecked {
 			n++
 		}
 	}
@@ -403,6 +445,9 @@ func printRange(w io.Writer, res service.RangeVerifyResult) {
 	fails := res.Failures()
 	for _, v := range fails {
 		_, _ = fmt.Fprintf(w, "  ✗ %s — %s\n", short(v.SHA), reasonHint(v.Reason))
+		for _, f := range v.ProfileFailures {
+			_, _ = fmt.Fprintf(w, "      %s\n", f)
+		}
 	}
 	if len(fails) == 0 {
 		_, _ = fmt.Fprintf(w, "verified %d commit(s) in %s..%s (%s)\n", len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
@@ -418,20 +463,59 @@ func printRange(w io.Writer, res service.RangeVerifyResult) {
 		if n := countForgeAccepted(res); n > 0 {
 			_, _ = fmt.Fprintf(w, "  (%d accepted as forge-authored — the forge signed them; warden ran NO checks on them)\n", n)
 		}
+		// Name the profiles only when one applied: without one, the gate is the
+		// gate it always was and must not read as profile-checked.
+		if len(res.Profiles) > 0 {
+			_, _ = fmt.Fprintf(w, "  every noted commit conforms to %s\n", profileList(res.Profiles))
+		}
+		if n := countProfileUnchecked(res); n > 0 {
+			_, _ = fmt.Fprintf(w, "  (%d forge-accepted commit(s) NOT profile-checked — no warden record to recompute)\n", n)
+		}
 		return
 	}
-	_, _ = fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s provenance\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), gateDepth(res.Effective))
+	want := gateDepth(res.Effective) + " provenance"
+	if len(res.Profiles) > 0 {
+		want += " conforming to " + profileList(res.Profiles)
+	}
+	_, _ = fmt.Fprintf(w, "FAILED: %d of %d commit(s) in %s..%s lack %s\n", len(fails), len(res.Commits), short(res.Base), short(res.Head), want)
+}
+
+// profileList joins a range gate's profiles for one line of output.
+func profileList(ps []service.RangeProfile) string {
+	names := make([]string, len(ps))
+	for i, p := range ps {
+		names[i] = p.Profile.String()
+	}
+	return strings.Join(names, " and ")
 }
 
 // rangeExport is the stable JSON shape a CI job or the Phase-2 action consumes.
+// Profiles is additive: absent when no profile was enforced.
 type rangeExport struct {
-	Base    string                 `json:"base"`
-	Head    string                 `json:"head"`
-	Depth   string                 `json:"depth"`
-	OK      bool                   `json:"ok"`
-	Total   int                    `json:"total"`
-	Failed  int                    `json:"failed"`
-	Commits []domain.CommitVerdict `json:"commits"`
+	Base     string                 `json:"base"`
+	Head     string                 `json:"head"`
+	Depth    string                 `json:"depth"`
+	OK       bool                   `json:"ok"`
+	Total    int                    `json:"total"`
+	Failed   int                    `json:"failed"`
+	Profiles []rangeProfileExport   `json:"profiles,omitempty"`
+	Commits  []domain.CommitVerdict `json:"commits"`
+}
+
+// rangeProfileExport is one enforced minimum profile and where it came from.
+type rangeProfileExport struct {
+	Profile  string `json:"profile"`
+	FromBase bool   `json:"from_base"`
+	FromFlag bool   `json:"from_flag"`
+}
+
+// exportProfiles converts a range gate's profiles for JSON output.
+func exportProfiles(ps []service.RangeProfile) []rangeProfileExport {
+	var out []rangeProfileExport
+	for _, p := range ps {
+		out = append(out, rangeProfileExport{Profile: p.Profile.String(), FromBase: p.FromBase, FromFlag: p.FromFlag})
+	}
+	return out
 }
 
 // printRangeJSON emits the range result as JSON. It returns a non-zero CLI code
@@ -439,13 +523,14 @@ type rangeExport struct {
 // res.OK so --json and text share one exit contract.
 func printRangeJSON(stdout, stderr io.Writer, res service.RangeVerifyResult) int {
 	out := rangeExport{
-		Base:    res.Base,
-		Head:    res.Head,
-		Depth:   gateDepth(res.Effective),
-		OK:      res.OK(),
-		Total:   len(res.Commits),
-		Failed:  len(res.Failures()),
-		Commits: res.Commits,
+		Base:     res.Base,
+		Head:     res.Head,
+		Depth:    gateDepth(res.Effective),
+		OK:       res.OK(),
+		Total:    len(res.Commits),
+		Failed:   len(res.Failures()),
+		Profiles: exportProfiles(res.Profiles),
+		Commits:  res.Commits,
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")

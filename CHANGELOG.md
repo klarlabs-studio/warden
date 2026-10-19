@@ -48,13 +48,30 @@ All notable changes to warden are documented here. The format follows
   and saw only the allowlisted environment), and from standard up no required
   approval was auto-approved, and under strict a note that records an agent
   declaration also records a notarized Agent Trace. A pass prints what was
-  checked. The flag needs an explicit `--key` and is single-commit only.
+  checked. For a single commit the flag needs an explicit `--key`.
   A version 2 requirements file (`{"version":2,"profile":{"min":"strict"}}`,
   `steps` optional) demands the same from protected policy; version 1 files
   are unchanged, and an older warden refuses version 2, so CI runs its checks.
   The `warden-verify` and `warden-gate` actions and the GitLab component gain
-  a `min-profile` input. On `warden-gate` it fails the gate for now, since no
-  release checks a profile across a range yet.
+  a `min-profile` input.
+- **The range gate enforces the base ref's profile (preview).** `verify
+  --range` checked provenance but not profiles, so a pull request could be
+  gated under `permissive`, or lower `profile:` in its own head, and still
+  pass a gate on a `strict` branch. The range gate now reads `profile:` from
+  the base ref's `.warden.yaml` (through `extends:`, as it reads
+  `trusted_keys`) and requires every noted commit to conform to it, judged
+  from each note's signed observations exactly as `--min-profile` judges one
+  commit. `--min-profile` is accepted with `--range` and adds a minimum; it
+  cannot lower the base's. Trust comes from `--key` or the base roster; with
+  a profile and neither, every noted commit fails and says why. A span is
+  covered only by a conforming note. A forge-accepted commit has no record to
+  recompute: it stays accepted and is marked `profile_unchecked`. A base
+  config that does not load fails the gate, in keyed mode too. Failing
+  commits report reason `profile` with `profile_failures`; `--json`, MCP
+  `verify_range` (new `min_profile` input) and `warden axi verify-range` (new
+  `--min-profile`) list the enforced profiles and their source. Until a base
+  names a profile, nothing changes. The `warden-gate` action's `min-profile`
+  input now forwards to the range gate instead of failing it.
 
 - **Agent declarations are bound into profiled notes, and strict requires an
   Agent Trace for them** (preview). An agent's own declaration that it took

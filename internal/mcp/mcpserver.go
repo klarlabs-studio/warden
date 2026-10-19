@@ -73,6 +73,9 @@ type RangeVerifyRequest struct {
 	// never read trust from the head it is checking.
 	UseRoster  bool
 	SkipMerges bool
+	// MinProfiles are explicit minimum compliance profiles, checked alongside
+	// the base ref's `profile:`, which the gate always reads.
+	MinProfiles []domain.ComplianceProfile
 }
 
 // RunSummary is a delivery-neutral run result the MCP tool returns.
@@ -148,6 +151,9 @@ type VerifyRangeInput struct {
 	// SkipMerges defaults true, matching the CLI: a merge commit's parents are
 	// gated individually, so gating the merge itself double-counts.
 	SkipMerges *bool `json:"skip_merges,omitempty" jsonschema:"description=Skip merge commits; their parents are gated individually (default true)"`
+	// MinProfile adds an explicit minimum compliance profile to the one the
+	// base ref's .warden.yaml names, which is always enforced.
+	MinProfile string `json:"min_profile,omitempty" jsonschema:"description=Also require conformance to this compliance profile (permissive, standard or strict, optionally name@version); the base ref's profile always applies (optional)"`
 }
 
 // RunStatusInput identifies the run to poll.
@@ -250,7 +256,9 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 	srv.Tool("verify_range").
 		Description("Gate every commit in base..head, failing if any lacks trustworthy provenance. " +
 			"Use this to answer 'is this whole branch/PR gated?'. Each commit gets a reason: ok, " +
-			"missing, broken-chain, unsigned, or untrusted.").
+			"missing, broken-chain, unsigned, untrusted, forge-authored, or profile. When the base " +
+			"ref's .warden.yaml names a compliance profile (or min_profile is given), every noted " +
+			"commit must conform to it; profile_failures names each clause that did not hold.").
 		ReadOnly().
 		Handler(func(in VerifyRangeInput) (RangeVerifyOutput, error) {
 			return handleVerifyRange(f, in)

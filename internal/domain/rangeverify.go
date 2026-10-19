@@ -44,6 +44,11 @@ const (
 	// whoever opened the Dependabot PR. What a gate does about this commit is a
 	// policy question (ForgePolicy); what it CALLS the commit is not.
 	ReasonForgeAuthored VerifyReason = "forge-authored"
+	// ReasonProfile: the note passed every provenance check the gate makes, but
+	// its signed observations do not conform to a minimum compliance profile in
+	// force for the range (the base ref's `profile:`, or --min-profile). The
+	// verdict's ProfileFailures name each clause that did not hold.
+	ReasonProfile VerifyReason = "profile"
 )
 
 // CommitVerdict is one commit's provenance outcome in a range gate. Reason is
@@ -64,6 +69,14 @@ type CommitVerdict struct {
 	// one where every commit was gated, and an auditor must be able to see the
 	// difference rather than reading an undifferentiated pass.
 	ForgeSigner string `json:"forge_signer,omitempty"`
+	// ProfileFailures lists, for ReasonProfile, each profile clause the note
+	// failed, as "profile <name@version>: <clause>: <reason>".
+	ProfileFailures []string `json:"profile_failures,omitempty"`
+	// ProfileUnchecked marks a commit that passed while a minimum profile was in
+	// force without being checked against it: a forge-accepted commit has no
+	// warden record whose observations could be recomputed. Its pass rests on
+	// forge.accept_authored in the base config, not on the profile.
+	ProfileUnchecked bool `json:"profile_unchecked,omitempty"`
 }
 
 // OK reports whether the commit passed the gate.

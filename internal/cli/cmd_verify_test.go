@@ -446,7 +446,6 @@ func TestVerifyMinProfile(t *testing.T) {
 		{"unknown level", []string{"--key", fp, "--min-profile", "paranoid"}, 2, "invalid --min-profile"},
 		{"unknown version", []string{"--key", fp, "--min-profile", "strict@2"}, 2, "invalid --min-profile"},
 		{"explicit empty", []string{"--key", fp, "--min-profile", ""}, 2, "invalid --min-profile"},
-		{"range unsupported", []string{"--key", fp, "--range", "HEAD~1..HEAD", "--min-profile", "standard"}, 2, "single-commit only"},
 		{"v2 file meets standard", []string{"--key", fp, "--requirements", v2Standard}, 0, "conforms to standard@1"},
 		{"v2 file below strict", []string{"--key", fp, "--requirements", v2Strict}, 1, "profile strict@1"},
 		{"v2 file plus flag", []string{"--key", fp, "--requirements", v2Standard, "--min-profile", "strict"}, 1, "profile strict@1"},
@@ -462,6 +461,154 @@ func TestVerifyMinProfile(t *testing.T) {
 				t.Fatalf("output lacks %q:\n%s", tc.wantOut, all)
 			}
 		})
+	}
+}
+
+// TestCmdVerifyRange_MinProfile drives `verify --range --min-profile` over a
+// real repository whose only noted commit was gated under standard: it
+// conforms to standard, not to strict, and without any key it cannot conform
+// to anything.
+func TestCmdVerifyRange_MinProfile(t *testing.T) {
+	repoWithConfig(t, "")
+	svc, err := newService(autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("git", "commit", "--allow-empty", "--no-verify", "-m", "gated")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard, err := domain.ParseComplianceProfile("standard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.NewProfileRef(standard)
+	executed := domain.StepObservation{Outcome: domain.StepExecuted}
+	record := domain.RunRecord{
+		RunID: "profiled-run", CommitSHA: head,
+		StepsRun:          []domain.StepName{domain.StepCredentials, domain.StepLint, domain.StepTest},
+		EvidenceChainRoot: "root", Evidence: []domain.EvidenceEntry{{Hash: "root"}},
+		PublicKey:    base64.StdEncoding.EncodeToString(pub),
+		Profile:      &ref,
+		StepOutcomes: map[domain.StepName]domain.StepObservation{domain.StepCredentials: executed, domain.StepLint: executed, domain.StepTest: executed},
+		Approval:     &domain.ApprovalRef{Channel: domain.ApprovalNone},
+	}
+	payload, err := record.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	if err := svc.Repo().WriteNote(head, record); err != nil {
+		t.Fatal(err)
+	}
+	fp := record.SignerFingerprint()
+	rng := base + "..HEAD"
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		want     int
+		wantOut  []string
+		denyOuts []string
+	}{
+		{"meets standard", []string{"--range", rng, "--key", fp, "--min-profile", "standard"}, 0,
+			[]string{"requiring compliance profile standard@1 (from --min-profile)", "every noted commit conforms to standard@1"}, nil},
+		{"below strict", []string{"--range", rng, "--key", fp, "--min-profile", "strict"}, 1,
+			[]string{"does not conform to a required compliance profile", "profile strict@1: recorded profile ranks at least strict@1: the note was gated under standard@1", "conforming to strict@1"}, nil},
+		{"no key and no base roster", []string{"--range", rng, "--min-profile", "standard"}, 1,
+			[]string{"a profile needs a pinned --key or a trusted_keys roster at the base ref"}, nil},
+		{"no profile anywhere", []string{"--range", rng, "--key", fp}, 0,
+			[]string{"verified 1 commit"}, []string{"profile", "conforms"}},
+		{"unknown level", []string{"--range", rng, "--key", fp, "--min-profile", "paranoid"}, 2,
+			[]string{"invalid --min-profile"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := cmdVerify(tc.args, &out, &errb)
+			all := out.String() + errb.String()
+			if code != tc.want {
+				t.Fatalf("exit %d want %d: %s", code, tc.want, all)
+			}
+			for _, w := range tc.wantOut {
+				if !strings.Contains(all, w) {
+					t.Errorf("output lacks %q:\n%s", w, all)
+				}
+			}
+			for _, d := range tc.denyOuts {
+				if strings.Contains(all, d) {
+					t.Errorf("output must not mention %q when no profile applied:\n%s", d, all)
+				}
+			}
+		})
+	}
+
+	t.Run("json names the profile and the failed clause", func(t *testing.T) {
+		var out, errb bytes.Buffer
+		if code := cmdVerify([]string{"--range", rng, "--key", fp, "--min-profile", "strict", "--json"}, &out, &errb); code != 1 {
+			t.Fatalf("exit %d: %s %s", code, out.String(), errb.String())
+		}
+		var got rangeExport
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+		}
+		if len(got.Profiles) != 1 || got.Profiles[0] != (rangeProfileExport{Profile: "strict@1", FromFlag: true}) {
+			t.Errorf("profiles = %+v", got.Profiles)
+		}
+		if len(got.Commits) != 1 || got.Commits[0].Reason != domain.ReasonProfile || len(got.Commits[0].ProfileFailures) == 0 {
+			t.Errorf("commits = %+v", got.Commits)
+		}
+	})
+	t.Run("json without a profile has no profiles key", func(t *testing.T) {
+		var out, errb bytes.Buffer
+		if code := cmdVerify([]string{"--range", rng, "--key", fp, "--json"}, &out, &errb); code != 0 {
+			t.Fatalf("exit %d: %s %s", code, out.String(), errb.String())
+		}
+		if strings.Contains(out.String(), "profile") {
+			t.Errorf("an unprofiled range must not emit profile fields:\n%s", out.String())
+		}
+	})
+}
+
+func TestPrintRangeProfile(t *testing.T) {
+	strict, err := domain.ParseComplianceProfile("strict")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := []service.RangeProfile{{Profile: strict, FromBase: true}}
+	pass := service.RangeVerifyResult{Base: "aaaaaaaaaaaa", Head: "bbbbbbbbbbbb", Profiles: profiles, Commits: []domain.CommitVerdict{
+		{SHA: "1111111111111111"},
+		{SHA: "2222222222222222", ForgeSigner: "fp", ProfileUnchecked: true},
+	}}
+	var buf bytes.Buffer
+	printRange(&buf, pass)
+	for _, want := range []string{"every noted commit conforms to strict@1", "1 forge-accepted commit(s) NOT profile-checked"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("pass render lacks %q:\n%s", want, buf.String())
+		}
+	}
+	fail := service.RangeVerifyResult{Base: "aaaaaaaaaaaa", Head: "bbbbbbbbbbbb", Profiles: profiles, Commits: []domain.CommitVerdict{
+		{SHA: "3333333333333333", Reason: domain.ReasonProfile, ProfileFailures: []string{"profile strict@1: x: y"}},
+	}}
+	buf.Reset()
+	printRange(&buf, fail)
+	for _, want := range []string{"✗ 333333333333", "      profile strict@1: x: y", "lack attested provenance conforming to strict@1"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("fail render lacks %q:\n%s", want, buf.String())
+		}
+	}
+	if got := profileSource(service.RangeProfile{FromBase: true, FromFlag: true}, "main"); got != "from main:.warden.yaml and --min-profile" {
+		t.Errorf("profileSource = %q", got)
 	}
 }
 

@@ -99,6 +99,25 @@ func TestAxi_VerifyRangeOnAGatedRepo(t *testing.T) {
 	if _, out, _ := run("axi", "verify-range", "--base", "HEAD~1", "--require-signed"); !strings.Contains(out, "require_signed: true") {
 		t.Errorf("the enforced gate depth must be reported: %q", out)
 	}
+
+	// The note was not gated under a profile, so a minimum fails it, and the
+	// output names both the profile enforced and the clause that failed.
+	code, out, _ = run("axi", "verify-range", "--base", "HEAD~1", "--min-profile", "standard")
+	if code != 1 {
+		t.Errorf("a range below the minimum profile must fail: code=%d out=%q", code, out)
+	}
+	for _, want := range []string{"profiles", "standard@1", "profile_failures", "reason: profile"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("verify-range --min-profile output missing %q: %q", want, out)
+		}
+	}
+	if code, _, errb := run("axi", "verify-range", "--base", "HEAD~1", "--min-profile", "paranoid"); code != 2 || !strings.Contains(errb, "invalid --min-profile") {
+		t.Errorf("an unknown profile is a usage error: code=%d err=%q", code, errb)
+	}
+	// Without a profile the output carries no profile fields at all.
+	if _, out, _ := run("axi", "verify-range", "--base", "HEAD~1"); strings.Contains(out, "profile") {
+		t.Errorf("an unprofiled range must not mention profiles: %q", out)
+	}
 }
 
 // doctor/audit over a gated repo exercise the per-commit reporting path, and
