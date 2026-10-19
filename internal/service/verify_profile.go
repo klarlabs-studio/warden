@@ -41,9 +41,7 @@ const (
 	clauseApproval  = "a required approval was answered by a terminal or the TUI, not auto-approved"
 	clauseIsolation = "every agent step that ran was isolated in a clone with the tree guard reporting no change"
 	clauseAgentEnv  = "every agent step that ran saw only the allowlisted environment"
-
-	// Clauses strict@1 defines that the signed record cannot support yet.
-	deferredAuthorship = "a declared agent commit carries a notarized Agent Trace (authorship is not in the signed record yet)"
+	clauseTrace     = "a change that declares a coding agent carries a notarized Agent Trace"
 )
 
 // Conformance decides whether a verified note meets the profile minimum.
@@ -63,9 +61,6 @@ const (
 // required pre-push steps.
 func Conformance(minimum domain.ComplianceProfile, res VerifyResult) ConformanceReport {
 	rep := ConformanceReport{Min: minimum.String(), Checked: []string{clauseTrusted}}
-	if minimum.Level() >= domain.ProfileStrict {
-		rep.Deferred = []string{deferredAuthorship}
-	}
 	rec := res.Record
 	if !res.Validated || !res.Trusted || res.External || rec == nil {
 		rep.fail(clauseTrusted, "the note is missing, unbound, untrusted or external")
@@ -82,6 +77,9 @@ func Conformance(minimum domain.ComplianceProfile, res VerifyResult) Conformance
 		checkEnvironments(&rep, minimum, rec)
 	}
 	checkAgentBoundaries(&rep, minimum, rec)
+	if minimum.RequiresTraceForDeclaredAgents() {
+		checkAgentTrace(&rep, rec)
+	}
 	// The definitions that withhold approval from the agent surface are the
 	// ones whose notes must show a required approval was not auto-approved.
 	if !minimum.AgentSurfaceMayApprove() {
@@ -236,6 +234,18 @@ func sortedSteps(m map[domain.StepName]domain.StepObservation) []domain.StepName
 	}
 	slices.Sort(out)
 	return out
+}
+
+// checkAgentTrace requires a notarized Agent Trace wherever the record shows an
+// agent declaration. A profiled record without declarations says no
+// declaration in the built-in tables was seen, which is all the run-time rule
+// keys on too. A trace reference without a digest notarized nothing, so it
+// counts as absent.
+func checkAgentTrace(rep *ConformanceReport, rec *domain.RunRecord) {
+	rep.Checked = append(rep.Checked, clauseTrace)
+	if rec.Authorship.Declared() && (rec.AgentTrace == nil || rec.AgentTrace.Digest == "") {
+		rep.fail(clauseTrace, "no Agent Trace was notarized, but "+rec.Authorship.Summary())
+	}
 }
 
 // checkApproval refuses an auto-approved gate wherever a decision was

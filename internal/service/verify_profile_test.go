@@ -133,6 +133,41 @@ func TestConformanceAgainstSignedRecords(t *testing.T) {
 			wantFail: "lint was predicted",
 		},
 		{
+			name: "declared agent without a trace fails strict", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				r.Authorship = &domain.AuthorshipSignals{Trailers: []domain.TrailerDeclaration{{Commit: head, Agent: "claude-code", Trailer: "Claude-Session: u"}}}
+			},
+			wantFail: "no Agent Trace was notarized",
+		},
+		{
+			name: "environment declaration without a trace fails strict", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				r.Authorship = &domain.AuthorshipSignals{EnvMarkers: []domain.EnvMarkerDeclaration{{Name: "GEMINI_CLI", Agent: "gemini-cli"}}}
+			},
+			wantFail: "gemini-cli",
+		},
+		{
+			name: "trace reference without a digest is no trace", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				r.Authorship = &domain.AuthorshipSignals{EnvMarkers: []domain.EnvMarkerDeclaration{{Name: "GEMINI_CLI", Agent: "gemini-cli"}}}
+				r.AgentTrace = &domain.AgentTraceRef{Path: ".agent-trace/run.json"}
+			},
+			wantFail: "no Agent Trace was notarized",
+		},
+		{
+			name: "declared agent with a notarized trace meets strict", min: "strict",
+			mutate: func(r *domain.RunRecord) {
+				r.Authorship = &domain.AuthorshipSignals{Trailers: []domain.TrailerDeclaration{{Commit: head, Agent: "claude-code", Trailer: "Claude-Session: u"}}}
+				r.AgentTrace = &domain.AgentTraceRef{Digest: strings.Repeat("ab", 32), Path: ".agent-trace/run.json"}
+			},
+		},
+		{
+			name: "declared agent without a trace is not a standard clause", min: "standard",
+			mutate: func(r *domain.RunRecord) {
+				r.Authorship = &domain.AuthorshipSignals{Trailers: []domain.TrailerDeclaration{{Commit: head, Agent: "claude-code", Trailer: "Claude-Session: u"}}}
+			},
+		},
+		{
 			name: "cached required step counts for standard", min: "standard",
 			mutate: func(r *domain.RunRecord) {
 				r.StepOutcomes[domain.StepLint] = domain.StepObservation{Outcome: domain.StepCached}
@@ -335,10 +370,11 @@ func TestConformanceChecksNetworkThatContainerChecksIgnores(t *testing.T) {
 	}
 }
 
-// A report never lists a clause as checked that it did not evaluate: strict's
-// authorship clause has no signed observation yet, so it is reported as
-// deferred and is absent from Checked.
-func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
+// Every clause strict@1 defines is now read from the signed record, so strict
+// defers nothing. Deferred stays in the report so that a clause a later
+// definition adds before the record carries its observation can never be
+// reported as checked.
+func TestConformanceChecksEveryStrictClause(t *testing.T) {
 	rec := strictConformingRecord(t, "abc")
 	res := VerifyResult{Validated: true, Trusted: true, Record: &rec}
 
@@ -346,16 +382,11 @@ func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
 	if !strict.OK() {
 		t.Fatalf("baseline must conform: %v", strict.Failures)
 	}
-	if len(strict.Deferred) != 1 || !strings.Contains(strict.Deferred[0], "Agent Trace") {
-		t.Fatalf("strict must defer only authorship, got %q", strict.Deferred)
-	}
-	for _, d := range strict.Deferred {
-		if slices.Contains(strict.Checked, d) {
-			t.Errorf("deferred clause %q is also listed as checked", d)
-		}
+	if len(strict.Deferred) != 0 {
+		t.Fatalf("strict must defer nothing, got %q", strict.Deferred)
 	}
 	joined := strings.Join(strict.Checked, "\n")
-	for _, want := range []string{"network none", "Linux container", "executed", "not auto-approved", "built-in definition", "ranks at least strict@1", "isolated in a clone", "allowlisted environment"} {
+	for _, want := range []string{"network none", "Linux container", "executed", "not auto-approved", "built-in definition", "ranks at least strict@1", "isolated in a clone", "allowlisted environment", "Agent Trace"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("strict checked clauses lack %q:\n%s", want, joined)
 		}
@@ -364,8 +395,9 @@ func TestConformanceReportsDeferredClausesSeparately(t *testing.T) {
 	standard := Conformance(mustProfile(t, "standard"), res)
 	standardChecked := strings.Join(standard.Checked, "\n")
 	if len(standard.Deferred) != 0 || strings.Contains(standardChecked, "network") ||
-		strings.Contains(standardChecked, "allowlisted") || !strings.Contains(standardChecked, "isolated in a clone") {
-		t.Errorf("standard checks isolation but no container or environment clause, and defers nothing: %+v", standard)
+		strings.Contains(standardChecked, "allowlisted") || strings.Contains(standardChecked, "Agent Trace") ||
+		!strings.Contains(standardChecked, "isolated in a clone") {
+		t.Errorf("standard checks isolation but no container, environment or trace clause, and defers nothing: %+v", standard)
 	}
 
 	// An untrusted result evaluates the trust clause alone.
