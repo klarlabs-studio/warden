@@ -210,14 +210,14 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	svc.SetAttestOnly(attestOnly)
 	svc.SetPushTarget(pushTargetBranch, pushTargetTip)
 
-	// A non-interactive pre-push still publishes to the attach socket, so another
-	// terminal can watch it with `warden attach`.
-	var server *attach.Server
-	if hook == domain.PrePush {
-		if server = startAttach(svc); server != nil {
-			svc.SetObserver(server)
-			defer server.Close()
-		}
+	// Every non-interactive gate run publishes to the attach socket, so another
+	// terminal can watch it with `warden attach`, and a background `warden
+	// watch --staged` sees a gate is running and stops competing with it for
+	// the container engine. A pre-commit is the run it most often overlaps.
+	server := startAttach(svc)
+	if server != nil {
+		svc.SetObserver(server)
+		defer server.Close()
 	}
 
 	res, err := svc.Run(ctx, hook)

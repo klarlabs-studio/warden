@@ -25,9 +25,16 @@ type Server struct {
 }
 
 // NewServer starts listening on the repo's socket. A stale socket from a crashed
-// run is removed first. Returns nil if listening fails — attach is optional.
+// run is removed first; a live one, published by a run still in progress, is
+// left alone. Returns nil if listening fails or another run holds the socket —
+// attach is optional.
 func NewServer(gitDir string) *Server {
 	path := SocketPath(gitDir)
+	if Live(gitDir) {
+		// Removing it would orphan that run's listener: its watchers and the
+		// background watcher's gate probe would lose it while it still runs.
+		return nil
+	}
 	_ = os.Remove(path) // clear a stale socket from a previous run
 	ln, err := net.Listen("unix", path)
 	if err != nil {
