@@ -72,6 +72,9 @@ anything in it is checked exactly as in version 1:
 version 2 file must name a profile, at least one step, or both. A version 1 file
 that names a profile is refused. A file that demands a profile needs an
 explicit `--key`. Passing `--min-profile` as well demands both minimums.
+A requirements file is single-commit only; a range gate takes its profile from
+its base ref instead (see
+[Checking a profile across a range](agent-profiles.md#checking-a-profile-across-a-range)).
 
 For `strict`, this release checks: trusted commit-bound local provenance; the
 recorded profile's digest against this warden's definition; its rank; that

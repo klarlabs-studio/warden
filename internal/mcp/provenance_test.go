@@ -317,3 +317,22 @@ func TestHandleVerify_ProjectsProfileObservations(t *testing.T) {
 		}
 	}
 }
+
+// min_profile is parsed at the boundary: a valid one reaches the facade, an
+// unknown one is refused rather than dropped.
+func TestHandleVerifyRange_MinProfile(t *testing.T) {
+	f := &fakeFacade{}
+	if _, err := handleVerifyRange(f, VerifyRangeInput{Base: "origin/main", MinProfile: "strict@1"}); err != nil {
+		t.Fatalf("handleVerifyRange: %v", err)
+	}
+	if got := f.rangeVerifyArg.opts.MinProfiles; len(got) != 1 || got[0].String() != "strict@1" {
+		t.Errorf("min profiles = %v, want strict@1", got)
+	}
+	if _, err := handleVerifyRange(&fakeFacade{}, VerifyRangeInput{Base: "origin/main", MinProfile: "paranoid"}); err == nil {
+		t.Error("an unknown min_profile must be an error, never ignored")
+	}
+	f = &fakeFacade{}
+	if _, err := handleVerifyRange(f, VerifyRangeInput{Base: "origin/main"}); err != nil || len(f.rangeVerifyArg.opts.MinProfiles) != 0 {
+		t.Errorf("no min_profile asks for none: %v %v", err, f.rangeVerifyArg.opts.MinProfiles)
+	}
+}

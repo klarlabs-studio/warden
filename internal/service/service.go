@@ -224,6 +224,32 @@ func (s *Service) ForgeConfigAt(ref string) (domain.ForgeConfig, error) {
 	return cfg.Forge, nil
 }
 
+// ProfileAt returns the compliance profile the config committed at ref resolves
+// to, following its extends chain at that same ref, and false when it names
+// none. A range gate calls it with its BASE: the profile a change must meet is
+// policy of the branch it targets, so a head that lowers `profile:` is still
+// judged by the base's.
+//
+// Nothing here degrades: a config that will not load, or names a profile this
+// warden does not know, is an error. Treating it as "no profile" would let a
+// broken base config switch enforcement off.
+func (s *Service) ProfileAt(ref string) (domain.ComplianceProfile, bool, error) {
+	cfg, err := config.ResolveAtRef(func(rel string) ([]byte, bool, error) {
+		return s.repo.FileAtRef(ref, rel)
+	})
+	if err != nil {
+		return domain.ComplianceProfile{}, false, err
+	}
+	if cfg.Profile == "" {
+		return domain.ComplianceProfile{}, false, nil
+	}
+	p, err := domain.ParseComplianceProfile(cfg.Profile)
+	if err != nil {
+		return domain.ComplianceProfile{}, false, err
+	}
+	return p, true, nil
+}
+
 // Explain resolves the effective policy for a hypothetical invocation, using
 // real diff stats when the invocation matches the current worktree and a
 // zero-diff otherwise (so `policy explain --branch other` still works).

@@ -114,6 +114,7 @@ func (f facade) VerifyRange(base, head string, opts mcpserver.RangeVerifyRequest
 		TrustedKeys:   opts.TrustedKeys,
 		UseRoster:     opts.UseRoster,
 		SkipMerges:    opts.SkipMerges,
+		MinProfiles:   opts.MinProfiles,
 	})
 	if err != nil {
 		return mcpserver.RangeVerifyOutput{}, err
@@ -126,6 +127,9 @@ func (f facade) VerifyRange(base, head string, opts mcpserver.RangeVerifyRequest
 		RequireSigned:  res.Effective.RequireSigned,
 		TrustedKeys:    res.Effective.TrustedKeys,
 		RosterFromBase: res.RosterFromBase,
+	}
+	for _, p := range res.Profiles {
+		out.Profiles = append(out.Profiles, mcpserver.RangeProfileOutput{Profile: p.Profile.String(), FromBase: p.FromBase, FromFlag: p.FromFlag})
 	}
 	for _, c := range res.Commits {
 		if !c.OK() {

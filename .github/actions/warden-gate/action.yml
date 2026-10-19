@@ -48,12 +48,13 @@ inputs:
     default: origin
   min-profile:
     description: >-
-      Optional minimum compliance profile (permissive, standard or strict).
-      Passed to `warden verify --range` as --min-profile. No released warden
-      checks a profile across a range yet: the current release refuses the
-      combination and an older one rejects the flag, so setting this input
-      FAILS the gate until a release that supports it. It never passes a
-      range it did not check.
+      Optional minimum compliance profile (permissive, standard or strict,
+      optionally name@version), passed to `warden verify --range` as
+      --min-profile. The gate always enforces the profile named by the BASE
+      ref's `.warden.yaml`; this adds a minimum on top and can never lower it.
+      A warden release that predates range profile checking refuses the
+      combination or rejects the flag, so the gate FAILS rather than passing
+      a range it did not check: pin a `warden-version` that supports it.
     required: false
     default: ""
   warden-version:
@@ -134,7 +135,11 @@ runs:
             echo "Reproduce locally with:"
             echo ""
             echo "\`\`\`"
-            echo "warden verify --range $BASE..$HEAD"
+            if [ -n "$MIN_PROFILE" ]; then
+              echo "warden verify --range $BASE..$HEAD --min-profile $MIN_PROFILE"
+            else
+              echo "warden verify --range $BASE..$HEAD"
+            fi
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"

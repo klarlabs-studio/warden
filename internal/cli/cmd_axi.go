@@ -106,11 +106,21 @@ func axiVerifyRange(f facade, args []string, stdout, stderr io.Writer) int {
 	signedFlag := fs.Bool("require-signed", false, "fail a commit whose note is unsigned")
 	keysFlag := fs.String("key", "", "comma-separated trusted keys or fingerprints")
 	skipMergesFlag := fs.Bool("skip-merges", true, "skip merge commits; their parents are gated individually")
+	minProfileFlag := fs.String("min-profile", "", "also require this compliance profile; the base ref's profile always applies")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if rejectExtraArgs(fs, stderr, "axi verify-range", "range") {
 		return 2
+	}
+	var mins []domain.ComplianceProfile
+	if *minProfileFlag != "" {
+		p, err := domain.ParseComplianceProfile(*minProfileFlag)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "warden axi verify-range: invalid --min-profile: %v\n", err)
+			return 2
+		}
+		mins = append(mins, p)
 	}
 	if *baseFlag == "" {
 		_, _ = fmt.Fprintln(stderr, "warden axi verify-range: --base is required")
@@ -123,8 +133,9 @@ func axiVerifyRange(f facade, args []string, stdout, stderr io.Writer) int {
 		// With no keys pinned, resolve the roster from the BASE ref — the trusted
 		// side. A range gate must never take its trust anchor from the head it is
 		// checking.
-		UseRoster:  len(keys) == 0,
-		SkipMerges: *skipMergesFlag,
+		UseRoster:   len(keys) == 0,
+		SkipMerges:  *skipMergesFlag,
+		MinProfiles: mins,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -135,9 +146,19 @@ func axiVerifyRange(f facade, args []string, stdout, stderr io.Writer) int {
 		if c.CoveredBy != "" {
 			m["covered_by"] = c.CoveredBy
 		}
+		if len(c.ProfileFailures) > 0 {
+			fails := make([]any, len(c.ProfileFailures))
+			for i, f := range c.ProfileFailures {
+				fails[i] = f
+			}
+			m["profile_failures"] = fails
+		}
+		if c.ProfileUnchecked {
+			m["profile_unchecked"] = true
+		}
 		commits = append(commits, m)
 	}
-	if code := emitTOON(stdout, stderr, map[string]any{
+	doc := map[string]any{
 		"base":             res.Base,
 		"head":             res.Head,
 		"ok":               res.OK,
@@ -145,7 +166,16 @@ func axiVerifyRange(f facade, args []string, stdout, stderr io.Writer) int {
 		"require_signed":   res.RequireSigned,
 		"roster_from_base": res.RosterFromBase,
 		"commits":          commits,
-	}); code != 0 {
+	}
+	// Only when a profile applied, so an unprofiled range reads as it always did.
+	if len(res.Profiles) > 0 {
+		profiles := make([]any, 0, len(res.Profiles))
+		for _, p := range res.Profiles {
+			profiles = append(profiles, map[string]any{"profile": p.Profile, "from_base": p.FromBase, "from_flag": p.FromFlag})
+		}
+		doc["profiles"] = profiles
+	}
+	if code := emitTOON(stdout, stderr, doc); code != 0 {
 		return code
 	}
 	if !res.OK {

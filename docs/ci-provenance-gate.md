@@ -85,6 +85,7 @@ Each commit in the range is classified, and the gate fails on the first problem:
 | `broken-chain` | a note exists but does not attest this commit — its evidence chain is broken, empty, or transplanted |
 | `unsigned` | `require-signed`/`key` was set but the note is unsigned or its signature does not verify |
 | `untrusted` | the signature verifies but the signer is not in the pinned `key` set |
+| `profile` | the note is sound but does not conform to a required [compliance profile](agent-profiles.md#checking-a-profile-across-a-range): the base ref's `profile:`, or `min-profile`; `profile_failures` names each clause |
 
 - Default (no `key`, `require-signed: false`): every commit must carry an
   **intact, commit-bound** note. This already rejects `missing` and

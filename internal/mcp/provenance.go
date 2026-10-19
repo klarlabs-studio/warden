@@ -1,6 +1,8 @@
 package mcpserver
 
 import (
+	"fmt"
+
 	"go.klarlabs.de/warden/internal/domain"
 )
 
@@ -84,9 +86,21 @@ type RangeVerifyOutput struct {
 	RequireSigned  bool     `json:"require_signed"`
 	TrustedKeys    []string `json:"trusted_keys,omitempty"`
 	RosterFromBase bool     `json:"roster_from_base"`
+	// Profiles lists the minimum compliance profiles enforced and where each
+	// came from. Absent when none applied: the base names no profile and none
+	// was asked for.
+	Profiles []RangeProfileOutput `json:"profiles,omitempty"`
 	// Failed counts commits that did not pass, so a caller can branch without
 	// walking the list.
 	Failed int `json:"failed"`
+}
+
+// RangeProfileOutput is one minimum compliance profile a range gate enforced.
+type RangeProfileOutput struct {
+	Profile string `json:"profile"`
+	// FromBase: the base ref's .warden.yaml named it. FromFlag: the caller did.
+	FromBase bool `json:"from_base"`
+	FromFlag bool `json:"from_flag"`
 }
 
 // AuditOutput is a branch's provenance report since adoption — the shape behind
@@ -188,7 +202,16 @@ func handleVerifyRange(f Facade, in VerifyRangeInput) (RangeVerifyOutput, error)
 	if in.SkipMerges != nil {
 		skipMerges = *in.SkipMerges
 	}
+	var mins []domain.ComplianceProfile
+	if in.MinProfile != "" {
+		p, err := domain.ParseComplianceProfile(in.MinProfile)
+		if err != nil {
+			return RangeVerifyOutput{}, fmt.Errorf("min_profile: %w", err)
+		}
+		mins = append(mins, p)
+	}
 	return f.VerifyRange(in.Base, head, RangeVerifyRequest{
+		MinProfiles:   mins,
 		RequireSigned: in.RequireSigned,
 		TrustedKeys:   in.TrustedKeys,
 		// Resolve the roster from the BASE ref when no keys are pinned: the base
