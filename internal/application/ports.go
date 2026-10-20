@@ -6,6 +6,25 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
+// WorkspaceSource reads what a run's per-workspace steps are selected from,
+// out of git objects only: manifests are never read from the filesystem and
+// no package manager runs (design 0006 §1).
+type WorkspaceSource interface {
+	// TrackedTree writes the tree object of dir's tracked state — its index
+	// plus unstaged edits to tracked files, untracked files excluded — and
+	// returns its name. dir's own index is left untouched.
+	TrackedTree(dir string) (string, error)
+	// Discover reads the workspace graph of a commit or tree.
+	Discover(rev string) (domain.WorkspaceGraph, error)
+	// ChangedPaths lists the paths that differ between two commits or trees,
+	// a rename reported as a delete plus an add.
+	ChangedPaths(from, to string) ([]string, error)
+	// ConfigurationDigestAt is the digest of the effective configuration
+	// committed at rev (extends chain included), the value policy resolution
+	// records as ConfigurationDigest.
+	ConfigurationDigestAt(rev string) (string, error)
+}
+
 // ConfigRepository loads the domain Config for the repository under gate.
 // Infrastructure adapts the on-disk .warden.yaml to it, so the application
 // layer never touches the filesystem or the YAML representation directly.

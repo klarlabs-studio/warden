@@ -105,6 +105,17 @@ func evidenceFor(res domain.StepResult) []axidomain.EvidenceRecord {
 	if res.Contract != nil && res.Reuse == nil {
 		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.contract", res.Step), Source: string(res.Step), Value: *res.Contract})
 	}
+	// A per-workspace step records what ran where: one record per workspace,
+	// in the step's (path) order, so the chain says which workspaces a passing
+	// step covered rather than only that it passed.
+	for _, w := range res.Workspaces {
+		value := map[string]any{"workspace": w.Workspace, "status": string(w.Status)}
+		if w.Mode == domain.WorkspaceModeBatch {
+			// One command ran for all of them: the status is the batch's.
+			value["mode"] = w.Mode
+		}
+		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.workspace", res.Step), Source: string(res.Step), Value: value})
+	}
 	for _, f := range res.Findings {
 		records = append(records, axidomain.EvidenceRecord{
 			Kind:   fmt.Sprintf("%s.finding", res.Step),
