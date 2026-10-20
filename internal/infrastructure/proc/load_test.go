@@ -99,3 +99,36 @@ func TestCurrentLoad_MeasuresOrSaysItCannot(t *testing.T) {
 		}
 	}
 }
+
+// The seam tests use to make a failing step's output independent of whichever
+// machine runs the suite. It must replace the reading, nest, and restore — a
+// restore that left a forced reading behind would leak contention into every
+// later test in the package.
+func TestSetLoadProbe_ReplacesAndRestores(t *testing.T) {
+	busy := Load{Known: true, Value: 109, CPUs: 10}
+	idle := Load{Known: true, Value: 0.5, CPUs: 8}
+
+	restoreOuter := SetLoadProbe(func() Load { return busy })
+	if got := CurrentLoad(); got != busy {
+		t.Fatalf("CurrentLoad = %+v, want the forced %+v", got, busy)
+	}
+	restoreInner := SetLoadProbe(func() Load { return idle })
+	if got := CurrentLoad(); got != idle {
+		t.Fatalf("nested probe: CurrentLoad = %+v, want %+v", got, idle)
+	}
+	restoreInner()
+	if got := CurrentLoad(); got != busy {
+		t.Fatalf("after inner restore: CurrentLoad = %+v, want the outer %+v", got, busy)
+	}
+	restoreOuter()
+	if got := CurrentLoad(); got.CPUs != runtime.NumCPU() {
+		t.Fatalf("after restore: CurrentLoad = %+v, want the real reading back", got)
+	}
+
+	// nil means "the machine", not "no reading".
+	restore := SetLoadProbe(nil)
+	defer restore()
+	if got := CurrentLoad(); got.CPUs != runtime.NumCPU() {
+		t.Fatalf("nil probe: CurrentLoad = %+v, want the real reading", got)
+	}
+}

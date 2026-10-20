@@ -53,6 +53,9 @@ func TestLoadCaveat_OnlyOnRealContention(t *testing.T) {
 // author would read "may be the machine" and merge. Status, and the fact that
 // the tool's own output survives, must be untouched.
 func TestShellStep_CaveatDoesNotChangeTheVerdict(t *testing.T) {
+	// Forced, not read from the machine: on an idle box the caveat is never
+	// produced and this would pass without testing anything.
+	t.Cleanup(proc.SetLoadProbe(func() proc.Load { return proc.Load{Known: true, Value: 109, CPUs: 10} }))
 	sc := application.StepContext{
 		WorktreeDir: t.TempDir(),
 		Commands:    map[string]string{"lint": `echo "main.go:1:1: undefined: foo"; exit 1`},
@@ -70,6 +73,9 @@ func TestShellStep_CaveatDoesNotChangeTheVerdict(t *testing.T) {
 	if len(res.Findings) != 1 || !strings.Contains(res.Findings[0].Message, "undefined: foo") {
 		t.Errorf("the tool's own output must survive: %+v", res.Findings)
 	}
+	if !strings.Contains(res.Findings[0].Why, "verdict above stands") {
+		t.Errorf("Why = %q, want the caveat present beside the unchanged verdict", res.Findings[0].Why)
+	}
 }
 
 // The invariant the first draft broke. Message is the TOOL's output, verbatim;
@@ -78,6 +84,7 @@ func TestShellStep_CaveatDoesNotChangeTheVerdict(t *testing.T) {
 // caught it by red-lining two existing tests that assert the output survives
 // intact — the feature failing on the property it was written to protect.
 func TestShellStep_CaveatNeverEntersTheToolsOutput(t *testing.T) {
+	t.Cleanup(proc.SetLoadProbe(func() proc.Load { return proc.Load{Known: true, Value: 109, CPUs: 10} }))
 	sc := application.StepContext{
 		WorktreeDir: t.TempDir(),
 		Commands:    map[string]string{"lint": `echo "boom"; exit 1`},
@@ -89,7 +96,11 @@ func TestShellStep_CaveatNeverEntersTheToolsOutput(t *testing.T) {
 	if len(res.Findings) != 1 {
 		t.Fatalf("findings = %+v, want one", res.Findings)
 	}
-	// Whatever this machine's load, the tool's own words are untouched.
+	// On a forced 10.9x reading, so the caveat exists and has somewhere to go.
+	if !strings.Contains(res.Findings[0].Why, "10.9x oversubscribed") {
+		t.Errorf("Why = %q, want the load caveat", res.Findings[0].Why)
+	}
+	// The tool's own words are untouched.
 	if got := strings.TrimSpace(res.Findings[0].Message); got != "boom" {
 		t.Errorf("Message = %q, want exactly the tool output %q — warden's commentary belongs in Why", got, "boom")
 	}
