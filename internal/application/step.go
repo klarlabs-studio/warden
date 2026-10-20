@@ -124,5 +124,7 @@ type ContainerExecution struct {
 // PredictionCache holds recent signed local successes for exact staged inputs.
 type PredictionCache interface {
 	Lookup(domain.StepName, string, domain.ExecutionContract) *domain.ExecutionReuse
-	Record(domain.StepName, string, domain.ExecutionContract) bool
+	// Record saves a pass and returns when it was recorded (its expiry is
+	// that time plus domain.PredictionTTL); false when nothing was saved.
+	Record(domain.StepName, string, domain.ExecutionContract) (time.Time, bool)
 }

@@ -28,9 +28,15 @@ func TestPredictionsExactSignedReuse(t *testing.T) {
 	store := OpenPredictions(t.TempDir(), "test-version", signer)
 	contract := domain.ExecutionContract{Version: 1, TreeSHA: strings.Repeat("a", 40), CommandDigest: domain.DigestBytes([]byte("test")), Inputs: map[string]string{}}
 	base := strings.Repeat("b", 40)
-	store.Record(domain.StepTest, base, contract)
-	if store.Lookup(domain.StepTest, base, contract) == nil {
+	savedAt, ok := store.Record(domain.StepTest, base, contract)
+	reuse := store.Lookup(domain.StepTest, base, contract)
+	if !ok || reuse == nil {
 		t.Fatal("lost valid signed prediction")
+	}
+	// The reported time is the recorded one, so an expiry derived from it is
+	// the prediction's own.
+	if !reuse.RecordedAt.Equal(savedAt) {
+		t.Fatalf("Record reported %v, the prediction says %v", savedAt, reuse.RecordedAt)
 	}
 	for _, tt := range []struct {
 		name   string
