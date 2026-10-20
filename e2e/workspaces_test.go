@@ -193,3 +193,78 @@ func TestGoldenFleet_WorkspacesAffectedGoWork(t *testing.T) {
 		t.Fatalf("lockfile change: kind %s %+v with %d workspaces, want full by lockfile over all 4", got.Selection.Kind, got.Selection.Full, len(got.Selection.Workspaces))
 	}
 }
+
+// Cycles, which real monorepos have: two pnpm packages that depend on each
+// other (one through devDependencies), web on one of them, and two go.work
+// modules that require each other. `warden workspaces` lists the graph rather
+// than refusing it, and a change to any member of a cycle selects the whole
+// cycle plus its dependents. reports stays out of everything.
+func TestGoldenFleet_WorkspacesCycles(t *testing.T) {
+	g := newGoldenRepoNoRemote(t)
+	g.writeFiles(map[string]string{
+		"package.json":                  `{"name":"root","private":true}`,
+		"pnpm-workspace.yaml":           "packages:\n  - \"packages/*\"\n",
+		"packages/a/package.json":       `{"name":"a","dependencies":{"b":"workspace:*"}}`,
+		"packages/b/package.json":       `{"name":"b","devDependencies":{"a":"workspace:*"}}`,
+		"packages/b/index.ts":           "export const b = 1;\n",
+		"packages/web/package.json":     `{"name":"web","dependencies":{"a":"workspace:*"}}`,
+		"packages/reports/package.json": `{"name":"reports"}`,
+		"go.work":                       "go 1.26\n\nuse (\n\t./mods/x\n\t./mods/y\n)\n",
+		"mods/x/go.mod":                 "module example.com/x\n\ngo 1.26\n\nrequire example.com/y v0.0.0\n",
+		"mods/y/go.mod":                 "module example.com/y\n\ngo 1.26\n\nrequire example.com/x v0.0.0\n",
+		"mods/y/y.go":                   "package y\n",
+	})
+	g.commit("fixture")
+
+	cmd := exec.Command(wardenBin, "workspaces", "--json")
+	cmd.Dir = g.dir
+	cmd.Env = append(hookEnv(), "WARDEN_CONFIG_DIR="+t.TempDir())
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("warden workspaces on a cyclic repo: %v: %s", err, stderr.String())
+	}
+	var list struct {
+		Workspaces []struct {
+			ID   string   `json:"id"`
+			Deps []string `json:"deps"`
+		} `json:"workspaces"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		t.Fatalf("decode %q: %v", stdout.String(), err)
+	}
+	gotDeps := map[string][]string{}
+	for _, w := range list.Workspaces {
+		gotDeps[w.ID] = w.Deps
+	}
+	wantDeps := map[string][]string{
+		"mods/x": {"mods/y"}, "mods/y": {"mods/x"},
+		"packages/a": {"packages/b"}, "packages/b": {"packages/a"},
+		"packages/reports": {}, "packages/web": {"packages/a"},
+	}
+	if !reflect.DeepEqual(gotDeps, wantDeps) {
+		t.Fatalf("graph %v\nwant  %v", gotDeps, wantDeps)
+	}
+
+	g.git("checkout", "-q", "-b", "feat")
+	g.writeFiles(map[string]string{"packages/b/index.ts": "export const b = 2;\n"})
+	g.commit("b")
+	want := map[string][]string{
+		"packages/a":   {"dependent:packages/b"},
+		"packages/b":   {"changed:packages/b/index.ts", "dependent:packages/a"},
+		"packages/web": {"dependent:packages/a"},
+	}
+	got := g.affected()
+	if got.Selection.Kind != "affected" || !reflect.DeepEqual(got.selected(), want) {
+		t.Fatalf("JS cycle: kind %s, selected %v\nwant %v", got.Selection.Kind, got.selected(), want)
+	}
+
+	g.writeFiles(map[string]string{"mods/y/y.go": "package y // edited\n"})
+	g.commit("y")
+	want["mods/x"] = []string{"dependent:mods/y"}
+	want["mods/y"] = []string{"changed:mods/y/y.go", "dependent:mods/x"}
+	got = g.affected()
+	if got.Selection.Kind != "affected" || !reflect.DeepEqual(got.selected(), want) {
+		t.Fatalf("Go cycle: kind %s, selected %v\nwant %v", got.Selection.Kind, got.selected(), want)
+	}
+}
