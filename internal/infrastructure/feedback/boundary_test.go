@@ -16,19 +16,32 @@ import (
 const feedbackImport = "go.klarlabs.de/warden/internal/infrastructure/feedback"
 
 // readers are the only files outside this package (and the domain's schema)
-// allowed to touch the feedback document: the staged watcher that writes it
-// and the reader command. Paths are relative to the module root.
+// allowed to touch the feedback document: the staged watcher that writes it,
+// the reader command, and the read-only reader surfaces for agents (the MCP
+// feedback_status tool and `warden axi feedback`), each in a file of its own
+// so the rest of the MCP server and the axi surface stay checked. Paths are
+// relative to the module root.
 var readers = map[string]bool{
 	"internal/cli/cmd_feedback.go":       true,
 	"internal/cli/cmd_watch.go":          true,
 	"internal/cli/cmd_watch_feedback.go": true,
+	"internal/cli/facade_feedback.go":    true,
+	"internal/cli/cmd_axi_feedback.go":   true,
+	"internal/mcp/feedback.go":           true,
+}
+
+// literalAllowed are the files that may spell the bare word "feedback": the
+// command and agent-verb dispatchers, which name the verb and nothing else.
+var literalAllowed = map[string]bool{
+	"internal/cli/cli.go":     true,
+	"internal/cli/cmd_axi.go": true,
 }
 
 // The feedback document is unsigned and advisory. It must be impossible for
 // anything that decides — the gate, verify, attest, notes, execution
-// requirements, the MCP and agent surfaces — to read it. This test fails the
-// build if any production file other than the writer and the reader imports
-// this package, names the document's types, or spells its paths.
+// requirements, the MCP run tools — to read it. This test fails the build if
+// any production file other than the writer and the readers imports this
+// package, names the document's types, or spells its paths.
 func TestNothingThatDecidesReadsTheFeedbackDocument(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -93,7 +106,7 @@ func feedbackReferences(t *testing.T, path, rel string) []string {
 			switch {
 			case value == "status.json", value == "watch.lock",
 				strings.Contains(value, "warden.feedback"), strings.Contains(value, "warden/feedback"),
-				value == "feedback" && rel != "internal/cli/cli.go":
+				value == "feedback" && !literalAllowed[rel]:
 				problems = append(problems, "spells "+strconv.Quote(value))
 			}
 		}

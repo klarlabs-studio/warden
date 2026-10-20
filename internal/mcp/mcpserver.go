@@ -48,6 +48,10 @@ type Facade interface {
 	Audit(branch string) (domain.AuditReport, error)
 	// Status describes the gate's installed state.
 	Status() (StatusOutput, error)
+
+	// The background staged watcher's last observation, read-only and
+	// advisory; see feedback.go.
+	feedbackReader
 }
 
 // ProvenanceRecord is a delivery-neutral verify result. It mirrors the service's
@@ -209,6 +213,7 @@ const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATEL
 //	doctor(branch?)                        -> AuditOutput
 //	audit(branch?)                         -> AuditOutput
 //	status()                               -> StatusOutput
+//	feedback_status()                      -> FeedbackStatusOutput
 //
 // Everything but run_trigger is a pure read and marked ReadOnly, so an agent can
 // interrogate a repo's provenance — the question Warden exists to answer —
@@ -289,6 +294,8 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		Handler(func(StatusInput) (StatusOutput, error) {
 			return f.Status()
 		})
+
+	registerFeedbackTool(srv, f)
 
 	runs := newRegistry()
 
