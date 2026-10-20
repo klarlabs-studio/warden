@@ -1,30 +1,6 @@
-package policy
+package domain
 
-import (
-	"fmt"
-	"strings"
-
-	"go.klarlabs.de/warden/internal/domain"
-)
-
-// ruleName derives a stable name for provenance. It prefers a human-readable
-// tag built from the match, falling back to a positional name.
-func ruleName(r domain.Rule, index int) string {
-	var parts []string
-	if r.Match.Branch != "" {
-		parts = append(parts, "branch="+r.Match.Branch)
-	}
-	if r.Match.Risk != "" {
-		parts = append(parts, "risk="+string(r.Match.Risk))
-	}
-	if len(r.Match.Paths) > 0 {
-		parts = append(parts, "paths="+strings.Join(r.Match.Paths, ","))
-	}
-	if len(parts) == 0 {
-		return fmt.Sprintf("rule[%d]", index)
-	}
-	return strings.Join(parts, " ")
-}
+import "strings"
 
 // Defense-in-depth caps. The linear matchers below are already O(n·m), so
 // these do not gate any legitimate glob — they merely bound absurd, hostile
@@ -36,7 +12,7 @@ const (
 	maxGlobSegments = 512  // max "/"-separated segments in either side
 )
 
-// globMatch matches a path/branch glob against s. It supports:
+// GlobMatch matches a path/branch glob against s. It supports:
 //   - "**" — matches zero or more whole path segments (crosses "/")
 //   - "*"  — matches any run of characters within a single segment
 //   - "?"  — matches any single character within a segment
@@ -48,7 +24,12 @@ const (
 // single backtrack memo, applied both across segments (for "**") and within a
 // segment (for "*"/"?"). It never backtracks exponentially, so hostile patterns
 // such as "*a*a*a*a*b" or "a/**/b/**/b/**/…" cannot hang the gate.
-func globMatch(pattern, s string) bool {
+//
+// It lives in domain because both policy resolution (match.paths, branch
+// globs) and workspace selection (workspaces.global/ignore) must agree on what
+// a glob means: a selection rule that matched differently from a policy rule
+// would scope a run by one reading and explain it by another.
+func GlobMatch(pattern, s string) bool {
 	// Reject pathologically large input outright (defense-in-depth).
 	if len(pattern) > maxGlobLen || len(s) > maxGlobLen {
 		return false
