@@ -40,6 +40,25 @@ All notable changes to warden are documented here. The format follows
   read-only MCP tool `feedback_status` and `warden axi feedback`. The docs
   give a VS Code problem matcher and a Vim `errorformat` for the format; see
   [background feedback](docs/background-feedback.md#editor-recipes).
+- **`warden watch` works in repositories that use container execution.** A
+  repository with `execution.image` had no live feedback loop at all: plain
+  `warden watch` refused the configuration ("watch runs in the live tree and
+  does not support container execution"), and `--staged` only sees what is
+  already staged. Live mode now checks the working tree as `git add -A` would
+  stage it (unstaged edits and untracked files included, ignored files left
+  out) in a disposable container worktree without host dependencies.
+  The snapshot is computed from a private copy of the index, so the watcher
+  never writes `.git/index` or takes `index.lock`, and a commit made during a
+  check succeeds. Only read-only shell checks run (`lint`, `test` and custom
+  commands; no agents, scanners or fixers), and live mode saves no prediction,
+  applies no fix and writes no note. It writes the feedback document with
+  `mode: live`, and `warden feedback status` recomputes the working-tree
+  snapshot to judge freshness, in a temporary object store so reading never
+  grows the repository. The watcher's polls write nothing; the snapshot is
+  computed only when the files change, and stores changed and untracked
+  contents as loose objects that `git gc` collects. `warden watch --once` now
+  also works in this mode. Host-mode live watch is unchanged. See
+  [background feedback](docs/background-feedback.md#live-mode).
 
 ### Fixed
 

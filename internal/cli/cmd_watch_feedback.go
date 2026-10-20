@@ -18,13 +18,13 @@ import (
 	"go.klarlabs.de/warden/internal/service"
 )
 
-// feedbackHeartbeatInterval is how often the staged watcher refreshes its
+// feedbackHeartbeatInterval is how often a watcher refreshes its
 // lock and the document's heartbeat. A variable so tests need not wait.
 var feedbackHeartbeatInterval = domain.FeedbackHeartbeatInterval
 
-// feedbackSession is the staged watcher's background feedback: the worktree
-// lock, the recorder writing status.json, and the heartbeat keeping both
-// fresh. Only the watcher creates one; a gate run never writes the document.
+// feedbackSession is a watcher's background feedback: the worktree lock, the
+// recorder writing status.json, and the heartbeat keeping both fresh. Only a
+// watcher creates one; a gate run never writes the document.
 type feedbackSession struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
@@ -32,6 +32,10 @@ type feedbackSession struct {
 	rec    *feedback.Recorder
 	stderr io.Writer
 	done   chan struct{}
+	// mode is the document's mode: which snapshot the watcher checks.
+	mode string
+	// worktree is the worktree's top-level directory.
+	worktree string
 
 	mu  sync.Mutex
 	env string
@@ -44,7 +48,7 @@ type feedbackSession struct {
 // startFeedback takes the worktree's watcher lock and starts the heartbeat.
 // A second watcher on the same worktree gets exitContention, naming the
 // holder's pid. On failure the session is nil and code is the exit code.
-func startFeedback(ctx context.Context, svc *service.Service, dir string, stderr io.Writer) (session *feedbackSession, code int) {
+func startFeedback(ctx context.Context, svc *service.Service, dir, mode string, stderr io.Writer) (session *feedbackSession, code int) {
 	gitDir, err := svc.GitDir()
 	if err != nil {
 		return nil, fail(stderr, err)
@@ -68,13 +72,13 @@ func startFeedback(ctx context.Context, svc *service.Service, dir string, stderr
 	rec := feedback.NewRecorder(feedback.RecorderOptions{
 		Path:          feedback.StatusPath(gitDir),
 		WardenVersion: Version,
-		Mode:          domain.FeedbackModeStaged,
+		Mode:          mode,
 		Worktree:      worktree,
 		StartedAt:     lock.Holder().StartedAt,
 		PID:           os.Getpid(),
 	})
 	sessionCtx, cancel := context.WithCancelCause(ctx)
-	s := &feedbackSession{ctx: sessionCtx, cancel: cancel, lock: lock, rec: rec, stderr: stderr, done: make(chan struct{})}
+	s := &feedbackSession{ctx: sessionCtx, cancel: cancel, lock: lock, rec: rec, stderr: stderr, done: make(chan struct{}), mode: mode, worktree: worktree}
 	go s.heartbeat()
 	return s, 0
 }
@@ -172,11 +176,17 @@ func (s *feedbackSession) begin(ctx context.Context, svc *service.Service, dir s
 		}
 		return nil
 	}
+	s.beginSnapshot(ctx, snapshot, steps)
+	return nil
+}
+
+// beginSnapshot records that an evaluation of snapshot, expected to run
+// steps, is starting.
+func (s *feedbackSession) beginSnapshot(ctx context.Context, snapshot domain.FeedbackSnapshot, steps []domain.StepName) {
 	s.mu.Lock()
 	s.recording, s.lastBeginErr = true, ""
 	s.mu.Unlock()
 	s.rec.Begin(ctx, snapshot, steps)
-	return nil
 }
 
 func (s *feedbackSession) currentSnapshot(ctx context.Context, svc *service.Service, dir string) (domain.FeedbackSnapshot, []domain.StepName, error) {
@@ -188,8 +198,51 @@ func (s *feedbackSession) currentSnapshot(ctx context.Context, svc *service.Serv
 	if err != nil {
 		return domain.FeedbackSnapshot{}, nil, err
 	}
-	snapshot, err := feedback.CurrentSnapshot(ctx, dir, digest, environmentDigest(s.environment()))
+	snapshot, err := feedback.CurrentSnapshot(ctx, dir, domain.FeedbackModeStaged, digest, environmentDigest(s.environment()), feedback.DiscardObjects)
 	return snapshot, expectedStagedSteps(cfg), err
+}
+
+// liveSnapshot computes the working-tree snapshot a live evaluation checks.
+// Its objects are kept: the disposable worktree checks the tree out. Content
+// the object store already holds is not written again, so a snapshot that
+// did not change writes nothing.
+func (s *feedbackSession) liveSnapshot(ctx context.Context, svc *service.Service, dir string) (domain.FeedbackSnapshot, []domain.StepName, error) {
+	cfg, err := svc.Config()
+	if err != nil {
+		return domain.FeedbackSnapshot{}, nil, err
+	}
+	digest, err := domain.DigestJSON(cfg)
+	if err != nil {
+		return domain.FeedbackSnapshot{}, nil, err
+	}
+	snapshot, err := feedback.CurrentSnapshot(ctx, dir, domain.FeedbackModeLive, digest, environmentDigest(s.environment()), feedback.KeepObjects)
+	if err != nil {
+		return domain.FeedbackSnapshot{}, nil, err
+	}
+	return snapshot, expectedLiveSteps(svc, snapshot.Branch), nil
+}
+
+// describes reports whether the document already holds a finished
+// evaluation of snapshot under the same environment.
+func (s *feedbackSession) describes(snapshot domain.FeedbackSnapshot) bool {
+	doc := s.rec.Document()
+	return doc.State == domain.FeedbackComplete && doc.Snapshot.ID == snapshot.ID && doc.Snapshot.EnvironmentDigest == snapshot.EnvironmentDigest
+}
+
+// expectedLiveSteps lists the container shell checks a live evaluation is
+// expected to run, in pipeline order. Path rules may add or remove steps once
+// the snapshot's paths are known; the recorder adds a step that starts
+// unannounced and drops one that never starts.
+func expectedLiveSteps(svc *service.Service, branch string) []domain.StepName {
+	resolved, err := svc.Explain(domain.PreCommit, branch, nil)
+	if err != nil {
+		return nil
+	}
+	live, err := application.LiveChecks(resolved)
+	if err != nil {
+		return nil
+	}
+	return live.Steps
 }
 
 // expectedStagedSteps lists the pre-commit steps opted into the predictive

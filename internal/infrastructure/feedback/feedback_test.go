@@ -126,7 +126,7 @@ func TestCurrentSnapshotMatchesGitAndLeavesTheIndexAlone(t *testing.T) {
 	if err := os.WriteFile(lock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snap, err := CurrentSnapshot(context.Background(), dir, testConfig, "sha256:env")
+	snap, err := CurrentSnapshot(context.Background(), dir, domain.FeedbackModeStaged, testConfig, "sha256:env", DiscardObjects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,14 +158,14 @@ func TestCurrentSnapshotMatchesGitAndLeavesTheIndexAlone(t *testing.T) {
 func TestCurrentSnapshotOnAnUnbornBranch(t *testing.T) {
 	dir := t.TempDir()
 	gitRun(t, dir, "init", "-q", "-b", "trunk")
-	snap, err := CurrentSnapshot(context.Background(), dir, testConfig, "")
+	snap, err := CurrentSnapshot(context.Background(), dir, domain.FeedbackModeStaged, testConfig, "", DiscardObjects)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snap.Base != "" || snap.Branch == "" || !domain.ValidTreeSHA(snap.Tree) {
 		t.Fatalf("snapshot %+v", snap)
 	}
-	if _, err := CurrentSnapshot(context.Background(), t.TempDir(), testConfig, ""); err == nil {
+	if _, err := CurrentSnapshot(context.Background(), t.TempDir(), domain.FeedbackModeStaged, testConfig, "", DiscardObjects); err == nil {
 		t.Fatal("a directory outside any repository produced a snapshot")
 	}
 }

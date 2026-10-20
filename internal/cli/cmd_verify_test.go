@@ -375,11 +375,17 @@ func TestVerifyContainerRequirements(t *testing.T) {
 	}
 }
 
-func TestWatchRefusesContainerConfiguration(t *testing.T) {
-	repoWithConfig(t, "execution:\n  image: checks:dev\n")
+// Live mode under a container configuration runs container shell checks;
+// with none configured there is nothing to watch, and it says so before
+// taking the worktree's lock.
+func TestWatchLiveContainerNeedsShellChecks(t *testing.T) {
+	dir := repoWithConfig(t, "execution:\n  image: checks:dev\n")
 	var out, errb bytes.Buffer
-	if code := cmdWatch(nil, &out, &errb); code != 1 || !strings.Contains(errb.String(), "does not support container execution") {
+	if code := cmdWatch(nil, &out, &errb); code != 1 || !strings.Contains(errb.String(), "no read-only container shell checks") {
 		t.Fatalf("watch: %d %s %s", code, out.String(), errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git", "warden", "feedback")); !os.IsNotExist(err) {
+		t.Fatalf("a refused live watch touched the feedback directory: %v", err)
 	}
 }
 

@@ -28,17 +28,19 @@ import (
 const pollInterval = 400 * time.Millisecond
 
 // cmdWatch supports live-file feedback and an explicit staged mode that warms
-// exact local predictions in disposable container worktrees. Neither mode pushes.
+// exact local predictions in disposable container worktrees. Under a container
+// configuration live mode checks a working-tree snapshot in a disposable
+// container worktree too. No mode pushes.
 func cmdWatch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	staged := fs.Bool("staged", false, "precompute opted-in checks against the Git staging area")
-	once := fs.Bool("once", false, "with --staged, evaluate once and exit")
+	once := fs.Bool("once", false, "evaluate once and exit (staged mode, or live mode under container execution)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || (*once && !*staged) {
-		_, _ = fmt.Fprintln(stderr, "warden: watch accepts --staged [--once]")
+	if fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "warden: watch accepts [--staged] [--once]")
 		return 2
 	}
 
@@ -62,7 +64,13 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 		return runStagedWatch(ctx, svc, dir, *once, stdout, stderr)
 	}
 	if cfg.Execution.ContainerEnabled() {
-		return fail(stderr, fmt.Errorf("watch runs in the live tree and does not support container execution; use warden run pre-commit for isolated container checks"))
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runLiveContainerWatch(ctx, svc, dir, *once, stdout, stderr)
+	}
+	if *once {
+		_, _ = fmt.Fprintln(stderr, "warden: watch --once needs --staged, or container execution for live mode")
+		return 2
 	}
 	cmds := watchCommands(cfg)
 	if len(cmds) == 0 {
@@ -190,7 +198,7 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	if public == "" {
 		return fail(stderr, fmt.Errorf("staged watch needs a local signing key"))
 	}
-	fb, code := startFeedback(ctx, svc, dir, stderr)
+	fb, code := startFeedback(ctx, svc, dir, domain.FeedbackModeStaged, stderr)
 	if fb == nil {
 		return code
 	}
@@ -206,15 +214,26 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 		return fb.exitCode(code, stderr)
 	}
 	snapshot, err := newStagedSnapshot(ctx, svc, dir, stdout)
-	if err != nil && ctx.Err() == nil {
-		return fail(stderr, err)
+	return watchSnapshots(ctx, svc, fb, snapshot, err, evaluate, "staged", stdout, stderr)
+}
+
+// watchSnapshots runs the coalescing loop over a snapshot fingerprint, the
+// part staged and live container watching share. what names the mode in the
+// start and stop lines.
+func watchSnapshots(ctx context.Context, svc *service.Service, fb *feedbackSession, snapshot *stagedSnapshot, snapshotErr error, evaluate func(context.Context) error, what string, stdout, stderr io.Writer) int {
+	if snapshotErr != nil && ctx.Err() == nil {
+		return fail(stderr, snapshotErr)
 	}
 	if ctx.Err() != nil { // interrupted while starting: a stop, not a failure
-		_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
+		_, _ = fmt.Fprintf(stdout, "warden: %s watch stopped\n", what)
 		return fb.exitCode(0, stderr)
 	}
 	snapshot.onEnvironment = fb.observeEnvironment
-	_, _ = fmt.Fprintln(stdout, "warden: watching staged inputs (ctrl+c to stop); checks run in disposable container worktrees")
+	inputs := "staged inputs"
+	if snapshot.tree != nil {
+		inputs = "the working tree"
+	}
+	_, _ = fmt.Fprintf(stdout, "warden: watching %s (ctrl+c to stop); checks run in disposable container worktrees\n", inputs)
 	watch.Loop{
 		Interval:    pollInterval,
 		Fingerprint: snapshot.Fingerprint,
@@ -227,8 +246,90 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 		RetryMin: stagedRetryMin,
 		RetryMax: stagedRetryMax,
 	}.Run(ctx)
-	_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
+	_, _ = fmt.Fprintf(stdout, "warden: %s watch stopped\n", what)
 	return fb.exitCode(0, stderr)
+}
+
+// runLiveContainerWatch is live mode under a container configuration. Each
+// evaluation checks a working-tree snapshot (the tree `git add -A` would
+// stage, computed from a private index) in a disposable dependency-free
+// container worktree. Only container shell checks run; nothing is predicted,
+// fixed, signed or noted, and the live index is never written.
+func runLiveContainerWatch(ctx context.Context, svc *service.Service, dir string, once bool, stdout, stderr io.Writer) int {
+	resolved, err := svc.Explain(domain.PreCommit, "", nil)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if _, err := application.LiveChecks(resolved); err != nil {
+		return fail(stderr, err)
+	}
+	cfg, err := svc.Config()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fb, code := startFeedback(ctx, svc, dir, domain.FeedbackModeLive, stderr)
+	if fb == nil {
+		return code
+	}
+	ctx = fb.ctx
+	defer fb.close()
+	live := &liveEvaluator{svc: svc, dir: dir, stdout: stdout, fb: fb}
+	defer svc.SetObserver(nil)
+	if once {
+		fb.observeEnvironment(sampleEnvironmentOnce(ctx, cfg.Execution))
+		code := reportStagedOnce(live.evaluate(ctx), stdout, stderr)
+		return fb.exitCode(code, stderr)
+	}
+	snapshot, err := newStagedSnapshot(ctx, svc, dir, stdout)
+	if err == nil {
+		// The working tree's content joins the staged inputs: an edit, a new
+		// file or a deletion is a change; so is a commit (HEAD) or a
+		// configuration change.
+		snapshot.tree = watch.NewTree(fb.worktree)
+	}
+	return watchSnapshots(ctx, svc, fb, snapshot, err, live.evaluate, "live", stdout, stderr)
+}
+
+// liveEvaluator evaluates working-tree snapshots for the live container
+// watcher.
+type liveEvaluator struct {
+	svc    *service.Service
+	dir    string
+	stdout io.Writer
+	fb     *feedbackSession
+	// last is the result of the evaluation the document describes.
+	last error
+}
+
+// evaluate computes the working-tree snapshot and checks it. The loop calls
+// it whenever its fingerprint changes, which a change the snapshot does not
+// include also does (an ignored file, a `git add`). When the snapshot is the
+// one the document already describes, under the same environment, the
+// previous result stands and nothing runs.
+func (l *liveEvaluator) evaluate(ctx context.Context) error {
+	snapshot, expected, err := l.fb.liveSnapshot(ctx, l.svc, l.dir)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return fmt.Errorf("working-tree snapshot: %w", err)
+	}
+	if l.fb.describes(snapshot) {
+		return l.last
+	}
+	l.fb.beginSnapshot(ctx, snapshot, expected)
+	reporter := &predictionReporter{ctx: ctx, w: l.stdout}
+	l.svc.SetObserver(application.MultiObserver{reporter, l.fb.observer()})
+	result, err := l.svc.CheckWorkingTree(ctx, snapshot.Base, snapshot.Tree)
+	err = classifyEvaluation(ctx, result, err, reporter, "live")
+	if err == nil {
+		_, _ = fmt.Fprintln(l.stdout, "warden: live checks passed for the working tree")
+	}
+	l.fb.record(ctx, err)
+	if ctx.Err() == nil && !watch.IsBlocked(err) {
+		l.last = err
+	}
+	return err
 }
 
 // evaluateStaged runs the predictive staged checks once. Nothing staged is
@@ -252,6 +353,17 @@ func runStagedEvaluation(ctx context.Context, svc *service.Service, dir string, 
 	reporter := &predictionReporter{ctx: ctx, w: stdout}
 	svc.SetObserver(application.MultiObserver{reporter, fb.observer()})
 	result, err := svc.PredictStaged(ctx)
+	if err := classifyEvaluation(ctx, result, err, reporter, "staged"); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(stdout, "warden: staged checks passed; saved predictions expire after 10 minutes")
+	return nil
+}
+
+// classifyEvaluation turns a background run into the loop's terms: nil for a
+// pass, watch.Blocked for a run the machine prevented (retried, never the
+// snapshot's verdict), and an error for a failure. what names the mode.
+func classifyEvaluation(ctx context.Context, result application.RunResult, err error, reporter *predictionReporter, what string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -262,12 +374,11 @@ func runStagedEvaluation(ctx context.Context, svc *service.Service, dir string, 
 		return err
 	}
 	if kind := firstBlocker(result.Blocker, reporter.blocker()); kind != domain.BlockerNone {
-		return watch.Blocked(stagedBlocked{kind: kind, err: fmt.Errorf("staged checks could not run: %s", result.Message)})
+		return watch.Blocked(stagedBlocked{kind: kind, err: fmt.Errorf("%s checks could not run: %s", what, result.Message)})
 	}
 	if result.Outcome != domain.OutcomePassed {
-		return fmt.Errorf("staged checks %s: %s", result.Outcome, result.Message)
+		return fmt.Errorf("%s checks %s: %s", what, result.Outcome, result.Message)
 	}
-	_, _ = fmt.Fprintln(stdout, "warden: staged checks passed; saved predictions expire after 10 minutes")
 	return nil
 }
 
@@ -307,6 +418,8 @@ const environmentUnavailable = "unavailable"
 // must evaluate again rather than leave the old pass on screen.
 type stagedSnapshot struct {
 	gate *watch.StatGate
+	// tree, when set, adds the working tree's content (live mode).
+	tree *watch.Tree
 	env  *watch.Sampler
 	// execution is the configuration's execution block as of the last full
 	// fingerprint; the sampler is keyed on it.
@@ -359,6 +472,9 @@ func (s *stagedSnapshot) Fingerprint(ctx context.Context) (string, error) {
 	inputs, err := s.gate.Fingerprint(ctx)
 	if err != nil {
 		return "", err
+	}
+	if s.tree != nil {
+		inputs = s.tree.Fingerprint() + "\x00" + inputs
 	}
 	key, err := domain.DigestJSON(s.execution)
 	if err != nil {

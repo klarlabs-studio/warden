@@ -21,7 +21,7 @@ type feedbackReader interface {
 // the server's working directory names the worktree.
 type FeedbackStatusInput struct{}
 
-// FeedbackStatusOutput is what the staged watcher last observed, judged now.
+// FeedbackStatusOutput is what the background watcher last observed, judged now.
 type FeedbackStatusOutput struct {
 	// Present is false when no watcher has written a document for the
 	// worktree; Message then says how to produce one.
@@ -36,7 +36,7 @@ type FeedbackStatusOutput struct {
 	Document *domain.FeedbackDocument `json:"document,omitempty"`
 }
 
-const feedbackStatusDescription = "Read what the background staged watcher (`warden watch --staged`) last " +
+const feedbackStatusDescription = "Read what the background watcher (`warden watch --staged`, or `warden watch` under container execution) last " +
 	"observed for this worktree: its state, the snapshot it checked, each step's status, findings " +
 	"and container environment. freshness is computed now by the reader: anything but current " +
 	"(or expired, which concerns only passing steps) means the results do not describe the " +
