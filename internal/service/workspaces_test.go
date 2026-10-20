@@ -154,3 +154,45 @@ func TestService_AffectedWorkspacesErrors(t *testing.T) {
 		t.Errorf("broken head configuration: %v", err)
 	}
 }
+
+// The committed workspaces block decides what an unowned or shared path
+// means: an ignored doc selects nothing, a configured global path selects
+// every workspace, and a path in neither forces a full selection.
+func TestService_AffectedWorkspacesReadsConfiguredRules(t *testing.T) {
+	dir := initRepo(t)
+	commitFiles(t, dir, "go.work", map[string]string{
+		".warden.yaml": "workspaces:\n  discover: [go]\n  global: [\"tools/**\"]\n  ignore: [\"docs/**\"]\n",
+		"go.work":      "go 1.26\n\nuse (\n\t./svc\n\t./lib\n)\n",
+		"svc/go.mod":   "module example.com/svc\n\ngo 1.26\n\nrequire example.com/lib v0.0.0\n",
+		"svc/svc.go":   "package svc\n",
+		"lib/go.mod":   "module example.com/lib\n\ngo 1.26\n",
+		"lib/lib.go":   "package lib\n",
+	})
+	base := gitT(t, dir, "rev-parse", "HEAD")
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectFor := func(files map[string]string) domain.Selection {
+		t.Helper()
+		commitFiles(t, dir, "change", files)
+		res, err := svc.AffectedWorkspaces(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Selection
+	}
+
+	sel := selectFor(map[string]string{"docs/guide.md": "x\n", "lib/lib.go": "package lib // edited\n"})
+	if got := strings.Join(sel.Paths(), ","); sel.Kind != domain.SelectionAffected || got != "lib,svc" {
+		t.Fatalf("an ignored doc must not force full: %s %s %+v", sel.Kind, got, sel.Full)
+	}
+	if strings.Join(sel.Rules.Ignore, ",") != "docs/**" || strings.Join(sel.Rules.Global, ",") != "tools/**" {
+		t.Errorf("the selection must record the committed rules: %+v", sel.Rules)
+	}
+
+	sel = selectFor(map[string]string{"tools/gen.go": "package tools\n"})
+	if sel.Kind != domain.SelectionFull || sel.Full.Rule != domain.FullRuleGlobal || sel.Full.Pattern != "tools/**" {
+		t.Fatalf("a configured global path must force full: %s %+v", sel.Kind, sel.Full)
+	}
+}

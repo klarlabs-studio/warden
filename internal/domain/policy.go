@@ -58,6 +58,10 @@ type ResolvedPolicy struct {
 	// none. The JSON tag keeps the MCP policy_explain output of an unprofiled
 	// repo exactly as it was.
 	Profile *ResolvedProfile `json:"Profile,omitempty"`
+	// Workspaces is the monorepo configuration in force, or nil when the
+	// config sets neither workspaces: nor per_workspace:. The JSON tag keeps
+	// the MCP policy_explain output of every other repo exactly as it was.
+	Workspaces *ResolvedWorkspaces `json:"Workspaces,omitempty"`
 }
 
 // ResolvedProfile is the compliance profile a policy was resolved under, with

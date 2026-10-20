@@ -60,10 +60,12 @@ func (s *Service) Workspaces(rev string) (WorkspaceList, error) {
 // the effective configuration at both ends. It is read-only: it writes no
 // note and runs nothing.
 //
-// The selection rules are the defaults (domain.SelectionRules{}): nothing
-// configures them yet. An anchor whose configuration cannot be loaded counts
-// as an unknown configuration, which forces a full selection rather than
-// failing the command.
+// The selection rules (workspaces.global, ignore and unowned) are read from
+// the configuration committed at HEAD. Rules that differ at the anchor change
+// the configuration digest, which forces a full selection, so the anchor's
+// rules never need consulting. An anchor whose configuration cannot be loaded
+// counts as an unknown configuration, which forces a full selection rather
+// than failing the command.
 func (s *Service) AffectedWorkspaces(base string) (AffectedWorkspaces, error) {
 	if base == "" || strings.HasPrefix(base, "-") {
 		return AffectedWorkspaces{}, fmt.Errorf("affected workspaces: invalid base %q", base)
@@ -88,16 +90,16 @@ func (s *Service) AffectedWorkspaces(base string) (AffectedWorkspaces, error) {
 	if err != nil {
 		return AffectedWorkspaces{}, err
 	}
-	headConfig, err := s.configurationDigestAt(head)
+	headCfg, headConfig, err := s.configurationAt(head)
 	if err != nil {
 		return AffectedWorkspaces{}, fmt.Errorf("configuration at HEAD: %w", err)
 	}
-	anchorConfig, err := s.configurationDigestAt(anchor)
+	_, anchorConfig, err := s.configurationAt(anchor)
 	if err != nil {
 		anchorConfig = ""
 	}
 	sel, err := domain.Select(domain.SelectionInput{
-		Base: baseGraph, Head: headGraph, Changed: changed,
+		Base: baseGraph, Head: headGraph, Changed: changed, Rules: headCfg.SelectionRules(),
 		AnchorConfigurationDigest: anchorConfig, ConfigurationDigest: headConfig,
 	})
 	if err != nil {
@@ -120,17 +122,18 @@ func (s *Service) DefaultAffectedBase() (string, error) {
 	return ref, nil
 }
 
-// configurationDigestAt is the digest of the effective configuration
-// committed at rev, extends chain included — the value policy resolution
-// records as ConfigurationDigest.
-func (s *Service) configurationDigestAt(rev string) (string, error) {
+// configurationAt is the effective configuration committed at rev, extends
+// chain included, and its digest — the value policy resolution records as
+// ConfigurationDigest.
+func (s *Service) configurationAt(rev string) (domain.Config, string, error) {
 	cfg, err := config.ResolveAtRef(func(rel string) ([]byte, bool, error) {
 		return s.repo.FileAtRef(rev, rel)
 	})
 	if err != nil {
-		return "", err
+		return domain.Config{}, "", err
 	}
-	return domain.DigestJSON(cfg)
+	digest, err := domain.DigestJSON(cfg)
+	return cfg, digest, err
 }
 
 // resolveCommit resolves rev to a full commit name, refusing a revision git

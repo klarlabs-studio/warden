@@ -97,6 +97,7 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 	res.WriteSteps = stepSet(cfg.Writes)
 	resolveOverlays(&res, matches)
 	resolveProfile(&res, cfg)
+	res.Workspaces = resolveWorkspaces(cfg)
 
 	for _, m := range matches {
 		res.MatchedRules = append(res.MatchedRules, m.name)
@@ -306,4 +307,32 @@ func resolveProfile(res *domain.ResolvedPolicy, cfg domain.Config) {
 			res.Agents[s] = cfg.Agent
 		}
 	}
+}
+
+// resolveWorkspaces carries the workspaces and per_workspace blocks into the
+// policy, with defaults spelled out, or returns nil when the config sets
+// neither. Nothing runs per workspace yet, and the result says so.
+func resolveWorkspaces(cfg domain.Config) *domain.ResolvedWorkspaces {
+	if cfg.Workspaces == nil && len(cfg.PerWorkspace) == 0 {
+		return nil
+	}
+	out := &domain.ResolvedWorkspaces{
+		Select: domain.WorkspaceSelectAll,
+		Rules:  cfg.SelectionRules(),
+		Notice: domain.WorkspacePreviewNotice,
+	}
+	if w := cfg.Workspaces; w != nil {
+		out.Discover = w.Discover
+		if w.Select != "" {
+			out.Select = w.Select
+		}
+		out.Concurrency = w.Concurrency
+	}
+	if len(cfg.PerWorkspace) > 0 {
+		out.Steps = make(map[domain.StepName]domain.PerWorkspaceStep, len(cfg.PerWorkspace))
+		for step, def := range cfg.PerWorkspace {
+			out.Steps[domain.StepName(step)] = def
+		}
+	}
+	return out
 }

@@ -63,9 +63,25 @@ names the reason, when any of these holds:
 A workspace the change deletes is listed under `removed`, and the workspaces
 that depended on it are still selected.
 
-The selection rules are fixed in this release. Configuring additional global
-paths, paths to ignore and what an unowned path does comes with the
-`workspaces:` configuration block in a later release.
+The `workspaces:` block in `.warden.yaml` adjusts these rules, and
+`--affected` reads it from the configuration committed at HEAD:
+
+```yaml
+workspaces:
+  discover: [js, go]
+  global: ["tools/build/**"]          # also select every workspace
+  ignore: ["docs/**", ".github/**"]   # unowned paths that select nothing
+  unowned: full                       # default; `ignore` lets every unowned path select nothing
+```
+
+`global` only adds to the built-in paths, and `ignore` never exempts a
+workspace's own files, `.warden.yaml`, a root manifest, a root lockfile or a
+global path. A configuration that differs from the merge-base's forces a full
+selection, so editing these rules never narrows the selection of the change
+that edits them. The block is a preview, and so is `per_workspace:`, which
+defines checks that run per workspace: this release validates both and
+`warden policy explain` shows them, but no step runs per workspace yet. Older
+wardens reject both keys.
 
 ## Where workspaces come from
 

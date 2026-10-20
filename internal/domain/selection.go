@@ -109,6 +109,18 @@ func validateSelectionGlob(g string) error {
 		return fmt.Errorf("glob longer than %d bytes", maxGlobLen)
 	case strings.HasPrefix(g, "/"):
 		return fmt.Errorf("glob %q must be relative to the repository root", g)
+	case strings.ContainsRune(g, '\\'):
+		// Changed paths always use "/", so a backslash can never match one.
+		return fmt.Errorf("glob %q must separate directories with /", g)
+	case strings.Count(g, "/") >= maxGlobSegments:
+		return fmt.Errorf("glob %q has more than %d segments", g, maxGlobSegments)
+	}
+	for _, seg := range strings.Split(g, "/") {
+		// A changed path is clean, so these segments can never match: the
+		// glob would look like configuration and select nothing.
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("glob %q has an empty, \".\" or \"..\" segment, which no repository path contains", g)
+		}
 	}
 	for _, r := range g {
 		if r < 0x20 || r == 0x7f {
