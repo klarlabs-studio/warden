@@ -94,6 +94,9 @@ type fakeDocker struct {
 	started    string
 	runSeconds int
 	imageID    string
+	// failRun makes every check fail, printing a line that looks like a
+	// compiler diagnostic. warden must pass it through, not parse it.
+	failRun bool
 }
 
 func installFakeDocker(t *testing.T, f fakeDocker) {
@@ -114,6 +117,9 @@ func installFakeDocker(t *testing.T, f fakeDocker) {
 		image = "$(cat '" + f.imageID + "')"
 	}
 	run := "echo checked; exit 0"
+	if f.failRun {
+		run = "echo 'main.go:3: error: boom' >&2; exit 1"
+	}
 	if f.started != "" {
 		run = "touch '" + f.started + "'; sleep " + fmt.Sprint(f.runSeconds) + "; echo checked; exit 0"
 	}
