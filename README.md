@@ -855,6 +855,7 @@ The exit status stays the only verdict.
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
+| `warden workspaces [--affected [--base rev]] [--json]` | **preview:** list the monorepo's workspaces committed at HEAD (pnpm, npm, yarn, `go.work`), or the ones a change since the merge-base with `--base` affects, each with its reason; read-only ([monorepo mode](docs/monorepo.md)) |
 | `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / `.husky` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b] [--ci]` | audit which commits since adoption carry a validation note (`--ci`: exit 3 on drift, so CI can tell drift from a doctor that could not run) |

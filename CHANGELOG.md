@@ -6,6 +6,25 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Preview: `warden workspaces` shows a monorepo's workspaces and what a
+  change affects.** warden had no notion of a workspace: a monorepo was one
+  directory, and every check ran on all of it. The new read-only command lists
+  the workspaces committed at HEAD with their dependencies (pnpm
+  `pnpm-workspace.yaml`, npm and yarn `workspaces`, and `go.work` modules,
+  including `use .`). With `--affected --base <rev>` it selects the workspaces
+  changed since the merge-base, plus everything that depends on them, and
+  says why each was selected, or which rule made the selection cover every
+  workspace (a root lockfile, a root manifest, `.warden.yaml`, a path no
+  workspace owns). Manifests are read from git objects, never from the working
+  tree, and no package manager or go command runs. A manifest that cannot be
+  read, or a workspace name warden cannot use, is an error naming the file
+  rather than a workspace left out. Nothing in the gate uses workspaces yet,
+  and the output may change between releases. See
+  [monorepo mode](docs/monorepo.md). warden now depends on
+  `golang.org/x/mod` (BSD-3-Clause) to parse `go.work` and `go.mod`.
+
 ### Fixed
 
 - **Signed dependency drift describes the commit's lockfiles.** Drift was
