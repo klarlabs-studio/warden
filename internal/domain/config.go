@@ -2,6 +2,8 @@ package domain
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -53,6 +55,20 @@ type Config struct {
 
 	// PredictiveCache opts specific read-only shell checks into exact staged-tree caching.
 	PredictiveCache []string `yaml:"predictive_cache"`
+
+	// Diagnostics maps a shell check (lint, test, or a commands: custom step)
+	// to a SARIF 2.1.0 file, relative to the repository root, that its command
+	// writes. When the check FAILS, warden reads that file and reports its
+	// results as located findings beside the command's verbatim output. A
+	// passing check's file is never read: the exit status stays the only
+	// verdict, and a pass stays eligible for a staged prediction. Requires
+	// warden >= 0.38.0 on every machine that reads the config: older releases
+	// reject the key.
+	//
+	// omitempty matters in both encodings, as for Profile: Save must not write
+	// the key into a config that does not use it, and the configuration digest
+	// of a repo without it is part of signed execution contracts.
+	Diagnostics map[string]string `yaml:"diagnostics,omitempty" json:"Diagnostics,omitempty"`
 
 	// SymlinkDeps opts out of dependency materialization. By default warden
 	// copies gitignored dependency directories (node_modules) into the
@@ -254,6 +270,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid step name %q in predictive_cache", name)
 		}
 	}
+	if err := c.validateDiagnostics(); err != nil {
+		return err
+	}
 	for hook, names := range c.Steps {
 		for _, n := range names {
 			if !n.Valid() {
@@ -327,6 +346,43 @@ func (c Config) Validate() error {
 		}
 	}
 	return c.validatePush()
+}
+
+// validateDiagnostics rejects a diagnostics entry warden could not act on: a
+// step that does not run a shell command, or a path that is not a plain
+// location inside the repository. A typo here would otherwise read as a check
+// with nothing to report.
+func (c Config) validateDiagnostics() error {
+	for step, file := range c.Diagnostics {
+		name := StepName(step)
+		if !name.Valid() {
+			return fmt.Errorf("invalid step name %q in diagnostics", step)
+		}
+		// security-scan runs its command through its own reader (it gates on
+		// the scanner's report), so a declared file would never be read there.
+		if name == StepSecurityScan || (name.IsBuiltin() && name != StepLint && name != StepTest) {
+			return fmt.Errorf("invalid diagnostics.%s: only shell checks (lint, test, or a step defined under commands:) can declare a SARIF file", step)
+		}
+		if !ValidDiagnosticsPath(file) {
+			return fmt.Errorf("invalid diagnostics.%s %q: must be a relative path inside the repository, written with forward slashes, without \"..\"", step, file)
+		}
+	}
+	return nil
+}
+
+// ValidDiagnosticsPath reports whether p names a file inside the repository:
+// relative, slash-separated, clean, and without ".." or empty elements.
+func ValidDiagnosticsPath(p string) bool {
+	if p == "" || strings.ContainsAny(p, "\\\x00") || strings.HasPrefix(p, "/") || path.Clean(p) != p || p == "." {
+		return false
+	}
+	for _, elem := range strings.Split(p, "/") {
+		if elem == ".." || elem == "." || elem == "" {
+			return false
+		}
+	}
+	// A drive letter or volume name is absolute on Windows.
+	return filepath.IsLocal(filepath.FromSlash(p))
 }
 
 // validateDuration reports why a config duration string is unusable, or nil if

@@ -40,6 +40,12 @@ type Finding struct {
 	Why string `json:"why,omitempty"`
 	// Fix carries the remediation, when the step knows one.
 	Fix *Fix `json:"fix,omitempty"`
+	// FromSARIF marks a finding read from a SARIF file the step's command
+	// wrote (Config.Diagnostics), rather than one the step reported itself.
+	// It only lets delivery surfaces (the feedback document's source) say
+	// where the finding came from; it is not serialized and is not part of
+	// the evidence chain.
+	FromSARIF bool `json:"-"`
 }
 
 // Fix is a remediation a step offers for a finding: a command to run, a patch to

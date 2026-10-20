@@ -40,6 +40,24 @@ All notable changes to warden are documented here. The format follows
   read-only MCP tool `feedback_status` and `warden axi feedback`. The docs
   give a VS Code problem matcher and a Vim `errorformat` for the format; see
   [background feedback](docs/background-feedback.md#editor-recipes).
+- **A failing check can say where its problems are.** A failing shell check
+  was one finding holding the tool's output, with no file and no line, so an
+  editor could only show "lint failed". warden does not guess locations from
+  prose. A check can now declare the SARIF 2.1.0 file its command writes,
+  `diagnostics: { lint: out/lint.sarif }`, and when the check fails its
+  results become findings with file, line, rule and severity, beside the
+  command's output, in the gate output, the feedback document
+  (`source: sarif`) and the `problems` and `sarif` formats. A passing check's
+  report is never read: the exit status stays the only verdict and a pass
+  stays eligible for a staged prediction. The path must be inside the
+  repository with no symlink in any component (under container execution the
+  container writes the mount, and warden reads on the host), the file must
+  have been written by this run and be at most 4 MiB, and results located
+  outside the repository are dropped. A report warden ignores is a note in
+  the step summary, never a failure of its own. The key needs warden 0.38.0
+  or later on every machine and CI runner that reads the configuration;
+  older releases reject it. See
+  [background feedback](docs/background-feedback.md#located-findings-from-a-sarif-report).
 
 ### Fixed
 

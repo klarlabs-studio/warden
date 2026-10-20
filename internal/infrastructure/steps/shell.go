@@ -64,8 +64,10 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 			}
 		}
 	}
+	stamp := stampDiagnostics(sc.WorktreeDir, sc.Diagnostics)
 	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
 	res := s.resultFor(ctx, sc, out, err, contended)
+	s.addDiagnostics(sc, &res, stamp)
 	if sc.Container != nil {
 		env := sc.Container.Environment
 		res.Environment = &env
@@ -82,6 +84,26 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		}
 	}
 	return res, nil
+}
+
+// addDiagnostics adds the results of the SARIF file the step declares
+// (Config.Diagnostics) to a failing result, beside the command's verbatim
+// output, and says in the summary what it read or why it read nothing.
+//
+// Only a failure that the command itself produced is read. A pass is left
+// untouched, so the exit status stays the only verdict and len(Findings) == 0
+// keeps a pass eligible for a staged prediction. A step that never ran (lock
+// contention, a missing toolchain) wrote no report to read.
+func (s ShellStep) addDiagnostics(sc application.StepContext, res *domain.StepResult, stamp diagnosticsStamp) {
+	if sc.Diagnostics == "" || res.Status != domain.StepFail || res.Blocker != domain.BlockerNone {
+		return
+	}
+	findings, note := ingestDiagnostics(sc.WorktreeDir, sc.Diagnostics, stamp)
+	res.Findings = append(res.Findings, findings...)
+	res.Summary += "; diagnostics: " + note
+	if sc.OnOutput != nil {
+		sc.OnOutput("warden: diagnostics: " + note)
+	}
 }
 
 // exitDescription renders how a command ended, for a message that has nothing

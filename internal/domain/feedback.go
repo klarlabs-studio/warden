@@ -361,6 +361,9 @@ func FeedbackStepFromResult(res StepResult, started, finished time.Time) Feedbac
 // the tool's own output, with no rule or with one of warden's step/* rules
 // describing how the command ended.
 func findingSource(f Finding) FeedbackFindingSource {
+	if f.FromSARIF {
+		return FindingSourceSARIF
+	}
 	if f.File == "" && f.Line == 0 && (f.Rule == "" || strings.HasPrefix(f.Rule, "step/")) {
 		return FindingSourceOutput
 	}

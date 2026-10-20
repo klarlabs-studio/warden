@@ -46,6 +46,10 @@ type ResolvedPolicy struct {
 	MaterializeDeps bool
 	// SecurityScan is the resolved security-scan gate configuration.
 	SecurityScan SecurityScanConfig
+	// Diagnostics maps a shell check to the repo-relative SARIF file its
+	// command writes (Config.Diagnostics). The JSON tag keeps policy_explain
+	// output unchanged for a repo that declares none.
+	Diagnostics map[StepName]string `json:"Diagnostics,omitempty"`
 	// WriteSteps are steps the config declared as tree-mutating (Config.Writes).
 	// They run as sequential barriers, never in a parallel batch — the escape
 	// hatch for a custom step (codegen, formatter) that writes the worktree.

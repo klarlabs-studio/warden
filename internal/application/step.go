@@ -50,6 +50,10 @@ type StepContext struct {
 	Timeout time.Duration
 	// Commands maps shell-backed steps (lint, test) to their command line.
 	Commands map[string]string
+	// Diagnostics is the repo-relative SARIF file this step's command
+	// declares it writes (Config.Diagnostics), or "" when none. A shell step
+	// reads it only when the command fails.
+	Diagnostics string
 	// Remote is the git remote the run publishes to (usually "origin"). Steps
 	// that reason about the integration point need it to name a remote ref.
 	Remote string
