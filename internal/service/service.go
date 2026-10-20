@@ -275,6 +275,13 @@ func (s *Service) PredictStaged(ctx context.Context) (application.RunResult, err
 	return s.runner.PredictStaged(ctx)
 }
 
+// CheckWorkingTree runs the live watcher's container checks against a
+// working-tree snapshot (tree on top of commit base). See
+// application.Runner.CheckWorkingTree for what it never does.
+func (s *Service) CheckWorkingTree(ctx context.Context, base, tree string) (application.RunResult, error) {
+	return s.runner.CheckWorkingTree(ctx, base, tree)
+}
+
 // Run drives a hook invocation end to end.
 func (s *Service) Run(ctx context.Context, hook domain.Hook) (application.RunResult, error) {
 	return s.runner.Run(ctx, hook)

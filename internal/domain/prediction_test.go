@@ -57,3 +57,33 @@ func TestRunCacheReuseDoesNotClaimFreshExecution(t *testing.T) {
 		t.Fatal("missing reuse evidence")
 	}
 }
+
+// The live watcher's checks are the predictable ones without the two rules
+// that exist only for exact reuse: no opt-in list, and any network.
+func TestContainerShellCheckIsPredictableWithoutReuseRules(t *testing.T) {
+	p := ResolvedPolicy{Hook: PreCommit, Execution: ExecutionConfig{Image: "checks:dev", Network: "bridge"}, Commands: map[string]string{"lint": "true", "test": "true", "custom": "true", "review": "true", "security-scan": "true", "agent": "true"}, Agents: map[StepName]string{"agent": "claude"}}
+	for _, s := range []StepName{StepLint, StepTest, "custom"} {
+		if !p.ContainerShellCheck(s) {
+			t.Fatalf("%s refused", s)
+		}
+		if p.Predictable(s) {
+			t.Fatalf("%s predictable without opting in on a bridge network", s)
+		}
+	}
+	for _, s := range []StepName{StepReview, StepSecurityScan, "agent", "unconfigured"} {
+		if p.ContainerShellCheck(s) {
+			t.Fatalf("%s allowed", s)
+		}
+	}
+	p.AutoFix = map[StepName]int{StepLint: 1}
+	p.WriteSteps = map[StepName]bool{StepTest: true}
+	if p.ContainerShellCheck(StepLint) || p.ContainerShellCheck(StepTest) {
+		t.Fatal("a tree-writing step allowed")
+	}
+	p.AutoFix, p.WriteSteps = nil, nil
+	for _, q := range []ResolvedPolicy{{Hook: PrePush, Execution: p.Execution, Commands: p.Commands}, {Hook: PreCommit, Commands: p.Commands}} {
+		if q.ContainerShellCheck(StepTest) {
+			t.Fatalf("allowed under %+v", q)
+		}
+	}
+}
