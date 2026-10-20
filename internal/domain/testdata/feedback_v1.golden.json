@@ -1,0 +1,87 @@
+{
+  "schema": "warden.feedback/v1",
+  "producer": {
+    "warden_version": "0.38.0",
+    "pid": 4242,
+    "started_at": "2026-10-20T09:30:00Z",
+    "heartbeat_at": "2026-10-20T09:30:30Z"
+  },
+  "mode": "staged",
+  "worktree": "/abs/checkout",
+  "state": "complete",
+  "message": "staged checks failed: lint failed",
+  "snapshot": {
+    "id": "sha256:eea93570d12284473d76e98248e7022660c338e70a2e21998b0e821c401011a5",
+    "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch": "feat/x",
+    "configuration_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "environment_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "evaluated_at": "2026-10-20T09:30:25Z",
+  "steps": [
+    {
+      "step": "lint",
+      "status": "fail",
+      "summary": "lint failed",
+      "blocker": "",
+      "started_at": "2026-10-20T09:30:10Z",
+      "finished_at": "2026-10-20T09:30:20Z",
+      "environment": {
+        "runtime": "docker",
+        "image": "team-checks:local",
+        "image_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "platform": "linux/arm64",
+        "network": "none"
+      },
+      "prediction": {
+        "saved": false,
+        "expires_at": null
+      },
+      "findings": [
+        {
+          "severity": "high",
+          "message": "main.go:3: unused variable",
+          "source": "output"
+        },
+        {
+          "severity": "medium",
+          "message": "deprecated call",
+          "file": "cfg.go",
+          "line": 7,
+          "rule": "SA1019",
+          "source": "step"
+        }
+      ],
+      "output_truncated": true
+    },
+    {
+      "step": "test",
+      "status": "pass",
+      "summary": "test passed; staged prediction saved",
+      "blocker": "",
+      "started_at": "2026-10-20T09:30:10Z",
+      "finished_at": "2026-10-20T09:30:22Z",
+      "prediction": {
+        "saved": true,
+        "expires_at": "2026-10-20T09:40:22Z"
+      },
+      "findings": [],
+      "output_truncated": false
+    },
+    {
+      "step": "typecheck",
+      "status": "pending",
+      "summary": "",
+      "blocker": "",
+      "started_at": null,
+      "finished_at": null,
+      "prediction": {
+        "saved": false,
+        "expires_at": null
+      },
+      "findings": [],
+      "output_truncated": false
+    }
+  ]
+}
