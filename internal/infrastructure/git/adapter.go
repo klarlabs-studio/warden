@@ -111,11 +111,32 @@ func (a *Adapter) DetectDepDrift(worktreeDir string) []domain.DepDrift {
 // SeedDependencyFreeWorktree copies the adapter, so parallel clones inherit
 // the no-host-dependencies setting without mutating the shared repository.
 func (a *Adapter) SeedDependencyFreeWorktree(hook domain.Hook, branch string) (application.Worktree, error) {
-	repo := *a.repo
-	repo.skipDependencyExposure = true
-	clean := NewAdapter(&repo)
+	clean := a.dependencyFree()
 	if hook == domain.PreCommit {
 		return clean.SeedWorktreeFromHead(false)
 	}
 	return clean.SeedWorktreeFromBranch(branch, false)
+}
+
+// SeedDependencyFreeSnapshot creates a dependency-free worktree holding a
+// working-tree snapshot (tree) on top of its base commit.
+func (a *Adapter) SeedDependencyFreeSnapshot(base, tree string) (application.Worktree, error) {
+	wt, err := a.dependencyFree().repo.CreateWorktreeAtSnapshot(base, tree, false)
+	if err != nil {
+		return nil, err
+	}
+	return worktreeAdapter{wt}, nil
+}
+
+// SnapshotDiffStats reports the paths a working-tree snapshot changes.
+func (a *Adapter) SnapshotDiffStats(base, tree string) (domain.DiffStats, error) {
+	return a.repo.SnapshotPaths(base, tree)
+}
+
+// dependencyFree is a copy of the adapter whose worktrees expose no
+// host-installed packages.
+func (a *Adapter) dependencyFree() *Adapter {
+	repo := *a.repo
+	repo.skipDependencyExposure = true
+	return NewAdapter(&repo)
 }

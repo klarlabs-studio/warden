@@ -39,8 +39,9 @@ const (
 // is cut at a UTF-8 boundary and the step's output_truncated is set.
 const FeedbackMessageLimit = 64 << 10
 
-// FeedbackModeStaged is the staged watcher's mode; FeedbackModeLive is
-// reserved for the container-aware live watcher.
+// FeedbackModeStaged is the staged watcher's mode: its snapshot is the tree
+// the index would write. FeedbackModeLive is the container-aware live
+// watcher's: its snapshot is the working tree as `git add -A` would stage it.
 const (
 	FeedbackModeStaged = "staged"
 	FeedbackModeLive   = "live"

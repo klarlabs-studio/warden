@@ -24,14 +24,15 @@ const feedbackUsage = "warden: usage: warden feedback status [--format json|sari
 
 // noFeedbackMessage is what every reader surface says when no watcher has
 // written a document for the worktree.
-const noFeedbackMessage = "no background feedback for this worktree; start `warden watch --staged` to produce it"
+const noFeedbackMessage = "no background feedback for this worktree; start `warden watch --staged` (or, under container execution, `warden watch`) to produce it"
 
-// cmdFeedback reads the background feedback the staged watcher writes.
+// cmdFeedback reads the background feedback a watcher writes.
 //
 // The reader validates the document, recomputes the worktree's current
 // snapshot id and fills in freshness itself: a producer can only say what it
 // observed, never whether that still holds. It never probes a container
-// engine, and it never starts a watcher or runs a check.
+// engine, never starts a watcher or runs a check, and never writes to the
+// repository: the snapshot's objects go to a temporary object store.
 func cmdFeedback(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "status" {
 		_, _ = fmt.Fprintln(stderr, feedbackUsage)
@@ -102,7 +103,7 @@ func readFeedback(svc *service.Service) (domain.FeedbackDocument, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), feedbackReadTimeout)
 	defer cancel()
-	current, err := feedback.CurrentSnapshot(ctx, mustCwd(), digest, "")
+	current, err := feedback.CurrentSnapshot(ctx, mustCwd(), doc.Mode, digest, "", feedback.DiscardObjects)
 	if err != nil {
 		return domain.FeedbackDocument{}, fmt.Errorf("cannot determine the current snapshot: %w", err)
 	}

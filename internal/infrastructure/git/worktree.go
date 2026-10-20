@@ -51,6 +51,47 @@ func (r *Repo) CreateWorktreeFromHead(materializeDeps bool) (*Worktree, error) {
 	return wt, nil
 }
 
+// CreateWorktreeAtSnapshot makes a detached worktree at commit base whose
+// index and files are exactly tree: a working-tree snapshot the live watcher
+// computed (see the feedback package), checked out on top of the commit it
+// was taken against. The snapshot's changes read as staged in the worktree,
+// the same shape a pre-commit run sees, and files outside tree (ignored ones
+// in the live checkout) are simply absent.
+//
+// Both must be object names, never revision expressions or options; the tree
+// must already be in the object store.
+func (r *Repo) CreateWorktreeAtSnapshot(base, tree string, materializeDeps bool) (*Worktree, error) {
+	if !domain.ValidTreeSHA(base) || !domain.ValidTreeSHA(tree) {
+		return nil, fmt.Errorf("git: snapshot worktree needs a base commit and a tree object name (got %q, %q)", base, tree)
+	}
+	wt, err := r.addDetachedWorktree(base, materializeDeps)
+	if err != nil {
+		return nil, err
+	}
+	// --reset discards the base checkout's index for tree's; -u updates the
+	// files to match, removing those tree does not hold.
+	if _, err := runIn(wt.Dir, "read-tree", "-u", "--reset", tree); err != nil {
+		_ = wt.Remove()
+		return nil, err
+	}
+	return wt, nil
+}
+
+// SnapshotPaths returns the paths that differ between commit base and tree,
+// in the shape StagedPaths reports: a snapshot's change set for path rules
+// and risk, as the staged diff is a commit's.
+func (r *Repo) SnapshotPaths(base, tree string) (domain.DiffStats, error) {
+	if !domain.ValidTreeSHA(base) || !domain.ValidTreeSHA(tree) {
+		return domain.DiffStats{}, fmt.Errorf("git: snapshot paths need a base commit and a tree object name (got %q, %q)", base, tree)
+	}
+	out, err := runRawIn(r.Dir, changedPathsArgs("--name-only", base, tree)...)
+	if err != nil {
+		return domain.DiffStats{}, err
+	}
+	paths := splitNUL(out)
+	return domain.DiffStats{FilesTouched: len(paths), Paths: paths}, nil
+}
+
 // CreateWorktreeFromBranch makes a detached worktree at the tip of branch, the
 // clean starting point for a pre-push run where the changes are already
 // committed (§4.3).

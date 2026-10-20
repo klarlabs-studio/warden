@@ -306,4 +306,9 @@ type Observer interface {
 // Container execution requires it, including on each parallel clone.
 type DependencyFreeGit interface {
 	SeedDependencyFreeWorktree(hook domain.Hook, branch string) (Worktree, error)
+	// SeedDependencyFreeSnapshot creates one at commit base whose index and
+	// files are tree, a working-tree snapshot already in the object store.
+	SeedDependencyFreeSnapshot(base, tree string) (Worktree, error)
+	// SnapshotDiffStats reports the paths tree changes relative to base.
+	SnapshotDiffStats(base, tree string) (domain.DiffStats, error)
 }
