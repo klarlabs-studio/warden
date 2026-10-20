@@ -103,6 +103,12 @@ func snapshotTree(ctx context.Context, dir string, stage bool, objects Objects) 
 		return "", fmt.Errorf("copy the index: %w", err)
 	}
 	env := []string{"GIT_INDEX_FILE=" + private}
+	// A split index (core.splitIndex) names a shared index file in the git
+	// directory. Git still finds it for the copy, but saving a split index
+	// writes a new shared file THERE, beside the real index, and prunes
+	// expired ones: a reader would write to the repository on every editor
+	// request. Saving the copy unsplit keeps every write inside tmpDir.
+	unsplit := func(args ...string) []string { return append([]string{"-c", "core.splitIndex=false"}, args...) }
 	if objects == DiscardObjects {
 		store, err := gitPath(ctx, dir, "objects")
 		if err != nil {
@@ -122,11 +128,11 @@ func snapshotTree(ctx context.Context, dir string, stage bool, objects Objects) 
 		// --all with no pathspec covers the whole worktree from any
 		// subdirectory: modified and deleted tracked files, and untracked
 		// files .gitignore does not exclude.
-		if _, err := git(ctx, dir, env, "add", "--all"); err != nil {
+		if _, err := git(ctx, dir, env, unsplit("add", "--all")...); err != nil {
 			return "", fmt.Errorf("stage the working tree: %w", err)
 		}
 	}
-	out, err := git(ctx, dir, env, "write-tree")
+	out, err := git(ctx, dir, env, unsplit("write-tree")...)
 	if err != nil {
 		return "", fmt.Errorf("compute the snapshot tree: %w", err)
 	}
@@ -192,9 +198,17 @@ func git(ctx context.Context, dir string, env []string, args ...string) ([]byte,
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			return nil, fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(string(exit.Stderr)))
+			return nil, fmt.Errorf("git %s: %s", subcommand(args), strings.TrimSpace(string(exit.Stderr)))
 		}
 		return nil, err
 	}
 	return out, nil
+}
+
+// subcommand is the git command args run, past any leading -c options.
+func subcommand(args []string) string {
+	for len(args) > 2 && args[0] == "-c" {
+		args = args[2:]
+	}
+	return args[0]
 }

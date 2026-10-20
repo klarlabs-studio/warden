@@ -71,7 +71,10 @@ hook run; this adapter cannot promise a fetch-free startup.
 To prevent a moved tag from authorizing the wrong checks, Warden creates a
 stopped container, verifies its image index, Linux platform, runtime handler,
 and network configuration, then starts it attached. Cleanup is explicit even
-after a successful check, and failure to delete the container fails the step.
+after a successful check. Deleting the container happens after its command has
+finished, so it cannot change the verdict, which comes from the command's exit
+status alone: a container that cannot be deleted is reported in the step's
+summary when the check passed, and beside its output when it failed.
 The shared worktree marker also verifies its bind mount. Apple's mount parser
 cannot represent worktree paths containing commas, equals signs, or newlines;
 Warden rejects them instead of interpreting a different mount.
@@ -169,6 +172,19 @@ terminating the client process. A marker check confirms that the engine mounted
 the actual worktree, including when the CLI selects a VM or remote context.
 The context must support accessing that path; a missing or incorrect mount
 fails the check.
+
+Every container is named `warden-<pid>-<nonce>` and labeled
+`de.klarlabs.warden.pid=<pid>` and `de.klarlabs.warden.host=<host name>`,
+naming the warden process that started it and the machine it ran on. A
+process killed outright (SIGKILL, a CI timeout) never removes its container:
+Docker-compatible engines remove it once its command ends (`--rm`), but
+Apple's removal is a step the killed process never reaches. `warden watch`
+removes such leftovers when it starts, and a gate run does the same in the
+background for the engine it selected: containers labeled with this host
+name whose owning process has exited. A container without those labels,
+labeled by another machine, or whose owner is still running is never
+touched. The same applies to a container whose deletion failed after its
+check finished; it is removed once its owner has exited.
 
 Native Git steps, credential inspection, coding-agent integrations, and
 `warden-step-*` subprocess plugins continue to execute on the host. Git's shared

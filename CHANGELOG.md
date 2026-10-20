@@ -101,6 +101,55 @@ All notable changes to warden are documented here. The format follows
   non-interactive gate run, pre-commit included, now publishes on the
   `warden attach` socket (previously only pre-push did), and a second run no
   longer removes the socket of a run still in progress.
+- **Snapshots no longer write into the git directory under a split
+  index.** The feedback reader and the live watcher compute their trees from
+  a private copy of the index. With `core.splitIndex=true` git still found
+  the shared index for that copy, but saving the copy wrote a new
+  `sharedindex.*` file into the repository's own git directory, beside the
+  real index, so `warden feedback status` could write to the repository each
+  time an editor asked. The copy is now saved unsplit, so every write stays
+  in its temporary directory; the trees were already correct and are
+  unchanged.
+- **A swapped SARIF report can no longer hang a check.** warden checked the
+  declared `diagnostics:` file was a regular file and then opened it. A
+  process that replaced it with a FIFO in between made the open wait for a
+  writer that never came, and the step, and the gate with it, hung. The
+  report is now opened without blocking and refused unless what was opened
+  is the same regular file that was checked.
+- **A container that cannot be deleted no longer fails a passing check.**
+  Apple's runtime deletes each check's container explicitly, within three
+  seconds. On a heavily loaded machine the delete was killed at that limit,
+  and a check whose command had passed was reported FAILED with
+  `container cleanup failed: signal: killed`, a verdict about the machine
+  dressed as one about the change. Deleting the container comes after the
+  command has finished, so the verdict now comes from the command's exit
+  status alone: a passing check passes and its summary says the container
+  could not be deleted, and a failing check still fails, with the note beside
+  its output. The delete is also given 15 seconds. It is not a blocker,
+  because a blocker means the step could not run, and this one did.
+- **A killed run's worktree is removed by the next run.** A run killed
+  outright (SIGKILL, a CI timeout) left its disposable `warden-wt-*`
+  worktree registered. The sweep that cleans those up kept every one whose
+  directory was still on disk, because it could not tell a dead run's from a
+  concurrent live one, and the temp directory survives until the OS reaps
+  it, so `git worktree list` kept showing the dead run's worktree and pinning
+  its HEAD. Each worktree now records the pid and host name of the process
+  that created it, and the next run removes those whose creator on this
+  machine has exited. A worktree created on another machine or by an older
+  warden is still only pruned once its directory is gone.
+- **A killed run's container is removed by the next run.** A watcher or
+  hook killed outright (SIGKILL, a CI timeout) never removed the container
+  its check was running in. Docker-compatible engines remove it once its
+  command ends (`--rm`), but Apple's runtime removes containers in an
+  explicit step the killed process never reaches, so each crash left one
+  behind for good. Every container warden starts is now named
+  `warden-<pid>-<nonce>` and labeled `de.klarlabs.warden.pid` and
+  `de.klarlabs.warden.host`. `warden watch` removes, when it starts, the
+  containers labeled with this machine's host name whose owning process has
+  exited, and a gate run does the same in the background for the engine it
+  selected. A container without the labels, one from another machine, and
+  one whose owner is still running are never touched. Containers left by
+  releases before this one carry no labels and are not removed.
 
 ## [0.37.0] - 2026-10-19
 

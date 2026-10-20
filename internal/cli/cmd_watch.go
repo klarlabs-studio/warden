@@ -204,6 +204,7 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	}
 	ctx = fb.ctx
 	defer fb.close()
+	sweepOrphanContainers(ctx, cfg.Execution, stdout)
 	evaluate := func(ctx context.Context) error {
 		return evaluateStaged(ctx, svc, dir, stdout, fb)
 	}
@@ -250,6 +251,16 @@ func watchSnapshots(ctx context.Context, svc *service.Service, fb *feedbackSessi
 	return fb.exitCode(0, stderr)
 }
 
+// sweepOrphanContainers removes, before the first evaluation, the containers
+// earlier warden processes on this machine started and were killed before
+// removing (see steps.SweepOrphanContainers), so they neither linger nor
+// compete with this watcher's checks.
+func sweepOrphanContainers(ctx context.Context, execution domain.ExecutionConfig, stdout io.Writer) {
+	if removed := steps.SweepOrphanContainers(ctx, execution); len(removed) > 0 {
+		_, _ = fmt.Fprintf(stdout, "warden: removed %d container(s) left by runs that were killed: %s\n", len(removed), strings.Join(removed, ", "))
+	}
+}
+
 // runLiveContainerWatch is live mode under a container configuration. Each
 // evaluation checks a working-tree snapshot (the tree `git add -A` would
 // stage, computed from a private index) in a disposable dependency-free
@@ -273,6 +284,7 @@ func runLiveContainerWatch(ctx context.Context, svc *service.Service, dir string
 	}
 	ctx = fb.ctx
 	defer fb.close()
+	sweepOrphanContainers(ctx, cfg.Execution, stdout)
 	live := &liveEvaluator{svc: svc, dir: dir, stdout: stdout, fb: fb}
 	defer svc.SetObserver(nil)
 	if once {

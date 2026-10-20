@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/csv"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -124,6 +125,27 @@ func unavailable(problems []string) error {
 	return fmt.Errorf("%w (%s); start an engine and pull/build execution.image, or explicitly select execution.mode: host", application.ErrContainerUnavailable, strings.Join(problems, "; "))
 }
 
+// containerCleanupError is returned for a container whose command exited
+// successfully but which could not be removed afterwards. The command's
+// verdict stands: the error is a note, never a failure of the check. Only
+// splitCleanup should look inside it; any caller that does not still sees an
+// error, so a missed case fails closed.
+type containerCleanupError struct{ err error }
+
+func (e *containerCleanupError) Error() string { return "container cleanup failed: " + e.err.Error() }
+func (e *containerCleanupError) Unwrap() error { return e.err }
+
+// splitCleanup separates a failed removal after a successful command from the
+// command's own result: it returns a note describing the failed removal (""
+// when there was none) and the command's error (nil for that case).
+func splitCleanup(err error) (note string, commandErr error) {
+	var cleanup *containerCleanupError
+	if errors.As(err, &cleanup) {
+		return cleanup.Error(), nil
+	}
+	return "", err
+}
+
 // probeFunc runs one read-only engine CLI query.
 type probeFunc func(bin string, args ...string) ([]byte, error)
 
@@ -150,7 +172,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, err
 	}
 	nonce := hex.EncodeToString(token)
-	name := "warden-" + nonce
+	name := containerName(nonce)
 	marker := ".warden-container-" + nonce
 	if err := os.WriteFile(filepath.Join(dir, marker), []byte(nonce), 0o600); err != nil {
 		return nil, err
@@ -178,6 +200,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, fmt.Errorf("container execution has no inspected image reference to run")
 	}
 	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
+	args = append(args, labelArgs()...)
 	args = append(args, compatUserArgs(selected, os.Getuid(), os.Getgid())...)
 	// Only Warden's explicit step inputs cross the boundary. In particular, do
 	// not inherit PATH, credentials, or host absolute build-cache locations.
