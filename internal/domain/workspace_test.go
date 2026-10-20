@@ -31,6 +31,37 @@ func TestWorkspaceGraphValidateAccepts(t *testing.T) {
 	}
 }
 
+// Dependency cycles are valid: real monorepos have them (two JS packages
+// that devDepend on each other, Go modules that require each other), and
+// selection is a reverse-dependency closure, which is well defined on a
+// cyclic graph. The digest stays deterministic whatever order the cycle is
+// written in.
+func TestWorkspaceGraphValidateAcceptsCycles(t *testing.T) {
+	cases := map[string][2]WorkspaceGraph{
+		"self dependency": {graph(ws("a", "a", "a")), graph(ws("a", "a", "a", "a"))},
+		"two-cycle": {
+			graph(ws("a", "a", "b"), ws("b", "b", "a")),
+			graph(ws("b", "b", "a"), ws("a", "a", "b", "b")),
+		},
+		"three-cycle with a dependent": {
+			graph(ws("a", "a", "b"), ws("b", "b", "c"), ws("c", "c", "a"), ws("app", "app", "c")),
+			graph(ws("app", "app", "c"), ws("c", "c", "a"), ws("b", "b", "c"), ws("a", "a", "b")),
+		},
+	}
+	for name, pair := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := pair[0].Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
+			}
+			d1, err1 := pair[0].Digest()
+			d2, err2 := pair[1].Digest()
+			if err1 != nil || err2 != nil || d1 != d2 {
+				t.Fatalf("Digest() = %q (%v), reordered %q (%v); want equal and no error", d1, err1, d2, err2)
+			}
+		})
+	}
+}
+
 func TestWorkspaceGraphValidateRefuses(t *testing.T) {
 	long := strings.Repeat("a", maxWorkspaceNameLen+1)
 	cases := []struct {
@@ -71,8 +102,6 @@ func TestWorkspaceGraphValidateRefuses(t *testing.T) {
 		{"dot-prefixed path", graph(ws("./.", "a")), "not clean"},
 		{"duplicate name", graph(ws("a", "x"), ws("b", "x")), "used by both"},
 		{"unknown dependency", graph(ws("a", "a", "b")), "not a workspace"},
-		{"self dependency", graph(ws("a", "a", "a")), "cycle: a -> a"},
-		{"cycle", graph(ws("a", "a", "b"), ws("b", "b", "c"), ws("c", "c", "a")), "cycle: a -> b -> c -> a"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
