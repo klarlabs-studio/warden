@@ -13,6 +13,7 @@ require (
 	go.klarlabs.de/mcp v1.27.0
 	go.klarlabs.de/statekit v1.14.0
 	golang.org/x/crypto v0.57.0
+	golang.org/x/mod v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
