@@ -45,6 +45,10 @@ While a gate run in the same worktree is in progress (it publishes on the
 `warden attach` socket), the watcher cancels its own work and waits, then
 evaluates again once the run ends. The hook never waits for the watcher.
 
+The watcher also writes what it observes to a per-worktree document that
+editors read with `warden feedback status`. It is advisory and the gate never
+reads it; see [background feedback](background-feedback.md).
+
 A passing check with complete input capture saves a signed local prediction.
 The next pre-commit gate can skip that check when all these still match:
 

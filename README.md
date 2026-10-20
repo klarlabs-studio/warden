@@ -837,6 +837,8 @@ expire after 10 minutes; a miss runs the check normally. Reuse is reported as
 cached evidence. Pre-push runs fresh checks, and predictions publish no commit
 notes. See [predictive staged checks](docs/predictive-cache.md) for exclusions
 and invalidation details.
+Editors can read what the watcher observed with `warden feedback status`; see
+[background feedback](docs/background-feedback.md).
 
 ## Commands
 
@@ -865,6 +867,7 @@ and invalidation details.
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
 | `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
 | `warden watch --staged [--once]` | warm opted-in staged container checks for local pre-commit reuse |
+| `warden feedback status [--format json]` | what the staged watcher last observed for this worktree, with freshness computed now ([background feedback](docs/background-feedback.md)) |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `policy-explain`, `steps`, `run-trigger`) |
