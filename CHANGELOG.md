@@ -110,6 +110,12 @@ All notable changes to warden are documented here. The format follows
   time an editor asked. The copy is now saved unsplit, so every write stays
   in its temporary directory; the trees were already correct and are
   unchanged.
+- **A swapped SARIF report can no longer hang a check.** warden checked the
+  declared `diagnostics:` file was a regular file and then opened it. A
+  process that replaced it with a FIFO in between made the open wait for a
+  writer that never came, and the step, and the gate with it, hung. The
+  report is now opened without blocking and refused unless what was opened
+  is the same regular file that was checked.
 
 ## [0.37.0] - 2026-10-19
 

@@ -113,6 +113,10 @@ func results(n int) string {
 	return "results"
 }
 
+// beforeConfinedOpen runs between readConfined's checks and its open. Tests
+// replace it to swap the file in that window.
+var beforeConfinedOpen = func() {}
+
 // readConfined reads rel from root, refusing anything that is not a regular
 // file reached through real directories inside root, larger than the cap, or
 // unchanged since before the command ran.
@@ -147,18 +151,22 @@ func readConfined(root, rel string, before diagnosticsStamp) ([]byte, error) {
 	if before.unchanged(leaf) {
 		return nil, errors.New("not rewritten by this run (it predates the check)")
 	}
+	beforeConfinedOpen()
 	confined, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open the worktree: %w", err)
 	}
 	defer func() { _ = confined.Close() }()
-	f, err := confined.Open(filepath.FromSlash(rel))
+	// Non-blocking, then verified: the checks above cannot stop the file being
+	// swapped before this open, and a FIFO opened for reading would block
+	// until something wrote to it.
+	f, err := confined.OpenFile(filepath.FromSlash(rel), os.O_RDONLY|openNonBlocking, 0)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	opened, err := f.Stat()
-	if err != nil || !os.SameFile(leaf, opened) {
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(leaf, opened) {
 		return nil, errors.New("replaced while being read")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, sarifMaxBytes+1))
