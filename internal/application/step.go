@@ -29,8 +29,14 @@ type StepContext struct {
 	// canonical worktree). It is consulted per step execution and may be called
 	// concurrently, so implementations must be safe for concurrent reads.
 	WorktreeFor func(domain.StepName) string
-	Branch      string
-	Diff        domain.DiffStats
+	// Selection returns the workspaces a per-workspace step runs over in this
+	// run. The runner computes it before the batch holding the step starts,
+	// on the tree that batch runs against (see Runner.Workspaces). It is nil
+	// outside a runner, and a per-workspace step fails rather than guess. It
+	// may be called concurrently.
+	Selection func(domain.StepName) (*domain.WorkspaceSelection, error)
+	Branch    string
+	Diff      domain.DiffStats
 	// Agent is the resolved coding-agent name for this step ("" = none).
 	Agent string
 	// AgentCommand is the resolved shell command template for Agent, or "" when

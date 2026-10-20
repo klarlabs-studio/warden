@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 )
 
 // Outcome classifies how a run ended. Pending is the live state; the rest are
@@ -122,6 +123,10 @@ func (r *Run) RecordStep(res StepResult) error {
 		r.blocker = res.Blocker
 		if reason := res.Blocker.Reason(); reason != "" {
 			r.message = fmt.Sprintf("step %s could not run: %s", res.Step, reason)
+		} else if failed := res.FailedWorkspaces(); len(failed) > 0 {
+			// A per-workspace step names where it failed: "step test failed"
+			// in a repo of forty packages leaves the reader to find out which.
+			r.message = fmt.Sprintf("step %s failed in workspace %s", res.Step, strings.Join(failed, ", "))
 		} else {
 			r.message = fmt.Sprintf("step %s failed", res.Step)
 		}

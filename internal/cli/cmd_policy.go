@@ -112,10 +112,10 @@ func printPolicy(w io.Writer, p domain.ResolvedPolicy) {
 	printWorkspaces(w, p)
 }
 
-// printWorkspaces shows the resolved monorepo configuration, and that this
-// release does not act on it. It prints nothing when the config sets neither
-// workspaces: nor per_workspace:, so every other repo's explain output is
-// unchanged.
+// printWorkspaces shows the resolved monorepo configuration and what its
+// per-workspace steps do in this hook. It prints nothing when the config sets
+// neither workspaces: nor per_workspace:, so every other repo's explain output
+// is unchanged.
 func printWorkspaces(w io.Writer, p domain.ResolvedPolicy) {
 	ws := p.Workspaces
 	if ws == nil {
@@ -139,12 +139,14 @@ func printWorkspaces(w io.Writer, p domain.ResolvedPolicy) {
 				line += " ecosystems=" + strings.Join(def.Ecosystems, ",")
 			}
 			if slices.Contains(p.Steps, s) {
-				line += " (in this hook's steps: it does not run per workspace yet)"
+				line += " (runs per workspace in this hook)"
+			} else {
+				line += " (not in this hook's steps)"
 			}
 			_, _ = fmt.Fprintln(w, line)
 		}
 	}
-	if !ws.Active {
+	if ws.Notice != "" {
 		_, _ = fmt.Fprintf(w, "NOTE: %s.\n", ws.Notice)
 	}
 }

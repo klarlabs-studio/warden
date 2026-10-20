@@ -170,6 +170,10 @@ type StepResult struct {
 	// surfaces — the background feedback document derives a prediction's
 	// expiry from it — and is not part of the evidence chain.
 	PredictionSavedAt time.Time
+	// Workspaces is set by a per-workspace step: one entry per workspace it
+	// ran for, in path order. The kernel adds one `<step>.workspace` evidence
+	// record per entry, so what ran where is inside the run's evidence chain.
+	Workspaces []WorkspaceOutcome
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See

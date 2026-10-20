@@ -1,15 +1,20 @@
 # Monorepo mode (preview)
 
-> **Preview.** This page describes the first, read-only part of monorepo
-> mode: `warden workspaces`. Nothing in the gate uses workspaces yet. Steps
-> still run for the whole repository, notes are unchanged, and the output
-> format of `warden workspaces` may change between releases.
+> **Preview.** Monorepo mode is arriving in steps. This release discovers
+> workspaces (`warden workspaces`), computes affected selections, and runs
+> steps defined under `per_workspace:` once per workspace. At pre-commit
+> they run for the workspaces the staged change affects (with
+> `select: affected`); at pre-push they run for every workspace. Notes record
+> each workspace's result as evidence, but no workspace scope yet, so every
+> note still verifies as a full run (see
+> [how verifiers treat a partial record](#how-verifiers-treat-a-partial-record)).
+> Configuration keys and output formats may still change between releases.
 
-Monorepo mode teaches warden what a workspace is, so that later releases can
-run per-workspace checks for only the workspaces a change affects, and record
-that it did. This release adds the two parts everything else builds on:
-discovering the workspace graph, and computing an affected selection. You can
-inspect both with `warden workspaces`.
+Monorepo mode teaches warden what a workspace is, so that it can run
+per-workspace checks for only the workspaces a change affects, and, in a later
+release, record in the signed note that it did. You can inspect discovery and
+selection with `warden workspaces`, and see what a hook runs per workspace
+with `warden policy explain`.
 
 ## Listing workspaces
 
@@ -78,10 +83,123 @@ workspaces:
 workspace's own files, `.warden.yaml`, a root manifest, a root lockfile or a
 global path. A configuration that differs from the merge-base's forces a full
 selection, so editing these rules never narrows the selection of the change
-that edits them. The block is a preview, and so is `per_workspace:`, which
-defines checks that run per workspace: this release validates both and
-`warden policy explain` shows them, but no step runs per workspace yet. Older
-wardens reject both keys.
+that edits them. Older wardens reject the `workspaces:` and `per_workspace:`
+keys, so add them only once a release that knows them runs on every machine
+and CI runner that reads the configuration.
+
+## Running checks per workspace
+
+A step defined under `per_workspace:` is one step, listed in `steps:` like any
+other, that runs once per workspace:
+
+```yaml
+steps:
+  pre_commit: [lint, test]
+  pre_push: [rebase, test, typecheck]
+workspaces:
+  discover: [js, go]
+  select: affected        # pre-commit runs only affected workspaces
+  ignore: ["docs/**"]
+  concurrency: 4          # optional
+per_workspace:
+  test:
+    each: "pnpm test"     # once per selected workspace, in its directory
+    ecosystems: [js]      # optional: only these ecosystems' workspaces
+  typecheck:
+    batch: "turbo run typecheck {workspaces.filter}"   # one call for all of them
+```
+
+A step is defined under `commands:` or under `per_workspace:`, never both. A
+`per_workspace:` definition takes precedence over the built-in `lint` and
+`test`, and a custom step needs no `commands:` entry.
+
+### Which workspaces run
+
+| Hook | `select: all` (default) | `select: affected` |
+|---|---|---|
+| pre-commit | every workspace | the workspaces the staged change affects, and their dependents |
+| pre-push | every workspace | every workspace |
+
+At pre-commit, the change is measured from `HEAD` to the tree the step runs
+against: the staged change, plus any fix that an earlier step whose writes are
+kept (`rebase`, `auto_fix`, `writes:`) made. Both graphs are read from git
+objects, and the [selection rules](#selecting-affected-workspaces) apply. In
+particular, a change to `.warden.yaml`, or a configuration in force that
+differs from the one committed at `HEAD` (an unstaged edit, or an `extends:`
+base), runs every workspace.
+
+Every workspace also runs when a step whose writes are kept runs at or after
+the first per-workspace step, or when a per-workspace step keeps its own
+writes. Its writes would land after the selection was made, so the selection
+would describe a different tree from the one committed. Put writers before
+per-workspace steps to keep affected selection.
+
+Pre-push always runs every workspace. Running only affected workspaces there
+needs a trusted full run to measure from and a scope recorded in the signed
+note, so that verifiers can tell a partial check from a full one. A later
+release adds both.
+
+Only the ecosystems named in `workspaces.discover` take part. A change in a
+directory that belongs to an ecosystem not listed is a path no workspace owns,
+and with the default `unowned: full` it runs every workspace.
+
+When nothing is selected (for example, a change only to ignored docs, or no
+selected workspace in the step's `ecosystems`), the step passes as **skipped**
+and says why. It does not count as a check that ran.
+
+### Commands and placeholders
+
+An `each:` command runs in the workspace's directory, and may use
+`{workspace.path}` and `{workspace.name}`. A `batch:` command runs once at the
+repository root, and may use `{workspaces.paths}`, `{workspaces.names}` and
+`{workspaces.filter}`. `{workspaces.filter}` becomes one `--filter=<name>`
+argument per workspace, which turbo and pnpm both accept.
+
+warden replaces each placeholder with a single-quoted value, so a name or a
+path always reaches the command as one literal word, whatever it contains.
+Write placeholders outside quotes of your own: inside `'...'` the value's
+quotes would end yours, and inside `"..."` they would be printed literally.
+
+```yaml
+each: 'go vet ./... && echo {workspace.name} >> "$LOG"'   # right
+each: "sh -c 'echo {workspace.path}'"                     # wrong: nested quotes
+```
+
+The same values are in the environment: `WARDEN_WORKSPACE_PATH` and
+`WARDEN_WORKSPACE_NAME` for `each:`, and `WARDEN_SELECTED_WORKSPACES` (the
+selected paths, one per line) for both modes.
+
+### Results
+
+The step fails when any workspace's command fails. The failure names the
+workspace (`step test failed in workspace apps/web`) and carries its output.
+Every selected workspace still runs, so one failure does not hide another. A
+`batch:` command is one command, so its failure names the batch rather than a
+workspace.
+
+Each workspace's result is a `<step>.workspace` record in the run's evidence
+chain, so a pre-push note says which workspaces a passing step ran for.
+
+### Concurrency
+
+`workspaces.concurrency` bounds how many per-workspace commands run at once
+across all per-workspace steps of a run. The default is half the CPUs (at
+least one). Steps that run in parallel share that one bound rather than each
+getting their own, so a parallel batch never multiplies it. A per-workspace
+step whose writes are kept runs one workspace at a time.
+
+The step's `timeouts:` entry covers all of its workspaces together.
+
+### What a per-workspace step does not do
+
+- It is never cached (`cache:`) and never predicted (`predictive_cache:`). Its
+  result depends on the selection as well as on the files, and neither cache
+  is keyed by the selection. Either entry for a per-workspace step is a load
+  error, and so is a `diagnostics:` file, which it does not read.
+- It does not run in `warden watch` live mode, which runs only `commands:`
+  checks.
+- It records no execution contract, so `verify --requirements` cannot reuse
+  it.
 
 ## Where workspaces come from
 
@@ -125,7 +243,8 @@ A selection is only as complete as the manifests. If one workspace reads
 files of another without declaring a dependency on it, a change to the second
 does not select the first. That is why a later release will record in the
 signed note which workspaces were checked, and why verifiers refuse such a
-partial record by default.
+partial record by default. Until a warden writes one, affected selection
+applies only at pre-commit, where nothing is signed.
 
 ## How verifiers treat a partial record
 

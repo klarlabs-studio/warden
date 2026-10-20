@@ -100,6 +100,10 @@ up or saves a prediction: the snapshot is derived from the working tree, not
 the index a commit is built from, and reusing its results at the gate would
 rest on an equivalence nobody has proven (see
 [background feedback](background-feedback.md#live-mode)).
-This feature does not install an operating-system daemon or select affected
-monorepo workspaces. It precomputes configured commands against the staged
-snapshot; commands may scope themselves using `WARDEN_CHANGED_FILES`.
+This feature does not install an operating-system daemon. It precomputes
+configured `commands:` checks against the staged snapshot; commands may scope
+themselves using `WARDEN_CHANGED_FILES`. A step defined under `per_workspace:`
+is never predicted and never reuses a prediction: its result depends on which
+workspaces were selected as well as on the tree, and a prediction is not keyed
+by the selection. Listing one in `predictive_cache` is a load error (see
+[monorepo mode](monorepo.md)).

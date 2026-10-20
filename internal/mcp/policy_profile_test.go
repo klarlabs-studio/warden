@@ -37,3 +37,21 @@ func TestHandlePolicyExplain_CarriesTheProfile(t *testing.T) {
 		t.Errorf("an unprofiled policy must not gain a Profile key: %s", b)
 	}
 }
+
+// policy_explain carries what per-workspace steps do in the hook, so an agent
+// reads the same account `warden policy explain` prints.
+func TestHandlePolicyExplain_CarriesWhatRunsPerWorkspace(t *testing.T) {
+	notice := domain.WorkspaceExecutionNotice(domain.PrePush, domain.WorkspaceSelectAffected)
+	ws := &domain.ResolvedWorkspaces{Discover: []string{"js"}, Select: domain.WorkspaceSelectAffected, Active: true, Notice: notice,
+		Steps: map[domain.StepName]domain.PerWorkspaceStep{"test": {Each: "pnpm test"}}}
+	got, err := handlePolicyExplain(&fakeFacade{policy: domain.ResolvedPolicy{Hook: domain.PrePush, Workspaces: ws}}, PolicyExplainInput{Hook: "pre-push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(got)
+	for _, want := range []string{`"Active":true`, `"Each":"pnpm test"`, "every discovered workspace at pre-push"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("policy_explain JSON missing %s: %s", want, b)
+		}
+	}
+}

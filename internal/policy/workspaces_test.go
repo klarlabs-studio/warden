@@ -2,6 +2,7 @@ package policy
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -24,13 +25,36 @@ func TestResolve_WorkspacesDefaults(t *testing.T) {
 		Select:   domain.WorkspaceSelectAll,
 		Rules:    domain.SelectionRules{Unowned: domain.UnownedFull},
 		Steps:    map[domain.StepName]domain.PerWorkspaceStep{"test": {Each: "pnpm test"}},
-		Notice:   domain.WorkspacePreviewNotice,
+		Active:   true,
+		Notice:   domain.WorkspaceExecutionNotice(domain.PrePush, domain.WorkspaceSelectAll),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("resolved workspaces:\n got  %+v\n want %+v", got, want)
 	}
-	if got.Active {
-		t.Error("this release runs nothing per workspace, and must not say it does")
+}
+
+// The notice says what runs where for the hook resolved: every workspace at
+// pre-push whatever select says, the affected ones at pre-commit only when
+// select: affected.
+func TestResolve_WorkspacesNoticePerHook(t *testing.T) {
+	for _, tc := range []struct {
+		hook   domain.Hook
+		mode   domain.WorkspaceSelectMode
+		want   string
+		forbid string
+	}{
+		{domain.PrePush, domain.WorkspaceSelectAffected, "every discovered workspace at pre-push", "staged change"},
+		{domain.PreCommit, domain.WorkspaceSelectAffected, "staged change affects", "at pre-push"},
+		{domain.PreCommit, domain.WorkspaceSelectAll, "every discovered workspace (select: all)", "staged change"},
+	} {
+		cfg := domain.Config{
+			Workspaces:   &domain.WorkspacesConfig{Discover: []string{"js"}, Select: tc.mode},
+			PerWorkspace: map[string]domain.PerWorkspaceStep{"test": {Each: "pnpm test"}},
+		}
+		ws := Resolve(cfg, Input{Hook: tc.hook}).Workspaces
+		if !ws.Active || !strings.Contains(ws.Notice, tc.want) || strings.Contains(ws.Notice, tc.forbid) {
+			t.Errorf("%s/%s: active=%v notice %q, want it to contain %q and not %q", tc.hook, tc.mode, ws.Active, ws.Notice, tc.want, tc.forbid)
+		}
 	}
 }
 
