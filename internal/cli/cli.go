@@ -59,6 +59,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdRecipes(rest, stdout, stderr)
 	case "watch":
 		return cmdWatch(rest, stdout, stderr)
+	case "feedback":
+		return cmdFeedback(rest, stdout, stderr)
 	case "attach":
 		return cmdAttach(rest, stdout, stderr)
 	case "axi":
@@ -107,6 +109,7 @@ Usage:
   warden recipes [name]                        list / print paste-able check recipes (gitleaks, semgrep, …)
   warden watch                                 re-run the fast checks on save (dev feedback loop)
   warden watch --staged [--once]                precompute opted-in staged container checks
+  warden feedback status [--format json]        what the staged watcher last observed, with freshness
   warden attach                                watch a running gate live from another terminal
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio
