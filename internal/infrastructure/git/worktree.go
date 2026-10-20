@@ -174,7 +174,17 @@ const wardenWorktreePrefix = "warden-wt-"
 // directory under .git/worktrees, naming the process that created it and
 // the machine it ran on. Git ignores files it does not know there, and
 // removes the directory with the registration.
+//
+// Its content is "<pid>\nmachine=<proc.MachineID>\n". Earlier releases wrote
+// the host name on the second line; a repository on a volume shared between
+// machines with the same name would then read the other machine's live pid
+// as dead and remove its worktree. That form never matches the "machine="
+// prefix, so such a marker is never judged — and an older warden reading the
+// new form compares it to its host name, which it cannot equal.
 const worktreeOwnerFile = "warden-owner"
+
+// ownerMachinePrefix starts the owner marker's machine line.
+const ownerMachinePrefix = "machine="
 
 // worktreeAdminDir is the admin directory of the linked worktree at dir,
 // read from its .git file ("gitdir: <path>", relative to dir when git was
@@ -194,38 +204,39 @@ func worktreeAdminDir(dir string) (string, error) {
 	return filepath.Clean(admin), nil
 }
 
-// recordWorktreeOwner writes this process's pid and host name into the
+// recordWorktreeOwner writes this process's pid and machine id into the
 // worktree's owner marker.
 func recordWorktreeOwner(dir string) {
 	admin, err := worktreeAdminDir(dir)
 	if err != nil {
 		return
 	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
+	machine, ok := proc.MachineID()
+	if !ok {
 		return // an owner the sweep could not place on this machine
 	}
-	_ = os.WriteFile(filepath.Join(admin, worktreeOwnerFile), []byte(strconv.Itoa(os.Getpid())+"\n"+host+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(admin, worktreeOwnerFile), []byte(strconv.Itoa(os.Getpid())+"\n"+ownerMachinePrefix+machine+"\n"), 0o600)
 }
 
 // ownerGone reports whether the worktree whose admin directory is admin was
 // created by a process on this machine that has since exited. Anything it
 // cannot establish (no marker, an unreadable one, another machine's) is "not
-// gone": a worktree is only ever removed on positive evidence its run is
-// over. A recycled pid makes a dead run look alive, which keeps the worktree
+// gone", as is a marker naming its machine only by host name (written by an
+// older warden): a worktree is only ever removed on positive evidence its run
+// is over. A recycled pid makes a dead run look alive, which keeps the worktree
 // until the OS reaps its directory; it never makes a live run look dead.
 func ownerGone(admin string) bool {
 	raw, err := os.ReadFile(filepath.Join(admin, worktreeOwnerFile)) //nolint:gosec // path built from git's own admin dir
 	if err != nil {
 		return false
 	}
-	pidText, host, _ := strings.Cut(string(raw), "\n")
-	host = strings.TrimSpace(host)
+	pidText, rest, _ := strings.Cut(string(raw), "\n")
+	machine, ok := strings.CutPrefix(strings.TrimSpace(rest), ownerMachinePrefix)
 	pid, err := strconv.Atoi(strings.TrimSpace(pidText))
-	if err != nil || pid <= 0 || host == "" {
+	if err != nil || pid <= 0 || !ok || machine == "" {
 		return false
 	}
-	if self, err := os.Hostname(); err != nil || self != host {
+	if self, ok := proc.MachineID(); !ok || self != machine {
 		return false
 	}
 	return pid != os.Getpid() && !proc.Alive(pid)

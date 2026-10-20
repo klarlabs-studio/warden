@@ -14,9 +14,25 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 const sweepNonce = "0123456789abcdef0123456789abcdef"
+
+// legacyHostLabel is the owner label releases before the machine id wrote.
+const legacyHostLabel = "de.klarlabs.warden.host"
+
+// thisMachine is the machine id this test process labels and sweeps by, in a
+// config dir of the test's own.
+func thisMachine(t *testing.T) string {
+	t.Helper()
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	id, ok := proc.MachineID()
+	if !ok {
+		t.Fatal("no machine id")
+	}
+	return id
+}
 
 // exitedProcess is the pid of a process that has already exited.
 func exitedProcess(t *testing.T) int {
@@ -112,6 +128,7 @@ func TestOwnerFromName(t *testing.T) {
 // exited: never this process's, never a running owner's, never a name it
 // cannot read an owner from.
 func TestSweepCompatRemovesOnlyDeadOwners(t *testing.T) {
+	machine := thisMachine(t)
 	dead, alive := exitedProcess(t), runningProcess(t)
 	listing := strings.Join([]string{sweepName(dead), sweepName(alive), sweepName(os.Getpid()), "warden-" + sweepNonce, "someone-elses"}, "\n") + "\n"
 	calls := fakeSweepEngine(t, "podman", listing)
@@ -119,8 +136,9 @@ func TestSweepCompatRemovesOnlyDeadOwners(t *testing.T) {
 	if want := []string{sweepName(dead)}; !slices.Equal(removed, want) || !slices.Equal(removals(calls()), want) {
 		t.Fatalf("removed %v (calls %q), want %v", removed, calls(), want)
 	}
-	host, _ := os.Hostname()
-	if got := calls()[0]; got != "ps --all --filter label="+ownerHostLabel+"="+host+" --format {{.Names}}" {
+	// The engine is asked for this machine's id, never for a host name: on a
+	// shared engine a namesake machine's containers are not even listed.
+	if got := calls()[0]; got != "ps --all --filter label="+ownerMachineLabel+"="+machine+" --format {{.Names}}" {
 		t.Fatalf("listing call %q", got)
 	}
 	// Once per engine per process: a second sweep lists nothing.
@@ -131,9 +149,11 @@ func TestSweepCompatRemovesOnlyDeadOwners(t *testing.T) {
 }
 
 // Apple's CLI cannot filter by label, so the sweep reads the labels itself:
-// another machine's container, an unlabelled one, and one whose pid label
-// disagrees with its name are all left alone.
-func TestSweepAppleRemovesOnlyDeadOwnersOnThisHost(t *testing.T) {
+// another machine's container (even one with this machine's host name), one
+// labeled only with the host name earlier releases wrote, an unlabeled one,
+// and one whose pid label disagrees with its name are all left alone.
+func TestSweepAppleRemovesOnlyDeadOwnersOnThisMachine(t *testing.T) {
+	machine := thisMachine(t)
 	host, _ := os.Hostname()
 	dead, alive := exitedProcess(t), runningProcess(t)
 	entry := func(name string, labels map[string]string) string {
@@ -144,16 +164,20 @@ func TestSweepAppleRemovesOnlyDeadOwnersOnThisHost(t *testing.T) {
 		return `{"configuration":{"id":` + strconv.Quote(name) + `,"labels":{` + strings.Join(parts, ",") + `}},"status":{"state":"stopped"}}`
 	}
 	own := func(pid int) map[string]string {
-		return map[string]string{ownerPIDLabel: strconv.Itoa(pid), ownerHostLabel: host}
+		return map[string]string{ownerPIDLabel: strconv.Itoa(pid), ownerMachineLabel: machine}
+	}
+	namesake := func(pid int) map[string]string {
+		return map[string]string{ownerPIDLabel: strconv.Itoa(pid), ownerMachineLabel: strings.Repeat("f", 32), legacyHostLabel: host}
 	}
 	listing := "[" + strings.Join([]string{
 		entry(sweepName(dead), own(dead)),
 		entry(sweepName(alive), own(alive)),
 		entry(sweepName(os.Getpid()), own(os.Getpid())),
-		entry(sweepName(dead+1000000), map[string]string{ownerPIDLabel: strconv.Itoa(dead + 1000000), ownerHostLabel: "another-machine"}),
+		entry(sweepName(dead+1000000), namesake(dead+1000000)),
 		entry(sweepName(dead+2000000), nil),
-		entry(sweepName(dead+3000000), map[string]string{ownerPIDLabel: strconv.Itoa(alive), ownerHostLabel: host}),
-		entry("warden-"+sweepNonce, map[string]string{ownerHostLabel: host}),
+		entry(sweepName(dead+3000000), map[string]string{ownerPIDLabel: strconv.Itoa(alive), ownerMachineLabel: machine}),
+		entry("warden-"+sweepNonce, map[string]string{ownerMachineLabel: machine}),
+		entry(sweepName(dead+4000000), map[string]string{ownerPIDLabel: strconv.Itoa(dead + 4000000), legacyHostLabel: host}),
 	}, ",") + "]"
 	calls := fakeSweepEngine(t, "container", listing)
 	removed := SweepOrphanContainers(context.Background(), domain.ExecutionConfig{Image: "checks:dev", Runtime: "apple"})
@@ -168,6 +192,7 @@ func TestSweepAppleRemovesOnlyDeadOwnersOnThisHost(t *testing.T) {
 // An engine that is down, or answers in a shape the sweep does not know,
 // removes nothing.
 func TestSweepIgnoresUnreadableListings(t *testing.T) {
+	thisMachine(t)
 	calls := fakeSweepEngine(t, "container", "not json")
 	if removed := SweepOrphanContainers(context.Background(), domain.ExecutionConfig{Image: "checks:dev", Runtime: "apple"}); len(removed) != 0 || len(removals(calls())) != 0 {
 		t.Fatalf("removed %v from an unreadable listing", removed)
@@ -179,6 +204,7 @@ func TestSweepIgnoresUnreadableListings(t *testing.T) {
 
 // The gate's sweep runs once per process, in the background.
 func TestSweepSelectedInBackground(t *testing.T) {
+	thisMachine(t)
 	dead := exitedProcess(t)
 	calls := fakeSweepEngine(t, "nerdctl", sweepName(dead)+"\n")
 	bin, err := exec.LookPath("nerdctl")
@@ -198,11 +224,8 @@ func TestSweepSelectedInBackground(t *testing.T) {
 // Every container warden starts names its owner and carries the labels the
 // sweep reads, on both kinds of backend.
 func TestContainersCarryOwnerLabels(t *testing.T) {
-	host, err := os.Hostname()
-	if err != nil {
-		t.Skip("no host name")
-	}
-	want := []string{"--label", ownerPIDLabel + "=" + strconv.Itoa(os.Getpid()), "--label", ownerHostLabel + "=" + host}
+	machine := thisMachine(t)
+	want := []string{"--label", ownerPIDLabel + "=" + strconv.Itoa(os.Getpid()), "--label", ownerMachineLabel + "=" + machine}
 	if got := labelArgs(); !slices.Equal(got, want) {
 		t.Fatalf("label args %q, want %q", got, want)
 	}
@@ -255,5 +278,81 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// The brief's three cases on a Docker-compatible engine, where the label filter
+// is the engine's: the same host name under another machine id is never
+// swept, the same id with a dead owner is, and without an id nothing is.
+func TestSweepCompatOwnerIdentity(t *testing.T) {
+	host, _ := os.Hostname()
+	for _, c := range []struct {
+		name        string
+		labeled     func(machine string) string // the machine label the container carries
+		wantRemoved bool
+	}{
+		{"same host name, another machine", func(string) string { return strings.Repeat("f", 32) }, false},
+		{"same machine, dead owner", func(machine string) string { return machine }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			machine := thisMachine(t)
+			dead := exitedProcess(t)
+			label := ownerMachineLabel + "=" + c.labeled(machine)
+			// The fake answers like an engine honoring the filter: it lists
+			// the container only when its labels match the one asked for.
+			calls := fakeFilteringEngine(t, "docker", label, legacyHostLabel+"="+host, sweepName(dead))
+			removed := SweepOrphanContainers(context.Background(), domain.ExecutionConfig{Image: "checks:dev", Runtime: "docker"})
+			if got := len(removed) == 1 && len(removals(calls())) == 1; got != c.wantRemoved {
+				t.Fatalf("removed %v (calls %q), want removed=%v", removed, calls(), c.wantRemoved)
+			}
+		})
+	}
+	t.Run("no machine id", func(t *testing.T) {
+		blocker := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("WARDEN_CONFIG_DIR", filepath.Join(blocker, "warden"))
+		calls := fakeSweepEngine(t, "podman", sweepName(exitedProcess(t))+"\n")
+		if removed := SweepOrphanContainers(context.Background(), domain.ExecutionConfig{Image: "checks:dev", Runtime: "podman"}); len(removed) != 0 || len(calls()) != 0 {
+			t.Fatalf("swept without a machine id: removed %v, calls %q", removed, calls())
+		}
+		if labels := labelArgs(); labels != nil {
+			t.Fatalf("labels without a machine id: %q", labels)
+		}
+	})
+}
+
+// fakeFilteringEngine is a Docker-compatible CLI holding one container, name,
+// labeled with each of labels; `ps --filter label=X` lists it only when X is
+// one of them.
+func fakeFilteringEngine(t *testing.T, bin, label, otherLabel, name string) (calls func() []string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI uses POSIX shell")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+echo "$*" >> ` + shellQuote(log) + `
+case "$1" in
+ps)
+  case "$4" in
+  ` + shellQuote("label="+label) + `|` + shellQuote("label="+otherLabel) + `) echo ` + shellQuote(name) + ` ;;
+  esac ;;
+rm) exit 0 ;;
+*) exit 90 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, bin), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() []string {
+		data, err := os.ReadFile(log)
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
 	}
 }
