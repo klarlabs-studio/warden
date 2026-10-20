@@ -225,3 +225,85 @@ func TestCopyIndexKeepsTheModificationTime(t *testing.T) {
 		t.Fatalf("copy holds %q", data)
 	}
 }
+
+// gitDirEntries lists the names directly inside dir's git directory with
+// their contents' digests, so a test can see a file appear, vanish or change.
+func gitDirEntries(t *testing.T, dir string) map[string][sha256.Size]byte {
+	t.Helper()
+	gitDir := filepath.Join(dir, ".git")
+	entries, err := os.ReadDir(gitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][sha256.Size]byte{}
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			out[e.Name()] = fileSum(t, filepath.Join(gitDir, e.Name()))
+		}
+	}
+	return out
+}
+
+// Under core.splitIndex the index names a shared index file that lives in
+// the git directory, and git writes a new one there whenever a split index
+// it saves has drifted far enough from its base. The private copy must still
+// read (the snapshot is the tree git computes), and writing it must not put
+// shared index files into the repository's git directory: a reader does this
+// on every editor request.
+func TestSnapshotUnderASplitIndex(t *testing.T) {
+	// Only this repository's configuration: a global feature.manyFiles
+	// (index.skipHash) makes some git versions write a null shared index,
+	// which is that git's bug, not the case under test.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	dir := liveRepo(t)
+	gitRun(t, dir, "config", "core.splitIndex", "true")
+	gitRun(t, dir, "update-index", "--split-index")
+	gitRun(t, dir, "add", "kept") // a staged change recorded in the split part
+	shared := 0
+	for name := range gitDirEntries(t, dir) {
+		if strings.HasPrefix(name, "sharedindex.") {
+			shared++
+		}
+	}
+	if shared == 0 {
+		t.Fatal("the fixture did not produce a split index")
+	}
+	writeTestFile(t, filepath.Join(dir, "kept"), "edited again after staging\n")
+	writeTestFile(t, filepath.Join(dir, "more"), "another untracked file\n")
+	wantStaged := gitRun(t, dir, "write-tree")
+	wantLive := addAllTree(t, dir)
+	before := gitDirEntries(t, dir)
+
+	ctx := context.Background()
+	for _, tc := range []struct {
+		mode    string
+		objects Objects
+		want    string
+	}{
+		{domain.FeedbackModeStaged, DiscardObjects, wantStaged},
+		{domain.FeedbackModeLive, DiscardObjects, wantLive},
+		{domain.FeedbackModeLive, KeepObjects, wantLive},
+	} {
+		snap, err := CurrentSnapshot(ctx, dir, tc.mode, testConfig, "", tc.objects)
+		if err != nil {
+			t.Fatalf("%s snapshot under a split index: %v", tc.mode, err)
+		}
+		if snap.Tree != tc.want {
+			t.Fatalf("%s tree %s, git computes %s", tc.mode, snap.Tree, tc.want)
+		}
+		after := gitDirEntries(t, dir)
+		for name, sum := range after {
+			if old, ok := before[name]; !ok {
+				t.Fatalf("%s snapshot wrote %s into the git directory", tc.mode, name)
+			} else if old != sum {
+				t.Fatalf("%s snapshot rewrote %s in the git directory", tc.mode, name)
+			}
+		}
+		for name := range before {
+			if _, ok := after[name]; !ok {
+				t.Fatalf("%s snapshot removed %s from the git directory", tc.mode, name)
+			}
+		}
+	}
+}

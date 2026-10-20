@@ -101,6 +101,15 @@ All notable changes to warden are documented here. The format follows
   non-interactive gate run, pre-commit included, now publishes on the
   `warden attach` socket (previously only pre-push did), and a second run no
   longer removes the socket of a run still in progress.
+- **Snapshots no longer write into the git directory under a split
+  index.** The feedback reader and the live watcher compute their trees from
+  a private copy of the index. With `core.splitIndex=true` git still found
+  the shared index for that copy, but saving the copy wrote a new
+  `sharedindex.*` file into the repository's own git directory, beside the
+  real index, so `warden feedback status` could write to the repository each
+  time an editor asked. The copy is now saved unsplit, so every write stays
+  in its temporary directory; the trees were already correct and are
+  unchanged.
 
 ## [0.37.0] - 2026-10-19
 
