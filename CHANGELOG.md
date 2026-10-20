@@ -47,14 +47,40 @@ All notable changes to warden are documented here. The format follows
   `extends:` both blocks merge with child-wins semantics, `workspaces.global`
   unions so a child cannot drop a path its base marked global, and a child
   that moves a step between `commands:` and `per_workspace:` replaces the
-  base's definition. **Nothing runs per workspace yet.** `warden policy
-  explain`, `axi policy-explain` and MCP `policy_explain` show the resolved
-  configuration and say that per-workspace execution is not active, and a run
-  whose steps include one defined under `per_workspace:` says the same.
-  `warden workspaces --affected` applies the `global`, `ignore` and `unowned`
-  committed at HEAD. A repository that sets neither block loads, resolves and
+  base's definition. `warden policy explain`, `axi policy-explain` and MCP
+  `policy_explain` show the resolved configuration and say what runs where
+  (see the next entry). `warden workspaces --affected` applies the `global`,
+  `ignore` and `unowned` committed at HEAD. A repository that sets neither block loads, resolves and
   digests exactly as before. Older wardens reject both keys, so add them only after the release
   that ships them runs on every machine and CI runner.
+
+- **Preview: steps defined under `per_workspace:` run once per workspace.**
+  The block was validated and resolved, but nothing ran from it: a `test`
+  defined there still ran as the repo-wide built-in (skipped, with no command
+  configured), and a custom step defined only there failed with "define
+  commands.<step>". Such a step now fans out. An `each:` command runs once per
+  selected workspace, in its directory; a `batch:` command runs once at the
+  root with the whole selection. Every substituted name and path is
+  single-quoted, so a directory name holding `$(...)`, quotes or spaces
+  reaches the command as one literal word. At pre-commit, `select: affected`
+  runs only the workspaces the staged change affects and their dependents
+  (measured from `HEAD` to the tree the step runs against, with the selection
+  rules); every workspace runs when a rule forces full, when the configuration
+  in force differs from `HEAD`'s, or when a step whose writes are kept runs at
+  or after a per-workspace step. Pre-push runs every workspace, whatever
+  `select` says. A failing workspace fails the step and is named in the
+  message (`step test failed in workspace apps/web`); the others still run.
+  An empty selection is a skipped pass, never a check that ran. One pool,
+  sized by `workspaces.concurrency` (default half the CPUs), bounds every
+  per-workspace command of a run, so steps in a parallel batch share it
+  instead of multiplying it. Each workspace's result is a `<step>.workspace`
+  record in the evidence chain, so a pre-push note for a repo using the block
+  gains those records; notes record no workspace scope yet, and a repo
+  without `per_workspace:` writes notes exactly as before. Per-workspace steps
+  are never cached or predicted, since neither cache is keyed by the
+  selection, and a `cache:`, `predictive_cache:` or `diagnostics:` entry for
+  one is now a load error rather than a setting that silently does nothing.
+  See [monorepo mode](docs/monorepo.md).
 
 ### Fixed
 
