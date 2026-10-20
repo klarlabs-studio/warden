@@ -109,7 +109,7 @@ func TestWorkspaceStep_BatchRunsOnceWithQuotedLists(t *testing.T) {
 	t.Setenv("LOG", log)
 
 	step := NewWorkspaceStep("typecheck", domain.PerWorkspaceStep{
-		Batch: `{ printf 'pwd=%s\n' "$(pwd -P)"; printf 'p=%s\n' {workspaces.paths}; printf 'n=%s\n' {workspaces.names}; printf 'f=%s\n' {workspaces.filter}; printf 'env=%s\n' "$WARDEN_SELECTED_WORKSPACES"; } >> "$LOG"`,
+		Batch: `{ printf 'cwd=%s\n' "$(pwd -P)"; printf 'p=%s\n' {workspaces.paths}; printf 'n=%s\n' {workspaces.names}; printf 'f=%s\n' {workspaces.filter}; printf 'env=%s\n' "$WARDEN_SELECTED_WORKSPACES"; } >> "$LOG"`,
 	}, NewWorkspacePool(4), false)
 	res, err := step.Run(context.Background(), application.StepContext{WorktreeDir: dir, Selection: selectionOf(sel)})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestWorkspaceStep_BatchRunsOnceWithQuotedLists(t *testing.T) {
 	}
 	realDir, _ := filepath.EvalSymlinks(dir)
 	want := []string{
-		"pwd=" + realDir,
+		"cwd=" + realDir,
 		"p=apps/web app", "p=packages/ui",
 		"n=web", "n=@acme/ui",
 		"f=--filter=web", "f=--filter=@acme/ui",
