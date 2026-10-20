@@ -86,6 +86,7 @@ Each commit in the range is classified, and the gate fails on the first problem:
 | `unsigned` | `require-signed`/`key` was set but the note is unsigned or its signature does not verify |
 | `untrusted` | the signature verifies but the signer is not in the pinned `key` set |
 | `profile` | the note is sound but does not conform to a required [compliance profile](agent-profiles.md#checking-a-profile-across-a-range): the base ref's `profile:`, or `min-profile`; `profile_failures` names each clause |
+| `affected-scope` | the note is sound but attests an [affected-scope monorepo run](monorepo.md#how-verifiers-treat-a-partial-record): per-workspace checks ran only for the workspaces a change affected. Refused by default. A commit inside such a note's push span gets the same reason, with `covered_by` naming the note |
 
 - Default (no `key`, `require-signed: false`): every commit must carry an
   **intact, commit-bound** note. This already rejects `missing` and
@@ -329,6 +330,12 @@ It emits an in-toto `Statement/v1` with a warden predicate
 chain, SBOM, signer, and verification status. It is a read-only projection —
 warden attests *source* provenance (reviewed/tested under policy), which is why
 the predicate is warden's own and not `slsa.dev/provenance` (build provenance).
+
+A note of an [affected-scope monorepo run](monorepo.md#how-verifiers-treat-a-partial-record)
+carries its signed `scope` in the predicate, with `verification.fullScope:
+false`. Its `--predicate vsa` form is `FAILED`, as `warden verify` refuses it,
+and its levels are `WARDEN_SOURCE_AFFECTED_GATED`, `…_SIGNED` and `…_TRUSTED`,
+never `WARDEN_SOURCE_GATED` or a level built on it.
 
 ## GitLab
 

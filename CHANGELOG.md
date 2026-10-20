@@ -56,6 +56,34 @@ All notable changes to warden are documented here. The format follows
   digests exactly as before. Older wardens reject both keys, so add them only after the release
   that ships them runs on every machine and CI runner.
 
+- **Verifiers refuse a partial monorepo check before any warden writes one.**
+  Monorepo mode will let a push run per-workspace checks for only the
+  workspaces a change affects, and record that in the signed note as an
+  `affected` scope. Such a record claims less than a full run, and a verifier
+  that did not know the difference would have read it as a full validation.
+  This release is the reader side, shipped first so your verifiers are ready
+  before any warden writes a scope. Nothing writes one yet, and notes without
+  a scope (every note today) verify exactly as before. A note whose scope is
+  not full is now refused by default everywhere: `warden verify` exits 1 with
+  `affected-scope` and names the scope (`affected: test[3/12 workspaces]`);
+  `verify --range` fails the commit with reason `affected-scope`, and the
+  commits its push span covers fail with the same reason instead of reading
+  as `--no-verify` pushes; `--requirements` refuses it before comparing any
+  contract; it conforms to no compliance profile (the `@1` definitions are
+  unchanged); `attest --predicate vsa` reports it `FAILED` with
+  `WARDEN_SOURCE_AFFECTED_*` levels, never `WARDEN_SOURCE_GATED`; and
+  `reattest` carries the scope unchanged, so the relocated note stays refused.
+  `why`, `axi verify` and the MCP `verify` tool show the scope. A scope this
+  warden cannot read as full (an unknown kind, a newer selection version, a
+  sparse checkout) counts as partial. The scope is inside the signature:
+  deleting it or relabelling it `full` breaks the signature, and an older
+  warden that pins a key refuses any scoped note for the same reason. An older
+  warden verifying without a key would accept one, so upgrade verifiers first
+  and pin a key wherever a verdict skips work. `warden why` also stopped
+  calling the chain of an intact note `BROKEN` when the note was refused only
+  for its kind (an external run) or its scope. See
+  [monorepo mode](docs/monorepo.md#how-verifiers-treat-a-partial-record).
+
 ### Fixed
 
 - **Signed dependency drift describes the commit's lockfiles.** Drift was
