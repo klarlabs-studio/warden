@@ -95,6 +95,9 @@ in the repository removes the worktrees, directory and registration both,
 whose creator on this machine has exited. A worktree it cannot judge (another
 machine's, or one an older warden created) is left alone until its directory
 is gone.
+The killed run's container is labeled with its owner the same way, and a
+watcher removes such containers when it starts (see
+[container execution](container-execution.md#scope-and-isolation)).
 
 ## Freshness
 

@@ -99,6 +99,7 @@ func runAppleContainer(ctx context.Context, sc application.StepContext, dir, nam
 		return nil, fmt.Errorf("missing inspected Apple image identity")
 	}
 	args := []string{"create", "--name", name, "--cap-drop", "ALL", "--platform", env.Platform, "--mount", "type=bind,source=" + dir + ",target=/workspace", "--workdir", "/workspace", "--entrypoint", "/bin/sh"}
+	args = append(args, labelArgs()...)
 	if env.Network == "none" {
 		args = append(args, "--network", "none", "--no-dns")
 	} else {

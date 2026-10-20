@@ -130,6 +130,20 @@ func TestShellContainerBoundary(t *testing.T) {
 	if strings.Contains(joined, "must-not-enter-container") || strings.Contains(joined, "docker.sock") {
 		t.Fatal("host credential or engine socket exposed")
 	}
+	// The owner labels and name a later sweep reads (container_sweep.go).
+	labels := labelArgs()
+	for i := 0; i+1 < len(labels); i += 2 {
+		if !containsPair(args, labels[i], labels[i+1]) {
+			t.Fatalf("run lacks %s %s: %q", labels[i], labels[i+1], args)
+		}
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--name" {
+			if pid, ok := ownerFromName(args[i+1]); !ok || pid != os.Getpid() {
+				t.Fatalf("container name %q does not name this process", args[i+1])
+			}
+		}
+	}
 	markers, err := filepath.Glob(filepath.Join(sc.WorktreeDir, ".warden-container-*"))
 	if err != nil || len(markers) != 0 {
 		t.Fatal("marker leaked", markers, err)

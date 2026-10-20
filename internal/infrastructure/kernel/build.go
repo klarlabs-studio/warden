@@ -54,6 +54,8 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	if err != nil {
 		return nil, err
 	}
+	// Remove what killed runs left on the engine this run uses.
+	steps.SweepSelectedInBackground(container)
 	sc.Container = container
 
 	var actions []*axidomain.ActionDefinition

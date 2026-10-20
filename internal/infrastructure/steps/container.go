@@ -172,7 +172,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, err
 	}
 	nonce := hex.EncodeToString(token)
-	name := "warden-" + nonce
+	name := containerName(nonce)
 	marker := ".warden-container-" + nonce
 	if err := os.WriteFile(filepath.Join(dir, marker), []byte(nonce), 0o600); err != nil {
 		return nil, err
@@ -200,6 +200,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, fmt.Errorf("container execution has no inspected image reference to run")
 	}
 	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
+	args = append(args, labelArgs()...)
 	args = append(args, compatUserArgs(selected, os.Getuid(), os.Getgid())...)
 	// Only Warden's explicit step inputs cross the boundary. In particular, do
 	// not inherit PATH, credentials, or host absolute build-cache locations.

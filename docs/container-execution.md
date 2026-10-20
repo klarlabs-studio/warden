@@ -173,6 +173,19 @@ the actual worktree, including when the CLI selects a VM or remote context.
 The context must support accessing that path; a missing or incorrect mount
 fails the check.
 
+Every container is named `warden-<pid>-<nonce>` and labeled
+`de.klarlabs.warden.pid=<pid>` and `de.klarlabs.warden.host=<host name>`,
+naming the warden process that started it and the machine it ran on. A
+process killed outright (SIGKILL, a CI timeout) never removes its container:
+Docker-compatible engines remove it once its command ends (`--rm`), but
+Apple's removal is a step the killed process never reaches. `warden watch`
+removes such leftovers when it starts, and a gate run does the same in the
+background for the engine it selected: containers labeled with this host
+name whose owning process has exited. A container without those labels,
+labeled by another machine, or whose owner is still running is never
+touched. The same applies to a container whose deletion failed after its
+check finished; it is removed once its owner has exited.
+
 Native Git steps, credential inspection, coding-agent integrations, and
 `warden-step-*` subprocess plugins continue to execute on the host. Git's shared
 metadata is not mounted, so commands that require the worktree's external Git

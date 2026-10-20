@@ -304,12 +304,16 @@ func gitTryAt(dir string, args ...string) (string, int) {
 
 // Scenario 6. A watcher killed mid-run leaves "running" in the document. The
 // reader must report producer_gone; a new watcher must take the lock over;
-// and no stale warden worktree registration may remain after the next run.
+// and no stale warden worktree registration, and no container of the killed
+// run, may remain after the next run.
 //
 // The killed run's deferred teardown never runs, so its worktree directory
-// and registration survive the SIGKILL. The directory alone cannot tell a
+// and registration survive the SIGKILL, and so does its container: Apple's
+// removal is an explicit step the killed process never reaches (Docker's
+// --rm removes it once its command ends). The directory alone cannot tell a
 // dead run's worktree from a concurrent live one, but the owner recorded when
-// it was created can: the restarted watcher's first run prunes it.
+// it was created can, and the container's name and labels name its owner: the
+// restarted watcher removes both.
 func TestGoldenFleet_FeedbackAfterAWatcherCrash(t *testing.T) {
 	image, engine, cli := feedbackEngine(t)
 	g := feedbackRepo(t, image, engine, `sleep 5 && test "$(cat sample)" = good`)
@@ -322,6 +326,14 @@ func TestGoldenFleet_FeedbackAfterAWatcherCrash(t *testing.T) {
 		s, ok := testStep(d)
 		return ok && s.Status == domain.FeedbackStepRunning
 	})
+	// Kill it once its container exists, so the kill leaves one behind.
+	deadline := time.Now().Add(60 * time.Second)
+	for len(containersOf(t, engine, cli, first.Process.Pid)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the first watcher's container never appeared")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if err := first.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -329,11 +341,10 @@ func TestGoldenFleet_FeedbackAfterAWatcherCrash(t *testing.T) {
 	if got := feedbackStatus(t, g.dir); got.Freshness != domain.FreshnessProducerGone || got.State != domain.FeedbackRunning {
 		t.Fatalf("after SIGKILL: state %q freshness %q", got.State, got.Freshness)
 	}
-	// The killed run's container finishes its `sleep` on its own. Let it, so
-	// the restarted watcher's container does not compete with it: under that
-	// contention Apple's cleanup can time out, which is a runtime matter, not
-	// what this scenario is about.
-	waitForNoWardenContainers(t, engine, cli)
+	leaked := containersOf(t, engine, cli, first.Process.Pid)
+	if engine == "apple" && len(leaked) != 1 {
+		t.Fatalf("the killed run should leave exactly its own container: %v", leaked)
+	}
 	orphans := wardenWorktrees(t, g.dir)
 	if len(orphans) != 1 {
 		t.Fatalf("the killed run should leave exactly its own worktree: %v", orphans)
@@ -357,6 +368,12 @@ func TestGoldenFleet_FeedbackAfterAWatcherCrash(t *testing.T) {
 	if _, err := os.Stat(orphans[0]); !os.IsNotExist(err) {
 		t.Fatalf("the killed run's worktree directory survived the next run: %v", err)
 	}
+	if left := containersOf(t, engine, cli, first.Process.Pid); len(left) != 0 {
+		t.Fatalf("the killed run's container survived the restart: %v\nwatcher:\n%s", left, out.String())
+	}
+	if len(leaked) > 0 && !strings.Contains(out.String(), leaked[0]) {
+		t.Fatalf("the restarted watcher did not say it removed %s:\n%s", leaked[0], out.String())
+	}
 	_ = second.Process.Signal(os.Interrupt)
 	_ = second.Wait()
 }
@@ -378,26 +395,26 @@ func waitForNoWardenWorktrees(t *testing.T, dir string) {
 	}
 }
 
-// waitForNoWardenContainers waits until the engine lists no running warden
-// container.
-func waitForNoWardenContainers(t *testing.T, engine, cli string) {
+// containersOf lists every container, running or stopped, that the warden
+// process pid started: warden names them warden-<pid>-<nonce>.
+func containersOf(t *testing.T, engine, cli string, pid int) []string {
 	t.Helper()
-	list := []string{"ps"}
+	list := []string{"ps", "--all", "--format", "{{.Names}}"}
 	if engine == "apple" {
-		list = []string{"list"}
+		list = []string{"list", "--all", "--quiet"}
 	}
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		out, err := exec.Command(cli, list...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%s %v: %v %s", cli, list, err, out)
-		}
-		if !strings.Contains(string(out), "warden-") {
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
+	out, err := exec.Command(cli, list...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v: %v %s", cli, list, err, out)
 	}
-	t.Fatal("the killed run's container is still running")
+	prefix := fmt.Sprintf("warden-%d-", pid)
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if name := strings.TrimSpace(line); strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // wardenWorktrees lists the registered worktrees warden created.

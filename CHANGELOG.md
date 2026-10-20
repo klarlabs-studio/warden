@@ -137,6 +137,19 @@ All notable changes to warden are documented here. The format follows
   that created it, and the next run removes those whose creator on this
   machine has exited. A worktree created on another machine or by an older
   warden is still only pruned once its directory is gone.
+- **A killed run's container is removed by the next run.** A watcher or
+  hook killed outright (SIGKILL, a CI timeout) never removed the container
+  its check was running in. Docker-compatible engines remove it once its
+  command ends (`--rm`), but Apple's runtime removes containers in an
+  explicit step the killed process never reaches, so each crash left one
+  behind for good. Every container warden starts is now named
+  `warden-<pid>-<nonce>` and labeled `de.klarlabs.warden.pid` and
+  `de.klarlabs.warden.host`. `warden watch` removes, when it starts, the
+  containers labeled with this machine's host name whose owning process has
+  exited, and a gate run does the same in the background for the engine it
+  selected. A container without the labels, one from another machine, and
+  one whose owner is still running are never touched. Containers left by
+  releases before this one carry no labels and are not removed.
 
 ## [0.37.0] - 2026-10-19
 
