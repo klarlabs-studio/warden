@@ -380,3 +380,110 @@ func TestSigningPayload_AgentBoundaryObservationsAreSigned(t *testing.T) {
 		})
 	}
 }
+
+// preScopeVerify verifies a note the way a warden from before monorepo mode
+// does: it decodes into a struct with every RunRecord field EXCEPT Scope —
+// built by reflection from RunRecord itself, so it cannot drift from the real
+// struct in any other way — recomputes the signing payload from that, and
+// checks the ed25519 signature over it.
+func preScopeVerify(t *testing.T, note []byte) bool {
+	t.Helper()
+	rt := reflect.TypeOf(RunRecord{})
+	fields := make([]reflect.StructField, 0, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		if f := rt.Field(i); f.Name != "Scope" {
+			fields = append(fields, reflect.StructField{Name: f.Name, Type: f.Type, Tag: f.Tag})
+		}
+	}
+	if len(fields) != rt.NumField()-1 {
+		t.Fatal("RunRecord has no Scope field; update this test")
+	}
+	old := reflect.New(reflect.StructOf(fields))
+	if err := json.Unmarshal(note, old.Interface()); err != nil {
+		t.Fatal(err)
+	}
+	v := old.Elem()
+	sig := v.FieldByName("Signature").String()
+	pub := v.FieldByName("PublicKey").String()
+	v.FieldByName("Signature").SetString("")
+	v.FieldByName("CarriedOriginal").Set(reflect.Zero(v.FieldByName("CarriedOriginal").Type()))
+	payload, err := json.Marshal(old.Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verifyEd25519Signature(pub, sig, payload)
+}
+
+// A note without a scope must be byte-identical to one written before the
+// field existed, so it still verifies for a warden that predates it. If someone
+// drops the omitempty, every note in every repo stops verifying for pinned
+// older verifiers at once.
+func TestSigningPayload_UnscopedNoteVerifiesForAPreScopeWarden(t *testing.T) {
+	rec := sampleRecord()
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), `"scope"`) {
+		t.Fatalf("an unscoped payload must not mention scope: %s", payload)
+	}
+	if !preScopeVerify(t, signedNote(t, rec)) {
+		t.Fatal("an unscoped note must verify for a warden that predates the scope field")
+	}
+}
+
+// The scope cannot be stripped by a reader that does not know it. An older
+// warden that pins a key drops the field, recomputes a different payload and
+// fails the signature, so it refuses an affected note instead of reading it as
+// the full run it is not. A full scope fails the same way: an older verifier
+// cannot tell the two apart, so it must not accept either.
+func TestSigningPayload_ScopedNoteFailsAPreScopeWarden(t *testing.T) {
+	for name, scope := range map[string]*RunScope{"affected": affectedScope(), "full": fullScope()} {
+		t.Run(name, func(t *testing.T) {
+			rec := sampleRecord()
+			rec.Scope = scope
+			note := signedNote(t, rec)
+			var current RunRecord
+			if err := json.Unmarshal(note, &current); err != nil {
+				t.Fatal(err)
+			}
+			if !current.VerifySignature() {
+				t.Fatal("precondition: the current warden verifies its own scoped note")
+			}
+			if preScopeVerify(t, note) {
+				t.Errorf("a pre-scope warden verified a note carrying a %s scope; it must fail closed", name)
+			}
+		})
+	}
+}
+
+// Every part of the scope is covered by the signature: removing it, relabelling
+// an affected run as full, or widening what a step ran for all break it.
+func TestSigningPayload_ScopeIsCoveredByTheSignature(t *testing.T) {
+	rec := sampleRecord()
+	rec.Scope = affectedScope()
+	var signed RunRecord
+	if err := json.Unmarshal(signedNote(t, rec), &signed); err != nil {
+		t.Fatal(err)
+	}
+	if !signed.VerifySignature() {
+		t.Fatal("precondition: the signed affected note verifies")
+	}
+	for name, edit := range map[string]func(*RunRecord){
+		"scope stripped":  func(r *RunRecord) { r.Scope = nil },
+		"relabelled full": func(r *RunRecord) { s := *r.Scope; s.Kind = SelectionFull; r.Scope = &s },
+		"step selection grew": func(r *RunRecord) {
+			s := *r.Scope
+			s.Steps = map[StepName]StepScope{"test": {Selected: s.Workspaces}}
+			r.Scope = &s
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			edited := signed
+			edit(&edited)
+			if edited.VerifySignature() {
+				t.Errorf("a note with its %s still verifies", name)
+			}
+		})
+	}
+}
