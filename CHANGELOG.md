@@ -6,6 +6,20 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-20
+
+A minor release that completes background feedback. The watcher now writes a
+versioned status document that editors and agents read through
+`warden feedback status` (JSON, SARIF or `file:line` problems) and the
+read-only MCP `feedback_status` tool, and the reader says whether the results
+still describe the worktree. `warden watch` now runs in repositories that use
+container execution, both staged and live, and re-checks when the configured
+image moves. A failing check can point at its problems through an opt-in
+SARIF report (`diagnostics:`). Crashed runs no longer leave containers or
+worktrees behind. The feedback document is advisory: the gate, `verify`,
+notes and predictions never read it. `diagnostics:` is a new configuration
+key, so upgrade every machine and CI runner before adding it.
+
 ### Added
 
 - **Editors can read what the staged watcher saw.** The watcher's results
