@@ -102,7 +102,7 @@ jobs:
             *)   echo "::error::unexpected HTTP $code from the tap repo." ; exit 1 ;;
           esac
 
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           # Exact, not a range. A release is the artifact that most needs to be
           # reproducible from what this file says.
@@ -207,7 +207,7 @@ jobs:
       # floor moved to 1.27, warden targets 1.26, setup-go pins GOTOOLCHAIN=local
       # — and the npm channel silently did not publish while every other channel
       # did. AGENTS.md already records this shape from the nox install step.
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           # The SAME exact version the release job uses. This job builds the
           # binaries that npm users install, so a floating range here means the
