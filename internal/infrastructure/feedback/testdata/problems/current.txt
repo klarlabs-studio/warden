@@ -1,0 +1,8 @@
+warden: feedback complete, current (staged, branch feat/x): 3 failed, 1 passed, 1 cached, 1 skipped
+warden: watcher: staged checks failed: lint, test, vet
+cmd/main.go:12: error: [lint/errcheck] Error return value is not checked
+internal/cfg dir/cfg.go:7: warning: [lint/SA1019] deprecated call
+util.go:3: info: [lint] consider a shorter name
+warden: test failed: test failed (exit 1)
+.warden.yaml:4: error: [test/config-anchor] test failed: test failed (exit 1)
+warden: vet failed: vet failed

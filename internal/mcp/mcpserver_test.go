@@ -66,6 +66,9 @@ type fakeFacade struct {
 
 	status    StatusOutput
 	statusErr error
+
+	feedback    FeedbackStatusOutput
+	feedbackErr error
 }
 
 func (f *fakeFacade) PolicyExplain(hook domain.Hook, branch string, paths []string) (domain.ResolvedPolicy, error) {
@@ -154,13 +157,15 @@ func (f *fakeFacade) Audit(branch string) (domain.AuditReport, error) {
 
 func (f *fakeFacade) Status() (StatusOutput, error) { return f.status, f.statusErr }
 
+func (f *fakeFacade) FeedbackStatus() (FeedbackStatusOutput, error) { return f.feedback, f.feedbackErr }
+
 func TestNewServer_BuildsWithoutPanic(t *testing.T) {
 	srv := NewServer(&fakeFacade{}, "1.2.3", AllowAllRuns)
 	if srv == nil {
 		t.Fatal("NewServer returned nil")
 	}
 	// Every documented tool must be registered, including the not-supported stubs.
-	for _, name := range []string{"policy_explain", "steps_list", "run_trigger", "run_respond", "run_status"} {
+	for _, name := range []string{"policy_explain", "steps_list", "run_trigger", "run_respond", "run_status", "feedback_status"} {
 		if _, ok := srv.GetTool(name); !ok {
 			t.Errorf("tool %q not registered", name)
 		}

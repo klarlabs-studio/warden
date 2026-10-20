@@ -1,0 +1,73 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "warden",
+          "version": "0.38.0",
+          "informationUri": "https://github.com/klarlabs-studio/warden"
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": false,
+          "toolExecutionNotifications": [
+            {
+              "descriptor": {
+                "id": "warden/state"
+              },
+              "level": "note",
+              "message": {
+                "text": "container execution unavailable: Cannot connect to the Docker daemon; retrying in 10s"
+              }
+            },
+            {
+              "descriptor": {
+                "id": "warden/blocked"
+              },
+              "level": "error",
+              "message": {
+                "text": "lint could not run (environment: its toolchain or dependencies are not installed): lint could not run: its toolchain or dependencies are not installed"
+              }
+            }
+          ]
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///abs/my%20checkout/"
+        }
+      },
+      "results": [],
+      "properties": {
+        "warden": {
+          "schema": "warden.feedback/v1",
+          "mode": "staged",
+          "state": "blocked",
+          "freshness": "current",
+          "diagnostics": true,
+          "message": "container execution unavailable: Cannot connect to the Docker daemon; retrying in 10s",
+          "snapshot": {
+            "id": "sha256:eea93570d12284473d76e98248e7022660c338e70a2e21998b0e821c401011a5",
+            "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "branch": "feat/x",
+            "configuration_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "evaluated_at": null,
+          "steps": [
+            {
+              "step": "lint",
+              "status": "fail",
+              "summary": "lint could not run: its toolchain or dependencies are not installed",
+              "blocker": "environment"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import (
 // consuming it spends ~40% fewer tokens on the uniform result shapes.
 func cmdAxi(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		_, _ = fmt.Fprintln(stderr, "usage: warden axi <verify|verify-range|doctor|audit|status|policy-explain|steps|run-trigger> [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: warden axi <verify|verify-range|doctor|audit|status|feedback|policy-explain|steps|run-trigger> [flags]")
 		return 2
 	}
 	verb, rest := args[0], args[1:]
@@ -45,6 +45,8 @@ func cmdAxi(args []string, stdout, stderr io.Writer) int {
 		return axiAuditReport(f.Audit, rest, stdout, stderr)
 	case "status":
 		return axiStatus(f, stdout, stderr)
+	case "feedback":
+		return axiFeedback(f, rest, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "warden axi: unknown verb %q\n", verb)
 		return 2

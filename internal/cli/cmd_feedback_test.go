@@ -54,7 +54,7 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 }
 
 func TestFeedbackStatusInvocation(t *testing.T) {
-	for _, args := range [][]string{nil, {"show"}, {"status", "--format", "sarif"}, {"status", "extra"}, {"status", "--nope"}} {
+	for _, args := range [][]string{nil, {"show"}, {"status", "--format", "xml"}, {"status", "extra"}, {"status", "--nope"}} {
 		var out, errb bytes.Buffer
 		if code := cmdFeedback(args, &out, &errb); code != 2 {
 			t.Errorf("%v: exit %d %s", args, code, errb.String())

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "warden",
+          "version": "0.38.0",
+          "informationUri": "https://github.com/klarlabs-studio/warden"
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-10-20T09:00:25Z",
+          "toolExecutionNotifications": [
+            {
+              "descriptor": {
+                "id": "warden/freshness"
+              },
+              "level": "warning",
+              "message": {
+                "text": "producer_gone: the watcher that wrote these results stopped without finishing; diagnostics are withheld until `warden watch --staged` runs again"
+              }
+            },
+            {
+              "descriptor": {
+                "id": "warden/state"
+              },
+              "level": "note",
+              "message": {
+                "text": "staged checks failed: lint, test, vet"
+              }
+            }
+          ]
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///abs/my%20checkout/"
+        }
+      },
+      "results": [],
+      "properties": {
+        "warden": {
+          "schema": "warden.feedback/v1",
+          "mode": "staged",
+          "state": "complete",
+          "freshness": "producer_gone",
+          "diagnostics": false,
+          "message": "staged checks failed: lint, test, vet",
+          "snapshot": {
+            "id": "sha256:eea93570d12284473d76e98248e7022660c338e70a2e21998b0e821c401011a5",
+            "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "branch": "feat/x",
+            "configuration_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "evaluated_at": "2026-10-20T09:00:25Z",
+          "steps": [
+            {
+              "step": "lint",
+              "status": "fail",
+              "summary": "lint failed"
+            },
+            {
+              "step": "test",
+              "status": "fail",
+              "summary": "test failed (exit 1)"
+            },
+            {
+              "step": "vet",
+              "status": "fail",
+              "summary": "vet failed"
+            },
+            {
+              "step": "format",
+              "status": "pass",
+              "summary": "format passed; staged prediction saved"
+            },
+            {
+              "step": "security-scan",
+              "status": "cached",
+              "summary": "security-scan (cached — staged prediction matched)"
+            },
+            {
+              "step": "review",
+              "status": "skipped",
+              "summary": "review: no command configured, skipped"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

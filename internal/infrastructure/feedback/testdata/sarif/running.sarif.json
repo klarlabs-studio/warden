@@ -1,0 +1,81 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "warden",
+          "version": "0.38.0",
+          "informationUri": "https://github.com/klarlabs-studio/warden",
+          "rules": [
+            {
+              "id": "step/exit"
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///abs/my%20checkout/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "step/exit",
+          "kind": "fail",
+          "level": "error",
+          "message": {
+            "text": "--- FAIL: TestX (0.00s)\n    x_test.go:9: want 1, got 2\nFAIL"
+          },
+          "properties": {
+            "step": "test",
+            "source": "output",
+            "severity": "high",
+            "located": false
+          }
+        }
+      ],
+      "properties": {
+        "warden": {
+          "schema": "warden.feedback/v1",
+          "mode": "staged",
+          "state": "running",
+          "freshness": "current",
+          "diagnostics": true,
+          "snapshot": {
+            "id": "sha256:eea93570d12284473d76e98248e7022660c338e70a2e21998b0e821c401011a5",
+            "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "branch": "feat/x",
+            "configuration_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "evaluated_at": null,
+          "steps": [
+            {
+              "step": "test",
+              "status": "fail",
+              "summary": "test failed (exit 1)"
+            },
+            {
+              "step": "lint",
+              "status": "running",
+              "summary": ""
+            },
+            {
+              "step": "vet",
+              "status": "pending",
+              "summary": ""
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

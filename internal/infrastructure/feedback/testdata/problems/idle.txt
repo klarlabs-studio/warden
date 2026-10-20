@@ -1,0 +1,2 @@
+warden: feedback idle, current (staged, branch (unborn)): no steps
+warden: watcher: nothing staged

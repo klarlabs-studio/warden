@@ -23,6 +23,23 @@ All notable changes to warden are documented here. The format follows
   One watcher writes per worktree: a second one exits 75 and names the pid
   holding the lock, and a crashed watcher's lock is taken over. See
   [background feedback](docs/background-feedback.md).
+- **Editors and agents can show the staged watcher's results.** The
+  document could only be printed as JSON, so an editor needed a plugin to turn
+  it into diagnostics, and agents had no way to ask for it.
+  `warden feedback status --format problems` prints
+  `file:line: severity: [step/rule] message` lines for findings that name a
+  location, and `warden: <step> failed: <summary>` for a failure that has
+  none. Such a failure is also anchored to the line of `.warden.yaml` (or the
+  `extends:` file) that declares its command, marked `config-anchor`; the
+  JSON never gains that location. `--format sarif` exports a SARIF 2.1.0 log
+  in which a finding warden has no location for keeps none, and a step the
+  machine stopped is a notification, not a result. Both formats state
+  freshness and withhold results that no longer describe the worktree
+  (`stale_snapshot`, `stale_environment`, `producer_gone`), so an editor never
+  shows old diagnostics as current. Agents read the same reader through the
+  read-only MCP tool `feedback_status` and `warden axi feedback`. The docs
+  give a VS Code problem matcher and a Vim `errorformat` for the format; see
+  [background feedback](docs/background-feedback.md#editor-recipes).
 
 ### Fixed
 

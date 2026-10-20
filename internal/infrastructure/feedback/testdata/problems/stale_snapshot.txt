@@ -1,0 +1,3 @@
+warden: feedback complete, stale_snapshot (staged, branch feat/x): 3 failed, 1 passed, 1 cached, 1 skipped
+warden: stale_snapshot: the staged tree, HEAD, branch or configuration changed since these results were observed; diagnostics are withheld until the watcher checks the worktree again
+warden: watcher: staged checks failed: lint, test, vet

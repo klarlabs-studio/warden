@@ -28,11 +28,12 @@ func TestUnavailableFacade_EveryToolExplainsItself(t *testing.T) {
 			_, err := u.RunTriggerStreaming(context.Background(), domain.PrePush, func(mcpserver.StepProgress) {})
 			return err
 		},
-		"Verify":      func() error { _, err := u.Verify("HEAD", nil); return err },
-		"VerifyRange": func() error { _, err := u.VerifyRange("a", "b", mcpserver.RangeVerifyRequest{}); return err },
-		"Doctor":      func() error { _, err := u.Doctor("main"); return err },
-		"Audit":       func() error { _, err := u.Audit("main"); return err },
-		"Status":      func() error { _, err := u.Status(); return err },
+		"Verify":         func() error { _, err := u.Verify("HEAD", nil); return err },
+		"VerifyRange":    func() error { _, err := u.VerifyRange("a", "b", mcpserver.RangeVerifyRequest{}); return err },
+		"Doctor":         func() error { _, err := u.Doctor("main"); return err },
+		"Audit":          func() error { _, err := u.Audit("main"); return err },
+		"Status":         func() error { _, err := u.Status(); return err },
+		"FeedbackStatus": func() error { _, err := u.FeedbackStatus(); return err },
 	}
 
 	for name, call := range calls {
