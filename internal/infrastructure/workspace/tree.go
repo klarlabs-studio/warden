@@ -121,9 +121,10 @@ func joinPath(dir, name string) string {
 //
 // The graph is validated before it is returned. A manifest that produces an
 // invalid workspace (a name outside the allowed characters, two workspaces at
-// one path or under one name, a dependency cycle) is an error naming the
-// problem; discovery never drops a workspace to make the graph valid, because
-// a workspace nobody knows about is a workspace nobody checks.
+// one path or under one name) is an error naming the problem; discovery never
+// drops a workspace to make the graph valid, because a workspace nobody knows
+// about is a workspace nobody checks. Dependency cycles are not invalid and
+// are returned as discovered.
 func Discover(src Source) (domain.WorkspaceGraph, error) {
 	files := newFileSet(src)
 	js, err := discoverJS(src, files)

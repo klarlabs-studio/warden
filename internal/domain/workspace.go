@@ -68,10 +68,17 @@ type canonicalWorkspaceGraph struct {
 // workspace would quietly shrink what a check covers.
 //
 // It refuses: an invalid name or path, two workspaces with the same name or
-// path, a dependency on a path that is not a workspace, and a dependency
-// cycle. Nested workspaces (including the root, ".") are allowed: a path
-// belongs to the workspace with the longest path containing it, the way
-// go.work modules and nested JS packages own their own directories.
+// path, and a dependency on a path that is not a workspace. Nested workspaces
+// (including the root, ".") are allowed: a path belongs to the workspace with
+// the longest path containing it, the way go.work modules and nested JS
+// packages own their own directories.
+//
+// Dependency cycles, a self-dependency included, are allowed too. Real
+// monorepos have them (two packages that devDepend on each other, Go modules
+// that require each other), and nothing over the graph needs an order:
+// selection is a reverse-dependency closure, which on a cycle simply selects
+// every member when any one is affected. Code that walks the graph must
+// therefore keep a visited set rather than assume it terminates.
 func (g WorkspaceGraph) Validate() error {
 	byPath := make(map[string]Workspace, len(g.Workspaces))
 	byName := make(map[string]string, len(g.Workspaces))
@@ -95,7 +102,7 @@ func (g WorkspaceGraph) Validate() error {
 			}
 		}
 	}
-	return checkWorkspaceCycles(g.dependencyMap())
+	return nil
 }
 
 func (w Workspace) validate() error {
@@ -140,54 +147,6 @@ func ValidateWorkspacePath(p string) error {
 		}
 		if strings.HasPrefix(elem, "-") {
 			return fmt.Errorf("workspace path %q has an element starting with '-'", p)
-		}
-	}
-	return nil
-}
-
-func (g WorkspaceGraph) dependencyMap() map[string][]string {
-	deps := make(map[string][]string, len(g.Workspaces))
-	for _, w := range g.Workspaces {
-		deps[w.Path] = sortedUnique(w.Deps)
-	}
-	return deps
-}
-
-// checkWorkspaceCycles refuses a dependency cycle (a self-dependency is the
-// shortest one), naming every workspace on it.
-func checkWorkspaceCycles(deps map[string][]string) error {
-	const (
-		unvisited = iota
-		active
-		done
-	)
-	state := make(map[string]int, len(deps))
-	var stack []string
-	var visit func(string) error
-	visit = func(n string) error {
-		state[n] = active
-		stack = append(stack, n)
-		for _, d := range deps[n] {
-			switch state[d] {
-			case active:
-				start := indexOf(stack, d)
-				cycle := append(append([]string{}, stack[start:]...), d)
-				return fmt.Errorf("workspace dependency cycle: %s", strings.Join(cycle, " -> "))
-			case unvisited:
-				if err := visit(d); err != nil {
-					return err
-				}
-			}
-		}
-		stack = stack[:len(stack)-1]
-		state[n] = done
-		return nil
-	}
-	for _, n := range sortedKeys(deps) {
-		if state[n] == unvisited {
-			if err := visit(n); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

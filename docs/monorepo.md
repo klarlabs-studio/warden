@@ -112,7 +112,12 @@ package without a `name`, a `go.work` `use` outside the repository or without
 a `go.mod`, a workspace name with characters outside letters, digits, `.`,
 `_`, `~`, `-` and `/` (plus a leading `@scope/`), two workspaces with one name
 or directory (including a directory that is both a JS workspace and a Go
-module), and a dependency cycle between workspaces.
+module).
+
+Dependency cycles between workspaces are fine. Two packages that list each
+other in `devDependencies`, or Go modules that require each other, form a
+cycle, and a change to any workspace on it selects every workspace on it,
+plus everything that depends on them.
 
 ## What a selection does not cover
 

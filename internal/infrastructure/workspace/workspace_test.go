@@ -249,6 +249,37 @@ func TestDiscover_MalformedManifestsAreErrors(t *testing.T) {
 	}
 }
 
+// Dependency cycles are common in real monorepos and are not an error: a JS
+// devDependency cycle and a Go require cycle are discovered as they are.
+func TestDiscover_Cycles(t *testing.T) {
+	t.Run("JS devDependency cycle and self-dependency", func(t *testing.T) {
+		got := mustDiscover(t, memTree{
+			"package.json":   `{"workspaces":["*"]}`,
+			"a/package.json": `{"name":"a","dependencies":{"b":"workspace:*"}}`,
+			"b/package.json": `{"name":"b","devDependencies":{"a":"workspace:*"}}`,
+			"c/package.json": `{"name":"c","devDependencies":{"c":"*","a":"^1"}}`,
+		})
+		assertWorkspaces(t, got, []domain.Workspace{
+			ws("a", "a", EcosystemJS, "b"),
+			ws("b", "b", EcosystemJS, "a"),
+			ws("c", "c", EcosystemJS, "a", "c"),
+		})
+	})
+	t.Run("Go require cycle", func(t *testing.T) {
+		got := mustDiscover(t, memTree{
+			"go.work":  "go 1.26\nuse (\n\t./x\n\t./y\n\t./z\n)\n",
+			"x/go.mod": "module example.com/x\n\ngo 1.26\n\nrequire example.com/y v0.0.0\n",
+			"y/go.mod": "module example.com/y\n\ngo 1.26\n\nrequire example.com/z v0.0.0\n",
+			"z/go.mod": "module example.com/z\n\ngo 1.26\n\nrequire example.com/x v0.0.0\n",
+		})
+		assertWorkspaces(t, got, []domain.Workspace{
+			ws("x", "example.com/x", EcosystemGo, "y"),
+			ws("y", "example.com/y", EcosystemGo, "z"),
+			ws("z", "example.com/z", EcosystemGo, "x"),
+		})
+	})
+}
+
 // A manifest whose workspaces fail domain validation fails discovery with the
 // validation's reason; nothing is dropped to make the graph pass.
 func TestDiscover_InvalidGraphSurfacesTheValidationError(t *testing.T) {
@@ -262,9 +293,6 @@ func TestDiscover_InvalidGraphSurfacesTheValidationError(t *testing.T) {
 		"two workspaces under one name": {
 			memTree{"package.json": `{"workspaces":["*"]}`, "a/package.json": `{"name":"same"}`, "b/package.json": `{"name":"same"}`},
 			`workspace name "same" is used by both`},
-		"a dependency cycle": {
-			memTree{"package.json": `{"workspaces":["*"]}`, "a/package.json": `{"name":"a","dependencies":{"b":"*"}}`, "b/package.json": `{"name":"b","devDependencies":{"a":"*"}}`},
-			"workspace dependency cycle"},
 		"one directory in two ecosystems": {
 			memTree{"package.json": `{"workspaces":["a"]}`, "a/package.json": `{"name":"a"}`, "go.work": "go 1.26\nuse ./a\n", "a/go.mod": "module example.com/a\n"},
 			`workspace path "a" is declared twice`},

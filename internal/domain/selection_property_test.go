@@ -10,7 +10,7 @@ import (
 
 // selectionCase is a random but valid selection problem: base and head graphs
 // over a shared universe of workspaces (so some are added or removed), random
-// acyclic edges in each, and two batches of changed paths drawn from workspace
+// edges in each (cycles and self-dependencies included), and two batches of changed paths drawn from workspace
 // files, unowned files, ignored files and the paths that force full.
 type selectionCase struct {
 	In    SelectionInput
@@ -48,17 +48,62 @@ func randomGraph(r *rand.Rand) WorkspaceGraph {
 		}
 	}
 	var g WorkspaceGraph
-	for k, i := range members {
+	// Edges may point at any member, itself included, so cycles of every
+	// length occur. The density varies so sparse, acyclic graphs occur too.
+	density := 3 + r.Intn(10)
+	for _, i := range members {
 		w := Workspace{Path: propPath(i), Name: fmt.Sprintf("w%d", i), Ecosystem: "js"}
-		// Edges only point at earlier members, so the graph is acyclic.
-		for _, j := range members[:k] {
-			if r.Intn(3) == 0 {
+		for _, j := range members {
+			if r.Intn(density) == 0 {
 				w.Deps = append(w.Deps, propPath(j))
 			}
 		}
 		g.Workspaces = append(g.Workspaces, w)
 	}
 	return g
+}
+
+// hasCycle reports whether g has a dependency cycle, by repeatedly removing
+// workspaces with no remaining dependencies (Kahn): whatever is left is on or
+// behind a cycle. It is independent of the code under test.
+func hasCycle(g WorkspaceGraph) bool {
+	remaining := map[string][]string{}
+	for _, w := range g.Workspaces {
+		remaining[w.Path] = w.Deps
+	}
+	for changed := true; changed; {
+		changed = false
+		for p, deps := range remaining {
+			blocked := false
+			for _, d := range deps {
+				if _, ok := remaining[d]; ok {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				delete(remaining, p)
+				changed = true
+			}
+		}
+	}
+	return len(remaining) > 0
+}
+
+// The generator must actually produce cycles, or the properties below say
+// nothing about them.
+func TestSelectPropertyGeneratorProducesCycles(t *testing.T) {
+	r := rand.New(rand.NewSource(1))
+	cyclic := 0
+	const n = 1000
+	for k := 0; k < n; k++ {
+		if hasCycle(randomGraph(r)) {
+			cyclic++
+		}
+	}
+	if cyclic < n/4 || cyclic == n {
+		t.Fatalf("%d of %d generated graphs have a cycle; want a substantial share, but not all", cyclic, n)
+	}
 }
 
 func randomPaths(r *rand.Rand, n int) []string {

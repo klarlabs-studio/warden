@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const cfg = "sha256:cfg"
@@ -331,6 +332,109 @@ func TestSelectDeletedEdgeStillCarries(t *testing.T) {
 	}
 }
 
+// cyclic is a repo with every shape of dependency cycle: a and b depend on
+// each other and web on a; c -> d -> e -> c with svc on e; s on itself; lone
+// on nothing.
+func cyclic() WorkspaceGraph {
+	return graph(
+		ws("pkg/a", "a", "pkg/b"),
+		ws("pkg/b", "b", "pkg/a"),
+		ws("apps/web", "web", "pkg/a"),
+		ws("pkg/c", "c", "pkg/d"),
+		ws("pkg/d", "d", "pkg/e"),
+		ws("pkg/e", "e", "pkg/c"),
+		ws("apps/svc", "svc", "pkg/e"),
+		ws("pkg/s", "s", "pkg/s"),
+		ws("pkg/lone", "lone"),
+	)
+}
+
+// selectWithin runs Select with a deadline, so a closure that loops on a
+// cycle fails the test instead of hanging the suite.
+func selectWithin(t *testing.T, in SelectionInput) Selection {
+	t.Helper()
+	type result struct {
+		s   Selection
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		s, err := Select(in)
+		done <- result{s, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Select: %v", r.err)
+		}
+		return r.s
+	case <-time.After(5 * time.Second):
+		t.Fatal("Select did not return within 5s: the dependent closure loops on a cycle")
+		return Selection{}
+	}
+}
+
+// A change in any member of a cycle selects every member, plus everything
+// that depends on the cycle. A self-dependency selects only the workspace
+// itself and never names it as its own reason.
+func TestSelectCycles(t *testing.T) {
+	cases := []struct {
+		name    string
+		changed []string
+		want    map[string][]SelectionReason
+	}{
+		{"two-cycle", []string{"pkg/b/x.ts"}, map[string][]SelectionReason{
+			"apps/web": {{Kind: ReasonDependent, Via: []string{"pkg/a"}}},
+			"pkg/a":    {{Kind: ReasonDependent, Via: []string{"pkg/b"}}},
+			"pkg/b":    {{Kind: ReasonChanged, Paths: []string{"pkg/b/x.ts"}}, {Kind: ReasonDependent, Via: []string{"pkg/a"}}},
+		}},
+		{"three-cycle", []string{"pkg/d/x.ts"}, map[string][]SelectionReason{
+			"apps/svc": {{Kind: ReasonDependent, Via: []string{"pkg/e"}}},
+			"pkg/c":    {{Kind: ReasonDependent, Via: []string{"pkg/d"}}},
+			"pkg/d":    {{Kind: ReasonChanged, Paths: []string{"pkg/d/x.ts"}}, {Kind: ReasonDependent, Via: []string{"pkg/e"}}},
+			"pkg/e":    {{Kind: ReasonDependent, Via: []string{"pkg/c"}}},
+		}},
+		{"self dependency", []string{"pkg/s/x.ts"}, map[string][]SelectionReason{
+			"pkg/s": {{Kind: ReasonChanged, Paths: []string{"pkg/s/x.ts"}}},
+		}},
+		{"dependent of a cycle stays local", []string{"apps/web/x.ts"}, map[string][]SelectionReason{
+			"apps/web": {{Kind: ReasonChanged, Paths: []string{"apps/web/x.ts"}}},
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := selectWithin(t, SelectionInput{
+				Base: cyclic(), Head: cyclic(), Changed: c.changed,
+				AnchorConfigurationDigest: cfg, ConfigurationDigest: cfg,
+			})
+			if s.Kind != SelectionAffected {
+				t.Fatalf("Kind = %s (%+v), want affected", s.Kind, s.Full)
+			}
+			got := map[string][]SelectionReason{}
+			for _, w := range s.Workspaces {
+				got[w.Path] = w.Reasons
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("selected\n%+v\nwant\n%+v", got, c.want)
+			}
+		})
+	}
+}
+
+// A cycle that exists only across the two graphs (a -> b in the base, b -> a
+// in the head) is still a cycle of the union, and the closure terminates.
+func TestSelectCycleAcrossGraphs(t *testing.T) {
+	base := graph(ws("pkg/a", "a", "pkg/b"), ws("pkg/b", "b"), ws("apps/web", "web", "pkg/b"))
+	head := graph(ws("pkg/a", "a"), ws("pkg/b", "b", "pkg/a"), ws("apps/web", "web"))
+	s := selectWithin(t, SelectionInput{
+		Base: base, Head: head, Changed: []string{"pkg/a/x.ts"},
+		AnchorConfigurationDigest: cfg, ConfigurationDigest: cfg,
+	})
+	if got, want := s.Paths(), []string{"apps/web", "pkg/a", "pkg/b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected %v, want %v", got, want)
+	}
+}
+
 func TestSelectRejectsInvalidInput(t *testing.T) {
 	cases := []struct {
 		name string
@@ -347,7 +451,7 @@ func TestSelectRejectsInvalidInput(t *testing.T) {
 			return in
 		}(), "longer than"},
 		{"invalid head", func() SelectionInput { in := input(); in.Head = graph(ws("a", "a;b")); return in }(), "head workspace graph"},
-		{"invalid base", func() SelectionInput { in := input(); in.Base = graph(ws("a", "a", "a")); return in }(), "base workspace graph"},
+		{"invalid base", func() SelectionInput { in := input(); in.Base = graph(ws("a", "a", "missing")); return in }(), "base workspace graph"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
