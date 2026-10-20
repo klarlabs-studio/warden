@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -173,4 +174,90 @@ func TestParseNumstatZ(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The live watcher (feedback snapshots) reads its change set through
+// SnapshotPaths, diffing a commit against a tree object rather than a commit
+// range or the index. It must report the same real paths.
+func TestSnapshotPaths_ReportsRealPathsForRenameDeleteAndQuotedNames(t *testing.T) {
+	dir, base := stageRenameDeleteOdd(t)
+	tree := gitOutT(t, dir, "write-tree")
+	repo := &Repo{Dir: dir}
+
+	stats, err := repo.SnapshotPaths(base, tree)
+	if err != nil {
+		t.Fatalf("SnapshotPaths: %v", err)
+	}
+	if got := sortedCopy(stats.Paths); !reflect.DeepEqual(got, wantChangedPaths) {
+		t.Fatalf("SnapshotPaths = %q, want %q", got, wantChangedPaths)
+	}
+	if stats.FilesTouched != len(wantChangedPaths) {
+		t.Errorf("FilesTouched = %d, want %d", stats.FilesTouched, len(wantChangedPaths))
+	}
+	assertPathRulesFire(t, stats.Paths)
+}
+
+// A newline is a legal byte in a POSIX file name. Line-oriented git output
+// either C-quotes such a path or, parsed by lines, splits it into two strings
+// that are not paths at all, so a rule for its directory never fires. Every
+// changed-path source must return it whole.
+func TestChangedPaths_KeepANewlineInAName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file names cannot contain a newline")
+	}
+	const nlPath = "nl dir/line\nbreak.txt"
+	dir := newTestRepo(t)
+	writeRepoFile(t, dir, "seed.txt", "seed\n")
+	gitIn(t, dir, "add", "seed.txt")
+	gitIn(t, dir, "commit", "-q", "-m", "base")
+	gitIn(t, dir, "config", "core.quotePath", "true")
+	base := gitOutT(t, dir, "rev-parse", "HEAD")
+	writeRepoFile(t, dir, nlPath, "x\n")
+	gitIn(t, dir, "add", "--", nlPath)
+	tree := gitOutT(t, dir, "write-tree")
+	repo := &Repo{Dir: dir}
+	want := []string{nlPath}
+
+	staged, err := repo.StagedPaths()
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	snap, err := repo.SnapshotPaths(base, tree)
+	if err != nil {
+		t.Fatalf("SnapshotPaths: %v", err)
+	}
+	gitIn(t, dir, "commit", "-q", "-m", "newline")
+	committed, err := repo.DiffStats(base)
+	if err != nil {
+		t.Fatalf("DiffStats: %v", err)
+	}
+	for name, got := range map[string]domain.DiffStats{"StagedPaths": staged, "SnapshotPaths": snap, "DiffStats": committed} {
+		if !reflect.DeepEqual(got.Paths, want) || got.FilesTouched != 1 {
+			t.Errorf("%s = %q (%d files), want %q (1 file)", name, got.Paths, got.FilesTouched, want)
+		}
+		cfg := domain.Config{
+			Steps: map[string][]domain.StepName{"pre_push": {"lint"}},
+			Rules: []domain.Rule{{Match: domain.Match{Paths: []string{"nl dir/**"}}}},
+		}
+		res := policy.Resolve(cfg, policy.Input{Hook: domain.PrePush, Branch: "feature", Paths: got.Paths, Risk: domain.RiskLow})
+		if !slices.Contains(res.MatchedRules, "paths=nl dir/**") {
+			t.Errorf("%s: rule for the newline file's directory did not fire; matched %q", name, res.MatchedRules)
+		}
+	}
+	if committed.LinesChanged != 1 {
+		t.Errorf("DiffStats LinesChanged = %d, want 1", committed.LinesChanged)
+	}
+}
+
+// gitOutT runs git in dir and returns its trimmed stdout, failing the test on
+// error.
+func gitOutT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
 }
