@@ -20,6 +20,23 @@ All notable changes to warden are documented here. The format follows
   objects, and nothing is recorded when the commit cannot be resolved.
   Lockfile paths in drift records now use `/` on Windows too, as the SBOM's
   already do.
+- **The leftover sweep no longer mistakes a namesake machine for this one.**
+  Since 0.38.0 a run removes the containers and `warden-wt-*` worktrees left
+  by killed runs, identifying its own by the pid and host name recorded
+  when they were created. Host names are not unique: every Mac that was never
+  renamed is `MacBook-Pro.local`, and DHCP hands out the same names. Two such
+  machines sharing a container engine (`DOCKER_HOST` pointing at a third box),
+  or a repository on a shared volume, each read the other's pids as dead, so
+  one machine's run could remove the other's running check container or
+  worktree. The owner is now recorded as the pid and a random machine id,
+  generated once and kept in warden's config directory beside the signing key
+  (`machine-id`; `WARDEN_CONFIG_DIR` relocates both). Containers carry
+  `de.klarlabs.warden.machine` instead of `de.klarlabs.warden.host`, and
+  leftovers recorded the old way are never removed by the sweep: remove them
+  by hand once, if any remain. When the id cannot be read or created, nothing
+  is recorded and nothing is swept. A CI job that points `WARDEN_CONFIG_DIR`
+  at a fresh directory each run gets a fresh id, so its leftovers are not
+  removed by later jobs.
 
 ## [0.38.0] - 2026-10-20
 

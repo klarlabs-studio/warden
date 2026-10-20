@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // Load is the machine's one-minute run-queue length and how many cores it has
@@ -70,6 +71,39 @@ func (l Load) String() string {
 // indistinguishable from an idle machine and would silently suppress the very
 // caveat this exists to print.
 func CurrentLoad() Load {
+	if probe := loadProbe.Load(); probe != nil {
+		return (*probe)()
+	}
+	return measureLoad()
+}
+
+// loadProbe, when set, replaces the machine reading. Nil in production.
+var loadProbe atomic.Pointer[func() Load]
+
+// SetLoadProbe makes CurrentLoad answer from probe instead of the machine, and
+// returns a function that restores the previous probe. Passing nil restores the
+// real reading.
+//
+// It exists for tests. The load caveat is reported beside a failing step's
+// verdict, so any test that drives a failing step through a renderer sees its
+// output change shape — an extra "why" column, an extra line — whenever the
+// machine running the suite happens to be oversubscribed. A suite is most
+// likely to run on a loaded box exactly when CI or several agents share it, so
+// the test that asserted the ordinary shape went red for reasons that had
+// nothing to do with the change under test. Tests pin the reading instead of
+// loosening their assertions, and force contention when the caveat is the
+// thing being tested.
+func SetLoadProbe(probe func() Load) (restore func()) {
+	var next *func() Load
+	if probe != nil {
+		next = &probe
+	}
+	prev := loadProbe.Swap(next)
+	return func() { loadProbe.Store(prev) }
+}
+
+// measureLoad is the real reading behind CurrentLoad.
+func measureLoad() Load {
 	l := Load{CPUs: runtime.NumCPU()}
 	if v, ok := loadFromProc(); ok {
 		l.Known, l.Value = true, v

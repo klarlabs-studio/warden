@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 // A worktree is torn down by a deferred Remove, and a deferred Remove does not
@@ -25,6 +27,9 @@ func sweepTestRepo(t *testing.T) (*Repo, func(args ...string)) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
+	// The owner marker's machine id lives in the config dir; keep it the
+	// test's own rather than the developer's.
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
 	dir := t.TempDir()
 	gitRun := func(args ...string) {
 		t.Helper()
@@ -230,8 +235,11 @@ func TestPruneStaleWardenWorktrees_RemovesADeadOwnersWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the new worktree records no owner: %v", err)
 	}
-	host, _ := os.Hostname()
-	if want := strconv.Itoa(os.Getpid()) + "\n" + host + "\n"; string(data) != want {
+	machine, ok := proc.MachineID()
+	if !ok {
+		t.Fatal("no machine id")
+	}
+	if want := strconv.Itoa(os.Getpid()) + "\nmachine=" + machine + "\n"; string(data) != want {
 		t.Fatalf("owner marker %q, want %q", data, want)
 	}
 
@@ -242,7 +250,7 @@ func TestPruneStaleWardenWorktrees_RemovesADeadOwnersWorktree(t *testing.T) {
 	}
 
 	// The owner has exited: the sweep removes it.
-	if err := os.WriteFile(marker, []byte(strconv.Itoa(exitedPID(t))+"\n"+host+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(marker, []byte(strconv.Itoa(exitedPID(t))+"\nmachine="+machine+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(wt.Dir+"-golangci-cache", 0o700); err != nil {
@@ -267,17 +275,23 @@ func TestPruneStaleWardenWorktrees_RemovesADeadOwnersWorktree(t *testing.T) {
 }
 
 // Only an owner the sweep can actually judge is judged. A marker naming
-// another machine (a repository on a shared volume) or one that cannot be
-// read leaves the worktree alone, as does a worktree with no marker at all
-// (created by an older warden, or between its creation and the marker).
+// another machine (a repository on a shared volume) — even one with this
+// machine's host name — or one that cannot be read leaves the worktree alone,
+// as does a worktree with no marker at all (created by an older warden, or
+// between its creation and the marker), and one naming its machine by host
+// name only, the form older releases wrote.
 func TestPruneStaleWardenWorktrees_KeepsOwnersItCannotJudge(t *testing.T) {
 	repo, _ := sweepTestRepo(t)
 	dead := strconv.Itoa(exitedPID(t))
+	host, _ := os.Hostname()
 	for name, content := range map[string]*string{
-		"another machine": ptr(dead + "\nsome-other-host\n"),
-		"unreadable":      ptr("not a pid\n"),
-		"no host":         ptr(dead + "\n"),
-		"no marker":       nil,
+		"another machine":         ptr(dead + "\nmachine=" + strings.Repeat("f", 32) + "\n"),
+		"same host name, legacy":  ptr(dead + "\n" + host + "\n"),
+		"machine= with host name": ptr(dead + "\nmachine=" + host + "\n"),
+		"unreadable":              ptr("not a pid\n"),
+		"no machine":              ptr(dead + "\n"),
+		"empty machine":           ptr(dead + "\nmachine=\n"),
+		"no marker":               nil,
 	} {
 		wt, err := repo.addDetachedWorktree("HEAD", false)
 		if err != nil {
@@ -303,3 +317,44 @@ func TestPruneStaleWardenWorktrees_KeepsOwnersItCannotJudge(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// Without a machine id a worktree records no owner, and no marker is judged:
+// the sweep removes nothing it cannot place on this machine.
+func TestPruneStaleWardenWorktrees_NoMachineIDSweepsNothing(t *testing.T) {
+	repo, _ := sweepTestRepo(t)
+	wt, err := repo.addDetachedWorktree("HEAD", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, ok := proc.MachineID()
+	if !ok {
+		t.Fatal("no machine id")
+	}
+	marker := ownerFile(t, wt.Dir)
+	if err := os.WriteFile(marker, []byte(strconv.Itoa(exitedPID(t))+"\nmachine="+machine+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WARDEN_CONFIG_DIR", filepath.Join(blocker, "warden"))
+	repo.pruneStaleWardenWorktrees()
+	if _, err := os.Stat(wt.Dir); err != nil {
+		t.Fatalf("a dead owner's worktree was swept with no machine id to match: %v", err)
+	}
+
+	unmarked, err := repo.addDetachedWorktree("HEAD", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(ownerFile(t, unmarked.Dir)); !os.IsNotExist(err) {
+		t.Fatalf("an owner marker was written without a machine id: %v", err)
+	}
+	for _, w := range []*Worktree{wt, unmarked} {
+		if err := w.Remove(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

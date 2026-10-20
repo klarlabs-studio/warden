@@ -9,6 +9,7 @@ import (
 
 	mcpclient "go.klarlabs.de/mcp"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 // The agent surfaces read through the same reader: a missing document is an
@@ -69,5 +70,33 @@ func TestFeedbackAgentSurfaces(t *testing.T) {
 	}
 	if code := cmdAxi([]string{"feedback"}, &out, &errb); code != 1 {
 		t.Fatalf("axi invalid document: %d", code)
+	}
+}
+
+// The reason TestFeedbackAgentSurfaces pins the machine reading: on an
+// oversubscribed box the same failure gains a why column carrying the load
+// caveat. That is the caveat working, not a regression — so the ordinary shape
+// is asserted on an idle reading, and the loaded shape here, on a forced one,
+// instead of either depending on whatever the machine running the suite was
+// doing at the time.
+func TestFeedbackAgentSurfaces_LoadCaveatOnlyAddsAWhyColumn(t *testing.T) {
+	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
+	dir := repoWithConfig(t, failingWatchConfig)
+	installFakeDocker(t, fakeDocker{failRun: true})
+	forceLoad(t, proc.Load{Known: true, Value: 109, CPUs: 10})
+
+	var out, errb bytes.Buffer
+	stageFile(t, dir, "sample", "staged\n")
+	_ = cmdWatch([]string{"--staged", "--once"}, &out, &errb)
+	out.Reset()
+	errb.Reset()
+	if code := cmdAxi([]string{"feedback"}, &out, &errb); code != 0 {
+		t.Fatalf("axi: %d %s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"status: fail", "{message,severity,source,why}", "\"main.go:3: error: boom\",high,output,", "10.9x oversubscribed", "verdict above stands"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("axi output lacks %q:\n%s", want, got)
+		}
 	}
 }
