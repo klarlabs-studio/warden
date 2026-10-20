@@ -66,8 +66,15 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	}
 	stamp := stampDiagnostics(sc.WorktreeDir, sc.Diagnostics)
 	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
+	cleanupNote, err := splitCleanup(err)
 	res := s.resultFor(ctx, sc, out, err, contended)
 	s.addDiagnostics(sc, &res, stamp)
+	if cleanupNote != "" {
+		res.Summary += "; " + cleanupNote
+		if sc.OnOutput != nil {
+			sc.OnOutput("warden: " + cleanupNote)
+		}
+	}
 	if sc.Container != nil {
 		env := sc.Container.Environment
 		res.Environment = &env

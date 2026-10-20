@@ -116,6 +116,17 @@ All notable changes to warden are documented here. The format follows
   writer that never came, and the step, and the gate with it, hung. The
   report is now opened without blocking and refused unless what was opened
   is the same regular file that was checked.
+- **A container that cannot be deleted no longer fails a passing check.**
+  Apple's runtime deletes each check's container explicitly, within three
+  seconds. On a heavily loaded machine the delete was killed at that limit,
+  and a check whose command had passed was reported FAILED with
+  `container cleanup failed: signal: killed`, a verdict about the machine
+  dressed as one about the change. Deleting the container comes after the
+  command has finished, so the verdict now comes from the command's exit
+  status alone: a passing check passes and its summary says the container
+  could not be deleted, and a failing check still fails, with the note beside
+  its output. The delete is also given 15 seconds. It is not a blocker,
+  because a blocker means the step could not run, and this one did.
 
 ## [0.37.0] - 2026-10-19
 

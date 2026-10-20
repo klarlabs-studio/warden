@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,9 @@ start)
  if [ "${APPLE_WAIT:-}" = yes ]; then exec sleep 30; fi
  echo apple-output
  exit "${APPLE_EXIT:-0}" ;;
-delete) exit "${APPLE_DELETE_STATUS:-0}" ;;
+delete)
+ if [ -n "${APPLE_DELETE_WAIT:-}" ]; then exec sleep "$APPLE_DELETE_WAIT"; fi
+ exit "${APPLE_DELETE_STATUS:-0}" ;;
 *) exit 90 ;;
 esac
 `
@@ -148,11 +151,64 @@ func TestAppleCreateInspectStartAndCleanup(t *testing.T) {
 	if strings.Contains(string(calls), "start") || !strings.HasSuffix(string(calls), "delete\n") {
 		t.Fatalf("changed image not stopped/cleaned: %s", calls)
 	}
-	t.Setenv("APPLE_CREATED_DIGEST", appleIndex)
-	t.Setenv("APPLE_DELETE_STATUS", "1")
-	result, err = NewShellStep(domain.StepTest, "test").Run(context.Background(), sc)
-	if err != nil || result.Status != domain.StepFail {
-		t.Fatal("cleanup failure became passing run", result, err)
+}
+
+// Removing the container is housekeeping after the command has finished:
+// whether it succeeds says nothing about the change. The verdict comes from
+// the command's exit status alone, and a failed removal is reported beside it.
+// It is not a blocker: a blocker says the step failed WITHOUT running, and
+// this one ran.
+func TestAppleCleanupFailureKeepsTheCommandsVerdict(t *testing.T) {
+	fakeAppleEngine(t)
+	previous := appleCleanupTimeout
+	appleCleanupTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { appleCleanupTimeout = previous })
+	selected, err := ResolveContainer(domain.ExecutionConfig{Runtime: "apple", Image: "checks:dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, deleteStatus, deleteWait, exit string
+		want                                 domain.StepStatus
+	}{
+		{"delete fails and the command passed", "1", "", "0", domain.StepPass},
+		{"delete killed at its timeout and the command passed", "", "30", "0", domain.StepPass},
+		{"delete fails and the command failed", "1", "", "1", domain.StepFail},
+		{"delete killed at its timeout and the command failed", "", "30", "1", domain.StepFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("APPLE_DELETE_STATUS", tc.deleteStatus)
+			t.Setenv("APPLE_DELETE_WAIT", tc.deleteWait)
+			t.Setenv("APPLE_EXIT", tc.exit)
+			var lines []string
+			sc := application.StepContext{WorktreeDir: t.TempDir(), Hook: domain.PreCommit, Container: selected,
+				Commands: map[string]string{"test": "echo check"}, OnOutput: func(l string) { lines = append(lines, l) }}
+			result, err := NewShellStep(domain.StepTest, "test").Run(context.Background(), sc)
+			if err != nil || result.Status != tc.want || result.Blocker != domain.BlockerNone {
+				t.Fatalf("got %+v %v, want status %s and no blocker", result, err, tc.want)
+			}
+			if result.Environment == nil {
+				t.Fatal("the environment the command ran in was dropped")
+			}
+			var reported string
+			if tc.want == domain.StepPass {
+				if len(result.Findings) != 0 {
+					t.Fatalf("a passing command gained findings: %+v", result.Findings)
+				}
+				reported = result.Summary
+			} else {
+				if len(result.Findings) != 1 || !strings.Contains(result.Findings[0].Message, "apple-output") {
+					t.Fatalf("the command's own output is missing: %+v", result.Findings)
+				}
+				reported = result.Findings[0].Message
+			}
+			if !strings.Contains(reported, "container cleanup failed") {
+				t.Fatalf("the cleanup failure was not reported: %q", reported)
+			}
+			if tc.want == domain.StepPass && !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "container cleanup failed") }) {
+				t.Fatalf("the cleanup failure was not shown: %q", lines)
+			}
+		})
 	}
 }
 

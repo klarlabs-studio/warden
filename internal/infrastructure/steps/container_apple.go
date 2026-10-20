@@ -123,11 +123,16 @@ func runAppleContainer(ctx context.Context, sc application.StepContext, dir, nam
 		return out, runErr
 	}
 	defer func() {
+		// Removal comes after the command has finished, so it cannot change
+		// what the command reported. A command that passed passes, with the
+		// failed removal carried beside the verdict; one that failed keeps its
+		// own error, with the note in its output.
 		if err := removeAppleContainer(sc, name); err != nil {
-			out = append(out, []byte("\nwarden: container cleanup failed: "+err.Error())...)
 			if runErr == nil {
-				runErr = err
+				runErr = &containerCleanupError{err: err}
+				return
 			}
+			out = append(out, []byte("\nwarden: container cleanup failed: "+err.Error())...)
 		}
 	}()
 	data, err := appleCommand(ctx, sc, "inspect", name)
@@ -154,8 +159,14 @@ func appleCommand(ctx context.Context, sc application.StepContext, args ...strin
 	return runCaptured(cmd, sc)
 }
 
+// appleCleanupTimeout bounds removing a finished container. Apple's delete
+// stops a VM; on a heavily loaded machine that has been seen to take longer
+// than the three seconds Docker's cancellation cleanup allows. A variable so
+// tests need not wait it out.
+var appleCleanupTimeout = 15 * time.Second
+
 func removeAppleContainer(sc application.StepContext, name string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), appleCleanupTimeout)
 	defer cancel()
 	cleanupSC := sc
 	cleanupSC.OnOutput = nil

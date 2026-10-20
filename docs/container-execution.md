@@ -71,7 +71,10 @@ hook run; this adapter cannot promise a fetch-free startup.
 To prevent a moved tag from authorizing the wrong checks, Warden creates a
 stopped container, verifies its image index, Linux platform, runtime handler,
 and network configuration, then starts it attached. Cleanup is explicit even
-after a successful check, and failure to delete the container fails the step.
+after a successful check. Deleting the container happens after its command has
+finished, so it cannot change the verdict, which comes from the command's exit
+status alone: a container that cannot be deleted is reported in the step's
+summary when the check passed, and beside its output when it failed.
 The shared worktree marker also verifies its bind mount. Apple's mount parser
 cannot represent worktree paths containing commas, equals signs, or newlines;
 Warden rejects them instead of interpreting a different mount.
