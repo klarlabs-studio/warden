@@ -6,6 +6,24 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Editors can read what the staged watcher saw.** The watcher's results
+  existed only on its terminal: an editor had nothing to read, a failure
+  scrolled away, and nothing said whether a pass still described the tree.
+  `warden watch --staged` now writes a `warden.feedback/v1` document per
+  worktree (state, the snapshot it checked, each step's status, the
+  environment it ran in, findings, and when a saved prediction expires), and
+  `warden feedback status --format json` prints it. The reader recomputes the
+  staged tree, HEAD, branch and configuration itself and reports
+  `freshness`: `current`, `stale_snapshot`, `producer_gone` (a watcher that
+  crashed leaves "running" behind), `stale_environment` or `expired`. It never
+  probes a container engine. The document is advisory and unsigned; the
+  gate, `verify`, `attest` and notes never read it, and a test enforces that.
+  One watcher writes per worktree: a second one exits 75 and names the pid
+  holding the lock, and a crashed watcher's lock is taken over. See
+  [background feedback](docs/background-feedback.md).
+
 ### Fixed
 
 - **`warden watch --staged` re-checks when the image moves.** A staged
