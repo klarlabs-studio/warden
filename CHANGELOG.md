@@ -6,6 +6,34 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Monorepo configuration, as a preview.** A monorepo could only tell warden
+  about its packages by writing a `cd <dir> &&` step per package, each of which
+  ran on every push. The new `workspaces:` block names the ecosystems whose
+  workspaces warden reads (`discover: [js, go]`), whether per-workspace steps
+  run for every workspace or only the affected ones (`select: all|affected`),
+  and what a change outside the workspaces means (`global`, `ignore`,
+  `unowned`). The new `per_workspace:` block defines a shell check that runs
+  once per workspace (`each:`) or in one call naming all of them (`batch:`).
+  Both are validated at load: a step is defined under `commands:` or
+  `per_workspace:`, never both; each command may use only its own placeholders
+  (`{workspace.path}` and `{workspace.name}` for `each:`, `{workspaces.paths}`,
+  `{workspaces.names}` and `{workspaces.filter}` for `batch:`), and a
+  workspace placeholder anywhere else is refused, because nothing would
+  replace it; a glob that no repository path could match (absolute, with a
+  backslash, or with an empty, `.` or `..` segment) is refused. Under
+  `extends:` both blocks merge with child-wins semantics, `workspaces.global`
+  unions so a child cannot drop a path its base marked global, and a child
+  that moves a step between `commands:` and `per_workspace:` replaces the
+  base's definition. **Nothing runs per workspace yet.** `warden policy
+  explain`, `axi policy-explain` and MCP `policy_explain` show the resolved
+  configuration and say that per-workspace execution is not active, and a run
+  whose steps include one defined under `per_workspace:` says the same. A
+  repository that sets neither block loads, resolves and digests exactly as
+  before. Older wardens reject both keys, so add them only after the release
+  that ships them runs on every machine and CI runner.
+
 ### Fixed
 
 - **Signed dependency drift describes the commit's lockfiles.** Drift was

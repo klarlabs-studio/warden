@@ -47,7 +47,7 @@ func (r *Repository) Load() (domain.Config, error) {
 	if err != nil {
 		return domain.Config{}, err
 	}
-	return applyProfile(cfg, layers)
+	return finish(cfg, layers)
 }
 
 // Exists reports whether the repo has a .warden.yaml at all.
@@ -138,6 +138,19 @@ func ResolveAtRef(read FileReaderAtRef) (domain.Config, error) {
 	cfg, layers, err := resolveAtRef(read, FileName, nil)
 	if err != nil {
 		return domain.Config{}, err
+	}
+	return finish(cfg, layers)
+}
+
+// finish checks the merged chain for what no single file can be checked for,
+// then puts its profile into force.
+func finish(cfg domain.Config, layers []layer) (domain.Config, error) {
+	if err := cfg.ValidateEffective(); err != nil {
+		name := FileName
+		if len(layers) > 1 {
+			name += " (with its extends chain)"
+		}
+		return domain.Config{}, fmt.Errorf("%s: %w", name, err)
 	}
 	return applyProfile(cfg, layers)
 }

@@ -738,6 +738,24 @@ notify_after: 10s   # default — a *passing* run only notifies once it ran at l
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
 diagnostics: { lint: out/lint.sarif }   # optional — a SARIF 2.1.0 file the check writes; read only when the check FAILS,
                                         # for file:line findings. Requires warden >= 0.38.0 everywhere (see docs/background-feedback.md)
+# Monorepo mode — PREVIEW. This release validates and resolves these two blocks and
+# `warden policy explain` shows them, but NO step runs per workspace yet: a step
+# defined only under per_workspace: does not run as one. Older wardens reject both
+# keys, so add them only once the release that ships them runs on every machine
+# and CI runner that reads this config.
+workspaces:
+  discover: [js, go]   # required with the block — ecosystems to read workspaces from (js = npm/yarn/pnpm, go = go.work)
+  select: all          # default — `affected` runs per-workspace steps only for changed workspaces and their dependents
+  global: ["tools/build/**"]   # changes here select every workspace (added to the lockfile/tool-config defaults)
+  ignore: ["docs/**", ".github/**"]   # changed paths no workspace owns that select nothing
+  unowned: full        # default — any other unowned change selects every workspace; `ignore` selects none
+  concurrency: 4       # optional — workspaces run at once across all per-workspace steps (0 = default)
+per_workspace:   # a step is defined here OR under commands:, never both (a child config's definition replaces its base's)
+  test:
+    each: "pnpm test"   # once per selected workspace, in its directory; may use {workspace.path} {workspace.name}
+    ecosystems: [js]    # optional — only workspaces of these ecosystems
+  typecheck:
+    batch: "turbo run typecheck {workspaces.filter}"   # one call; may use {workspaces.paths} {workspaces.names} {workspaces.filter}
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment

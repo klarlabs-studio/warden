@@ -355,6 +355,29 @@ func printWarnings(w io.Writer, res application.RunResult) {
 	for _, warn := range res.Warnings {
 		_, _ = fmt.Fprintf(w, "warden: %s\n", warn)
 	}
+	printWorkspacePreview(w, res.Policy)
+}
+
+// printWorkspacePreview names the run's steps that the config defines under
+// per_workspace:, which this release does not run per workspace. Without it,
+// such a step reads as an ordinary skip ("no command configured") or a missing
+// custom step, and nothing says the configuration was never acted on.
+func printWorkspacePreview(w io.Writer, p domain.ResolvedPolicy) {
+	ws := p.Workspaces
+	if ws == nil || ws.Active {
+		return
+	}
+	var defined []domain.StepName
+	for _, s := range p.Steps {
+		if _, ok := ws.Steps[s]; ok {
+			defined = append(defined, s)
+		}
+	}
+	if len(defined) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "warden: per_workspace: defines %s; this release does not run steps per workspace yet (monorepo mode preview; see `warden policy explain`)\n",
+		domain.JoinSteps(defined))
 }
 
 // noteGitPushError, on a SUCCESSFUL pre-push that warden pushed ITSELF, prints
@@ -524,6 +547,7 @@ func passLine(ran, prePush []domain.StepName, notes map[domain.StepName]domain.O
 // runPreCommitExit re-applies any auto-fixes to the live tree and exits 0 on a
 // pass so the commit proceeds; a failure exits non-zero to abort the commit.
 func runPreCommitExit(svc preCommitReporter, res application.RunResult, stdout, stderr io.Writer) int {
+	printWorkspacePreview(stdout, res.Policy)
 	for _, step := range res.Policy.Steps {
 		if reuse, ok := res.ReusedSteps[step]; ok {
 			_, _ = fmt.Fprintf(stdout, "warden: %s cached — matched signed staged prediction from %s\n", step, reuse.RecordedAt.UTC().Format(time.RFC3339))

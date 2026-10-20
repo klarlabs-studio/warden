@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 
 	"go.klarlabs.de/axi/toon"
@@ -292,6 +293,18 @@ func axiPolicyExplain(f facade, args []string, stdout, stderr io.Writer) int {
 		out["profile"] = p.Name
 		out["profile_digest"] = p.Digest
 		out["profile_floors_unmet"] = unmet
+	}
+	if ws := resolved.Workspaces; ws != nil {
+		perWorkspace := make([]domain.StepName, 0, len(ws.Steps))
+		for s := range ws.Steps {
+			perWorkspace = append(perWorkspace, s)
+		}
+		slices.Sort(perWorkspace)
+		out["workspaces_discover"] = anyStrings(ws.Discover)
+		out["workspaces_select"] = string(ws.Select)
+		out["per_workspace_steps"] = stepStrings(perWorkspace)
+		out["per_workspace_active"] = ws.Active
+		out["per_workspace_notice"] = ws.Notice
 	}
 	return emitTOON(stdout, stderr, out)
 }
