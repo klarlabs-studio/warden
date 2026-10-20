@@ -6,6 +6,21 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Signed dependency drift describes the commit's lockfiles.** Drift was
+  found by walking the validation worktree, as the SBOM was before 0.36.0.
+  Two things went wrong. First, a `package-lock.json` that a check generated
+  and nobody committed was compared against the install and recorded in the
+  note's signed `dependencies_drifted`, warning about a lockfile the commit
+  does not contain. Second, a committed lockfile that a check rewrote was
+  compared as rewritten: when the rewrite matched what was installed, the
+  drift between the commit and the install was hidden. Drift now compares the
+  `package-lock.json` files in the attested commit's tree, read from git
+  objects, and nothing is recorded when the commit cannot be resolved.
+  Lockfile paths in drift records now use `/` on Windows too, as the SBOM's
+  already do.
+
 ## [0.38.0] - 2026-10-20
 
 A minor release that completes background feedback. The watcher now writes a

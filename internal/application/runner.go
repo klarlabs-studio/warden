@@ -673,10 +673,11 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	if r.SBOM != nil && shaErr == nil {
 		record.Dependencies = r.SBOM.Collect(sc.WorktreeDir, finalSHA)
 	}
-	// Attach drift in the same place and for the same reason: it must be inside
-	// the signature. A caveat the verifier cannot see is not a caveat.
-	if r.DepDrift != nil {
-		record.DependenciesDrifted = r.DepDrift.DetectDepDrift(sc.WorktreeDir)
+	// Attach drift in the same place and for the same reasons: it must be
+	// inside the signature (a caveat the verifier cannot see is not a caveat),
+	// and it compares finalSHA's committed lockfiles, not the worktree's.
+	if r.DepDrift != nil && shaErr == nil {
+		record.DependenciesDrifted = r.DepDrift.DetectDepDrift(sc.WorktreeDir, finalSHA)
 	}
 	if shaErr == nil {
 		record.CommitSHA = finalSHA
