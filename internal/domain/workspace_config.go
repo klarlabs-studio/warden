@@ -242,6 +242,27 @@ func (c Config) ValidateEffective() error {
 	if len(c.PerWorkspace) > 0 && (c.Workspaces == nil || len(c.Workspaces.Discover) == 0) {
 		return fmt.Errorf("per_workspace: steps need workspaces to run over; set workspaces.discover (%s)", strings.Join(WorkspaceEcosystems, ", "))
 	}
+	return c.validatePerWorkspaceUnsupported()
+}
+
+// validatePerWorkspaceUnsupported refuses settings a per-workspace step would
+// silently ignore. Each of them is read only for a repo-wide command step, so
+// accepting one would look like configuration and do nothing: a cache: entry
+// that never skips, a predictive_cache: entry that never predicts, a SARIF
+// file that is never read. They are checked on the merged config because the
+// setting and the per_workspace: definition may come from different files.
+func (c Config) validatePerWorkspaceUnsupported() error {
+	for _, step := range sortedKeys(c.PerWorkspace) {
+		if _, ok := c.Cache[step]; ok {
+			return fmt.Errorf("cache.%s: a per_workspace: step is not cached; remove the entry (each run checks the selected workspaces)", step)
+		}
+		if slices.Contains(c.PredictiveCache, step) {
+			return fmt.Errorf("predictive_cache: %s is a per_workspace: step, which never reuses a staged prediction; remove it from the list", step)
+		}
+		if _, ok := c.Diagnostics[step]; ok {
+			return fmt.Errorf("diagnostics.%s: a per_workspace: step does not read a SARIF file; remove the entry", step)
+		}
+	}
 	return nil
 }
 
@@ -316,11 +337,6 @@ func mergePerWorkspace(base, child map[string]PerWorkspaceStep) map[string]PerWo
 	return out
 }
 
-// WorkspacePreviewNotice says what this release does with workspaces: and
-// per_workspace:. It is shown wherever the resolved configuration is, so a
-// repo that sets them is never left to assume they act.
-const WorkspacePreviewNotice = "per-workspace execution is not active in this release: workspaces: and per_workspace: are validated and resolved, but no step runs per workspace yet"
-
 // ResolvedWorkspaces is the workspace configuration a policy was resolved
 // under, for `policy explain` and for the run that will fan steps out.
 type ResolvedWorkspaces struct {
@@ -335,7 +351,8 @@ type ResolvedWorkspaces struct {
 	// Steps maps each per-workspace step to its definition.
 	Steps map[StepName]PerWorkspaceStep
 	// Active reports whether this warden runs per-workspace steps. It is
-	// false in this release, and Notice says so.
+	// true from the release that runs them; Notice says what runs where for
+	// the hook the policy was resolved for (WorkspaceExecutionNotice).
 	Active bool
 	Notice string
 }
