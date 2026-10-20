@@ -149,7 +149,7 @@ func matchingRules(cfg domain.Config, in Input) []matched {
 
 // ruleMatches reports whether every set field of m holds for the invocation.
 func ruleMatches(m domain.Match, in Input) bool {
-	if m.Branch != "" && !globMatch(m.Branch, in.Branch) {
+	if m.Branch != "" && !domain.GlobMatch(m.Branch, in.Branch) {
 		return false
 	}
 	if m.Risk != "" && m.Risk != in.Risk {
@@ -165,7 +165,7 @@ func ruleMatches(m domain.Match, in Input) bool {
 func anyPathMatches(globs, paths []string) bool {
 	for _, g := range globs {
 		for _, p := range paths {
-			if globMatch(g, p) {
+			if domain.GlobMatch(g, p) {
 				return true
 			}
 		}
