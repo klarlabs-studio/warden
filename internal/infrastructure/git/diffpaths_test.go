@@ -261,3 +261,31 @@ func gitOutT(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// ChangedPaths between two commits gives the same real paths: both sides of a
+// cross-directory rename, the deletion, and the oddly named file unquoted.
+func TestChangedPaths_BetweenCommitsReportsRealPaths(t *testing.T) {
+	dir, base := stageRenameDeleteOdd(t)
+	gitIn(t, dir, "commit", "-q", "-m", "change")
+	repo := &Repo{Dir: dir}
+	got, err := repo.ChangedPaths(base, "HEAD")
+	if err != nil {
+		t.Fatalf("ChangedPaths: %v", err)
+	}
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, wantChangedPaths) {
+		t.Fatalf("ChangedPaths = %q, want %q", got, wantChangedPaths)
+	}
+	if got, err := repo.ChangedPaths("HEAD", "HEAD"); err != nil || len(got) != 0 {
+		t.Fatalf("no change = %q, %v; want none", got, err)
+	}
+	if _, err := repo.ChangedPaths("", "HEAD"); err == nil {
+		t.Fatal("an empty revision must be an error")
+	}
+	if _, err := repo.ChangedPaths("--output=x", "HEAD"); err == nil {
+		t.Fatal("a revision that git would read as an option must be refused")
+	}
+	if _, err := repo.ChangedPaths("no-such-rev", "HEAD"); err == nil {
+		t.Fatal("an unresolvable revision must be an error")
+	}
+}
