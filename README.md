@@ -736,6 +736,8 @@ timeouts: { test: "5m", review: "2m" }   # kill + fail a step that hangs longer 
 notify: true     # default — desktop notification after a slow interactive pre-push (a failed/blocked push always notifies)
 notify_after: 10s   # default — a *passing* run only notifies once it ran at least this long (fast green gates stay silent); must be a valid Go duration or the config is rejected at load
 cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declared inputs are unchanged
+diagnostics: { lint: out/lint.sarif }   # optional — a SARIF 2.1.0 file the check writes; read only when the check FAILS,
+                                        # for file:line findings. Requires warden >= 0.38.0 everywhere (see docs/background-feedback.md)
 risk: { diff_lines_high: 400, files_touched_high: 15 }
 security_scan: { mode: delta }   # default — the security-scan step fails only on findings THIS change introduced (see below)
 pr: { enabled: true, comment: true }   # open/update a PR on a passing push, post a gate-result comment
@@ -838,7 +840,10 @@ cached evidence. Pre-push runs fresh checks, and predictions publish no commit
 notes. See [predictive staged checks](docs/predictive-cache.md) for exclusions
 and invalidation details.
 Editors can read what the watcher observed with `warden feedback status`; see
-[background feedback](docs/background-feedback.md).
+[background feedback](docs/background-feedback.md). A check can declare the SARIF
+file its command writes (`diagnostics: { lint: out/lint.sarif }`); when the
+check fails, its results become `file:line` findings beside the command's output.
+The exit status stays the only verdict.
 
 ## Commands
 

@@ -118,9 +118,9 @@ warden: vet failed: vet failed
   The message is cut to its first line, so a tool's multi-line output cannot
   forge more diagnostics; the full text is in the JSON.
 - A failing step with no located finding prints
-  `warden: <step> failed: <summary>`. That covers every failing shell check,
-  because warden passes a command's output through verbatim rather than
-  guessing a location from it.
+  `warden: <step> failed: <summary>`. That covers every failing shell check
+  that declares no SARIF report, because warden passes a command's output
+  through verbatim rather than guessing a location from it.
 - When the failing step's command is declared under `commands:`, a second line
   anchors it to that line of the configuration, marked with the rule
   `config-anchor`. The anchor follows `extends:`, so it names the file whose
@@ -159,6 +159,73 @@ A SARIF 2.1.0 log with one run, for tools that import SARIF:
 
 Some SARIF consumers, such as code-scanning upload services, require every
 result to have a location. warden does not invent one to satisfy them.
+
+## Located findings from a SARIF report
+
+warden passes a failing command's output through verbatim and never guesses a
+file or line from it. A check that can write SARIF 2.1.0 can say where its
+problems are instead. Declare the file its command writes, relative to the
+repository root:
+
+```yaml
+commands:
+  lint: "golangci-lint run --output.sarif.path=out/lint.sarif ./..."
+diagnostics:
+  lint: out/lint.sarif
+```
+
+When `lint` fails, warden reads `out/lint.sarif` from the worktree the check
+ran in and adds each result as a finding with its file, line, rule and
+severity (`error` is high, `warning` medium, `note` low). The command's own
+output stays as the first finding. The results appear wherever findings do:
+the gate's output, the document (with `source: sarif`), and the `problems` and
+`sarif` formats.
+
+The rules:
+
+- **Only a failing check's report is read.** The exit status is the only
+  verdict. A check that exits 0 passes even if its report lists errors, and
+  stays eligible for a staged prediction. A check that never ran (another
+  process held its lock, its toolchain is missing) has no report to read.
+- **Only shell checks**: `lint`, `test`, or a step defined under `commands:`.
+  `security-scan` already reads its scanner's report, and the configuration is
+  refused if `diagnostics:` names it, an agent step, or a built-in step that
+  runs no command.
+- **The path must stay inside the repository.** It must be relative, written
+  with forward slashes, and contain no `..`. Anything else is refused when the
+  configuration loads.
+- **No symlinks.** Every component of the path, not just the file, must be a
+  real directory or file. Under container execution the check can write
+  anything into the mounted worktree, including a link to a host path that the
+  container cannot see but warden, reading on the host, could. A symlink
+  anywhere in the path means the report is ignored.
+- **The report must be from this run.** A file that existed before the
+  command ran and was not rewritten by it, such as a report committed to the
+  repository, is ignored.
+- **At most 4 MiB**, and at most 1000 results become findings.
+- **Locations are mapped to the repository.** A URI under the container's
+  `/workspace` mount or the worktree's host path is made relative to the
+  repository root; a relative URI already is (`uriBaseId`s are resolved
+  through `originalUriBaseIds`). A result located anywhere else, on another
+  host, or under another scheme is dropped and counted. A result with no
+  location keeps none.
+- Results whose `kind` is not `fail`, and suppressed results (unless the
+  suppression was rejected), are skipped.
+
+A report that is missing, a symlink, too large, unchanged or not valid SARIF
+2.1.0 never fails the step on its own. The step's summary says what happened,
+for example `lint failed; diagnostics: 2 findings from out/lint.sarif; 1
+result outside the repository dropped` or `lint failed; diagnostics: ignored
+out/lint.sarif: out is a symlink`, and the same line is printed while the
+gate runs.
+
+The findings are ordinary findings of a failing step. They are hashed into
+the run's evidence chain like any other step's findings. A failing run
+writes no commit note, so they never appear in signed provenance.
+
+`diagnostics:` needs warden 0.38.0 or later on every machine and CI runner
+that reads the configuration: older releases reject unknown keys and would
+refuse to run the gate at all.
 
 ## Agents
 
@@ -282,9 +349,11 @@ Any tool that reads `file:line: message` lines can consume the format: match
   prediction; `expires_at` is when the prediction behind a `pass` or `cached`
   step expires.
 - `findings` are warden's findings, each with a `source`: `step` for a
-  structured finding a step reported, `output` for a failing command's
-  verbatim output. Warden does not guess a file or line from a tool's output,
-  so an `output` finding has none. Each message is capped at 64 KiB;
+  structured finding a step reported, `sarif` for a result read from the
+  check's declared SARIF report (see
+  [located findings](#located-findings-from-a-sarif-report)), `output` for a
+  failing command's verbatim output. Warden does not guess a file or line from
+  a tool's output, so an `output` finding has none. Each message is capped at 64 KiB;
   `output_truncated` says one was cut.
 - `freshness` is the reader's. A document on disk carries it only as
   `stale_environment`; the reader rejects a document that asserts any other
