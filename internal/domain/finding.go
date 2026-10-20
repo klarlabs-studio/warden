@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // Severity classifies a finding.
 type Severity string
 
@@ -157,6 +159,11 @@ type StepResult struct {
 	// profiled run's signed record carries what it observed of an agent that
 	// ran (see Run.StepOutcomes and StepObservation).
 	AgentBoundary *AgentBoundaryObservation
+	// PredictionSavedAt is when this pass was saved as a staged prediction
+	// (zero when none was). Like Outcome it is read only by delivery
+	// surfaces — the background feedback document derives a prediction's
+	// expiry from it — and is not part of the evidence chain.
+	PredictionSavedAt time.Time
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See

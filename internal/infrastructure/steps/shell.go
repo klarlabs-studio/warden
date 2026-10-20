@@ -73,7 +73,8 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	if res.Status == domain.StepPass {
 		res.Contract = finishExecutionContract(ctx, sc, contract)
 		if sc.Predictions != nil && res.Contract != nil && domain.ValidTreeSHA(base) && !res.Fixed && len(res.Findings) == 0 && ctx.Err() == nil {
-			if sc.Predictions.Record(s.name, base, *res.Contract) {
+			if savedAt, ok := sc.Predictions.Record(s.name, base, *res.Contract); ok {
+				res.PredictionSavedAt = savedAt
 				res.Summary += "; staged prediction saved"
 			} else {
 				res.Summary += "; prediction could not be saved"

@@ -190,12 +190,20 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	if public == "" {
 		return fail(stderr, fmt.Errorf("staged watch needs a local signing key"))
 	}
+	fb, code := startFeedback(ctx, svc, dir, stderr)
+	if fb == nil {
+		return code
+	}
+	ctx = fb.ctx
+	defer fb.close()
 	evaluate := func(ctx context.Context) error {
-		return evaluateStaged(ctx, svc, dir, stdout)
+		return evaluateStaged(ctx, svc, dir, stdout, fb)
 	}
 	defer svc.SetObserver(nil)
 	if once {
-		return reportStagedOnce(evaluate(ctx), stdout, stderr)
+		fb.observeEnvironment(sampleEnvironmentOnce(ctx, cfg.Execution))
+		code := reportStagedOnce(evaluate(ctx), stdout, stderr)
+		return fb.exitCode(code, stderr)
 	}
 	snapshot, err := newStagedSnapshot(ctx, svc, dir, stdout)
 	if err != nil && ctx.Err() == nil {
@@ -203,33 +211,46 @@ func runStagedWatch(ctx context.Context, svc *service.Service, dir string, once 
 	}
 	if ctx.Err() != nil { // interrupted while starting: a stop, not a failure
 		_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
-		return 0
+		return fb.exitCode(0, stderr)
 	}
+	snapshot.onEnvironment = fb.observeEnvironment
 	_, _ = fmt.Fprintln(stdout, "warden: watching staged inputs (ctrl+c to stop); checks run in disposable container worktrees")
 	watch.Loop{
 		Interval:    pollInterval,
 		Fingerprint: snapshot.Fingerprint,
 		Evaluate:    evaluate,
-		Report:      func(e watch.Event) { reportStagedEvent(e, stdout, stderr) },
-		Hold:        gateRunning(svc),
-		RetryMin:    stagedRetryMin,
-		RetryMax:    stagedRetryMax,
+		Report: func(e watch.Event) {
+			fb.observeLoop(e)
+			reportStagedEvent(e, stdout, stderr)
+		},
+		Hold:     gateRunning(svc),
+		RetryMin: stagedRetryMin,
+		RetryMax: stagedRetryMax,
 	}.Run(ctx)
 	_, _ = fmt.Fprintln(stdout, "warden: staged watch stopped")
-	return 0
+	return fb.exitCode(0, stderr)
 }
 
 // evaluateStaged runs the predictive staged checks once. Nothing staged is
 // watch.ErrIdle; a run the machine prevented is wrapped with watch.Blocked so
 // the loop retries it rather than recording it as the snapshot's verdict.
-func evaluateStaged(ctx context.Context, svc *service.Service, dir string, stdout io.Writer) error {
+func evaluateStaged(ctx context.Context, svc *service.Service, dir string, stdout io.Writer, fb *feedbackSession) error {
+	if err := fb.begin(ctx, svc, dir); err != nil {
+		return err
+	}
+	err := runStagedEvaluation(ctx, svc, dir, stdout, fb)
+	fb.record(ctx, err)
+	return err
+}
+
+func runStagedEvaluation(ctx context.Context, svc *service.Service, dir string, stdout io.Writer, fb *feedbackSession) error {
 	// An inspection failure is not "nothing staged": evaluate, and let the
 	// run report what is wrong.
 	if empty, err := watch.NothingStaged(ctx, dir); err == nil && empty {
 		return watch.ErrIdle
 	}
 	reporter := &predictionReporter{ctx: ctx, w: stdout}
-	svc.SetObserver(reporter)
+	svc.SetObserver(application.MultiObserver{reporter, fb.observer()})
 	result, err := svc.PredictStaged(ctx)
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -292,6 +313,8 @@ type stagedSnapshot struct {
 	execution domain.ExecutionConfig
 	shown     string
 	out       io.Writer
+	// onEnvironment, when set, receives every sampled environment.
+	onEnvironment func(string)
 }
 
 // newStagedSnapshot hashes the index and loads the configuration only when a
@@ -342,6 +365,9 @@ func (s *stagedSnapshot) Fingerprint(ctx context.Context) (string, error) {
 		return "", err
 	}
 	env := s.env.Value(ctx, key)
+	if s.onEnvironment != nil {
+		s.onEnvironment(env)
+	}
 	if env != s.shown && env != "" {
 		switch {
 		case env == environmentUnavailable:
@@ -369,6 +395,16 @@ func sampleEnvironment(ctx context.Context, execution domain.ExecutionConfig) (s
 		return environmentUnavailable, nil
 	}
 	return describeEnvironment(env), nil
+}
+
+// sampleEnvironmentOnce samples the environment for a single evaluation. An
+// inconclusive sample is recorded as no observation.
+func sampleEnvironmentOnce(ctx context.Context, execution domain.ExecutionConfig) string {
+	env, err := sampleEnvironment(ctx, execution)
+	if err != nil {
+		return ""
+	}
+	return env
 }
 
 // describeEnvironment names the runtime, image ID and platform checks run in.
