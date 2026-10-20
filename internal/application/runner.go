@@ -159,6 +159,96 @@ func (r *Runner) PredictStaged(ctx context.Context) (RunResult, error) {
 	return r.run(ctx, domain.PreCommit, true)
 }
 
+// ErrNoLiveChecks is returned by CheckWorkingTree when the configuration has
+// no check the live watcher may run in a container.
+var ErrNoLiveChecks = errors.New("no read-only container shell checks to run: configure commands for lint, test or custom steps in steps.pre_commit")
+
+// CheckWorkingTree runs the container-aware live watcher's checks against a
+// working-tree snapshot: tree, as `git add -A` would stage the live checkout,
+// on top of commit base. It is advisory feedback and nothing more:
+//
+//   - only container shell checks run (domain.ResolvedPolicy.ContainerShellCheck),
+//     in a disposable dependency-free worktree;
+//   - no prediction is looked up or saved: the snapshot comes from a different
+//     diff source than a commit's, and that equivalence is not proven;
+//   - no step is authorized to fix, and no fix patch is computed, so nothing
+//     is ever written back to the developer's tree;
+//   - nothing is signed, and no note is written.
+func (r *Runner) CheckWorkingTree(ctx context.Context, base, tree string) (RunResult, error) {
+	if !domain.ValidTreeSHA(base) {
+		return RunResult{}, errors.New("live checks need a commit to check the working tree against; make the first commit")
+	}
+	if !domain.ValidTreeSHA(tree) {
+		return RunResult{}, fmt.Errorf("live checks: %q is not a tree object name", tree)
+	}
+	cfg, err := r.Configs.Load()
+	if err != nil {
+		return RunResult{}, err
+	}
+	if !cfg.Execution.ContainerEnabled() {
+		return RunResult{}, errors.New("live snapshot checks run only under container execution")
+	}
+	git, ok := r.Git.(DependencyFreeGit)
+	if !ok {
+		return RunResult{}, errors.New("git adapter cannot create dependency-free container worktrees")
+	}
+	branch, err := r.Git.CurrentBranch()
+	if err != nil {
+		return RunResult{}, fmt.Errorf("current branch: %w", err)
+	}
+	diff, err := git.SnapshotDiffStats(base, tree)
+	if err != nil {
+		return RunResult{}, err
+	}
+	risk := cfg.Risk.Thresholds().Classify(diff)
+	resolved := policy.Resolve(cfg, policy.Input{Hook: domain.PreCommit, Branch: branch, Paths: diff.Paths, Risk: risk})
+	resolved.Commands = cfg.Commands
+	resolved.AgentCommands = cfg.AgentCommands
+	resolved, err = LiveChecks(resolved)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	wt, err := git.SeedDependencyFreeSnapshot(base, tree)
+	if err != nil {
+		return RunResult{}, fmt.Errorf("seed snapshot worktree: %w", err)
+	}
+	defer func() { _ = wt.Remove() }()
+	sc := r.withStream(StepContext{Hook: domain.PreCommit, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, Remote: r.Settings.Remote})
+	run := r.newRun(domain.PreCommit, resolved, branch)
+	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
+		return RunResult{}, err
+	}
+	if run.IsTerminal() {
+		return r.result(run, ""), nil
+	}
+	if err := run.Pass(); err != nil {
+		return RunResult{}, err
+	}
+	return r.result(run, ""), nil
+}
+
+// LiveChecks narrows a resolved pre-commit policy to what the live watcher
+// runs: its container shell checks, with the predictive cache and every
+// auto-fix budget removed, so the kernel neither looks up nor records a
+// prediction and no step is authorized to write. It fails with
+// ErrNoLiveChecks when nothing is left.
+func LiveChecks(resolved domain.ResolvedPolicy) (domain.ResolvedPolicy, error) {
+	var selected []domain.StepName
+	for _, step := range resolved.Steps {
+		if resolved.ContainerShellCheck(step) {
+			selected = append(selected, step)
+		}
+	}
+	if len(selected) == 0 {
+		return resolved, ErrNoLiveChecks
+	}
+	resolved.Steps = selected
+	resolved.PredictiveCache = nil
+	resolved.AutoFix = nil
+	return resolved, nil
+}
+
 func (r *Runner) run(ctx context.Context, hook domain.Hook, predictOnly bool) (RunResult, error) {
 	cfg, err := r.Configs.Load()
 	if err != nil {

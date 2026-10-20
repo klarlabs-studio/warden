@@ -216,5 +216,13 @@ func (p ResolvedPolicy) AuthorizesFix() bool {
 
 // Predictable excludes native, scanner, agent and tree-writing semantics.
 func (p ResolvedPolicy) Predictable(s StepName) bool {
-	return p.Hook == PreCommit && p.Execution.ContainerEnabled() && (p.Execution.Network == "" || p.Execution.Network == "none") && s != StepSecurityScan && (s == StepLint || s == StepTest || !s.IsBuiltin()) && !p.WritesTree(s) && slices.Contains(p.PredictiveCache, string(s)) && strings.TrimSpace(p.Commands[string(s)]) != ""
+	return p.ContainerShellCheck(s) && (p.Execution.Network == "" || p.Execution.Network == "none") && slices.Contains(p.PredictiveCache, string(s))
+}
+
+// ContainerShellCheck reports whether s is a pre-commit shell check that runs
+// read-only in a container: a configured command for lint, test or a custom
+// step, never a native or scanner step, an agent, or a step that writes the
+// tree. These are the checks the container-aware live watcher runs.
+func (p ResolvedPolicy) ContainerShellCheck(s StepName) bool {
+	return p.Hook == PreCommit && p.Execution.ContainerEnabled() && s != StepSecurityScan && (s == StepLint || s == StepTest || !s.IsBuiltin()) && !p.WritesTree(s) && strings.TrimSpace(p.Commands[string(s)]) != ""
 }
