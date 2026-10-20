@@ -190,6 +190,18 @@ func TestGoldenFleet_PerWorkspacePrePushRunsAll(t *testing.T) {
 	if n != len(allExecWorkspaces) {
 		t.Fatalf("note holds %d test.workspace records, want %d: %s", n, len(allExecWorkspaces), note)
 	}
+	// This release writes no workspace scope: the note is a plain full run,
+	// which every verifier reads as before.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(note, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["scope"]; ok {
+		t.Fatalf("pre-push wrote a scope, which this release must not: %s", note)
+	}
+	if out, code := r.warden("verify", "--commit", "HEAD"); code != 0 {
+		t.Fatalf("the note must verify as a full run: %d %s", code, out)
+	}
 }
 
 // A failing workspace fails the step, the output names it, and the other
