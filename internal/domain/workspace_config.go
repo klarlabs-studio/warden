@@ -148,6 +148,21 @@ func (w WorkspacesConfig) selectionRules() SelectionRules {
 	return SelectionRules{Global: w.Global, Ignore: w.Ignore, Unowned: w.Unowned}
 }
 
+// SelectionRules returns the rules Select reads from this config's
+// workspaces block: its global and ignore globs and its unowned mode, with
+// the default mode spelled out. A config without the block yields the
+// defaults.
+func (c Config) SelectionRules() SelectionRules {
+	var r SelectionRules
+	if c.Workspaces != nil {
+		r = c.Workspaces.selectionRules()
+	}
+	if r.Unowned == "" {
+		r.Unowned = UnownedFull
+	}
+	return r
+}
+
 func validateEcosystems(key string, values []string) error {
 	seen := map[string]bool{}
 	for _, e := range values {

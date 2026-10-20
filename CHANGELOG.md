@@ -46,9 +46,10 @@ All notable changes to warden are documented here. The format follows
   base's definition. **Nothing runs per workspace yet.** `warden policy
   explain`, `axi policy-explain` and MCP `policy_explain` show the resolved
   configuration and say that per-workspace execution is not active, and a run
-  whose steps include one defined under `per_workspace:` says the same. A
-  repository that sets neither block loads, resolves and digests exactly as
-  before. Older wardens reject both keys, so add them only after the release
+  whose steps include one defined under `per_workspace:` says the same.
+  `warden workspaces --affected` applies the `global`, `ignore` and `unowned`
+  committed at HEAD. A repository that sets neither block loads, resolves and
+  digests exactly as before. Older wardens reject both keys, so add them only after the release
   that ships them runs on every machine and CI runner.
 
 ### Fixed

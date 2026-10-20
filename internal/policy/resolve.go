@@ -318,18 +318,13 @@ func resolveWorkspaces(cfg domain.Config) *domain.ResolvedWorkspaces {
 	}
 	out := &domain.ResolvedWorkspaces{
 		Select: domain.WorkspaceSelectAll,
-		Rules:  domain.SelectionRules{Unowned: domain.UnownedFull},
+		Rules:  cfg.SelectionRules(),
 		Notice: domain.WorkspacePreviewNotice,
 	}
 	if w := cfg.Workspaces; w != nil {
 		out.Discover = w.Discover
 		if w.Select != "" {
 			out.Select = w.Select
-		}
-		out.Rules.Global = w.Global
-		out.Rules.Ignore = w.Ignore
-		if w.Unowned != "" {
-			out.Rules.Unowned = w.Unowned
 		}
 		out.Concurrency = w.Concurrency
 	}
