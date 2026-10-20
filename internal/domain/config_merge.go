@@ -8,9 +8,10 @@ import "maps"
 // per field; the per-hook `steps:` lists UNION (base steps are preserved so a
 // repo cannot silently drop an org-mandated step — see mergeStepMap); rules
 // concatenate (base first, then child) so an org base can set broad policy and
-// a repo append stricter rules. The signing, agent_trace, forge, status and push
-// blocks merge per field (child wins), except that signing.required and
-// agent_trace.required only ratchet up. The profile ratchets too: the higher of
+// a repo append stricter rules. The signing, agent_trace, forge, status, push
+// and workspaces blocks merge per field (child wins), except that
+// signing.required and agent_trace.required only ratchet up and
+// workspaces.global unions. The profile ratchets too: the higher of
 // base and child wins (the loader refuses a child that names a lower one). This
 // backs `extends:` — the org-policy-sync mechanism (§5.2).
 //
@@ -33,7 +34,11 @@ func (c Config) OverlayOnto(base Config) Config {
 	if c.Hooks != (HookConfig{}) {
 		out.Hooks = c.Hooks
 	}
-	out.Commands = mergeStringMap(base.Commands, c.Commands)
+	// commands: and per_workspace: merge per key, child wins, and together:
+	// the child's definition of a step replaces the base's whichever block
+	// either is in (see mergeStepDefinitions).
+	out.Commands, out.PerWorkspace = mergeStepDefinitions(base, c)
+	out.Workspaces = mergeWorkspaces(base.Workspaces, c.Workspaces)
 	out.AgentCommands = mergeStringMap(base.AgentCommands, c.AgentCommands)
 	out.Timeouts = mergeStringMap(base.Timeouts, c.Timeouts)
 	out.Diagnostics = mergeStringMap(base.Diagnostics, c.Diagnostics)

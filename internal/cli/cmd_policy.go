@@ -4,6 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
+	"strconv"
+	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/explain"
@@ -106,6 +109,58 @@ func printPolicy(w io.Writer, p domain.ResolvedPolicy) {
 		_, _ = fmt.Fprintln(w, "matched rules:   (none)")
 	}
 	printProfile(w, p.Profile)
+	printWorkspaces(w, p)
+}
+
+// printWorkspaces shows the resolved monorepo configuration, and that this
+// release does not act on it. It prints nothing when the config sets neither
+// workspaces: nor per_workspace:, so every other repo's explain output is
+// unchanged.
+func printWorkspaces(w io.Writer, p domain.ResolvedPolicy) {
+	ws := p.Workspaces
+	if ws == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "workspaces:      discover=%s select=%s unowned=%s concurrency=%s\n",
+		orNone(strings.Join(ws.Discover, ",")), ws.Select, ws.Rules.Unowned, concurrencyLabel(ws.Concurrency))
+	_, _ = fmt.Fprintf(w, "  global:        %s (always: %s)\n", orNone(strings.Join(ws.Rules.Global, " ")), strings.Join(domain.DefaultGlobalPaths, " "))
+	_, _ = fmt.Fprintf(w, "  ignore:        %s\n", orNone(strings.Join(ws.Rules.Ignore, " ")))
+	if len(ws.Steps) > 0 {
+		_, _ = fmt.Fprintln(w, "per_workspace:")
+		names := make([]domain.StepName, 0, len(ws.Steps))
+		for s := range ws.Steps {
+			names = append(names, s)
+		}
+		slices.Sort(names)
+		for _, s := range names {
+			def := ws.Steps[s]
+			line := fmt.Sprintf("  %s: %s %q", s, def.Mode(), def.Command())
+			if len(def.Ecosystems) > 0 {
+				line += " ecosystems=" + strings.Join(def.Ecosystems, ",")
+			}
+			if slices.Contains(p.Steps, s) {
+				line += " (in this hook's steps: it does not run per workspace yet)"
+			}
+			_, _ = fmt.Fprintln(w, line)
+		}
+	}
+	if !ws.Active {
+		_, _ = fmt.Fprintf(w, "NOTE: %s.\n", ws.Notice)
+	}
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}
+
+func concurrencyLabel(n int) string {
+	if n == 0 {
+		return "default"
+	}
+	return strconv.Itoa(n)
 }
 
 // printProfile shows the compliance profile in force and each floor's status.

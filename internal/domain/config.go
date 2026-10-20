@@ -70,6 +70,21 @@ type Config struct {
 	// of a repo without it is part of signed execution contracts.
 	Diagnostics map[string]string `yaml:"diagnostics,omitempty" json:"Diagnostics,omitempty"`
 
+	// Workspaces configures monorepo mode (design 0006): which ecosystems'
+	// workspaces are discovered, and which changes select which of them. It
+	// is a preview: this release validates and resolves it, and `policy
+	// explain` shows it, but no step runs per workspace yet. Requires the
+	// release that ships it on every machine that reads the config: older
+	// releases reject the key.
+	//
+	// omitempty matters in both encodings, as for Profile.
+	Workspaces *WorkspacesConfig `yaml:"workspaces,omitempty" json:"Workspaces,omitempty"`
+
+	// PerWorkspace maps a shell check to the command it runs per workspace
+	// instead of once for the repository. A step is defined here or under
+	// commands:, never both. A preview, like Workspaces.
+	PerWorkspace map[string]PerWorkspaceStep `yaml:"per_workspace,omitempty" json:"PerWorkspace,omitempty"`
+
 	// SymlinkDeps opts out of dependency materialization. By default warden
 	// copies gitignored dependency directories (node_modules) into the
 	// disposable worktree as REAL files, so any tool works — including Next.js 16
@@ -271,6 +286,9 @@ func (c Config) Validate() error {
 		}
 	}
 	if err := c.validateDiagnostics(); err != nil {
+		return err
+	}
+	if err := c.validateWorkspaces(); err != nil {
 		return err
 	}
 	for hook, names := range c.Steps {
