@@ -58,39 +58,42 @@ func (p *Predictions) Lookup(step domain.StepName, base string, contract domain.
 	}
 	return &domain.ExecutionReuse{Source: domain.PredictionPurpose, Key: key, RecordedAt: entry.CreatedAt}
 }
-func (p *Predictions) Record(step domain.StepName, base string, contract domain.ExecutionContract) bool {
+func (p *Predictions) Record(step domain.StepName, base string, contract domain.ExecutionContract) (time.Time, bool) {
 	if p.signer == nil || p.binary == "" {
-		return false
+		return time.Time{}, false
 	}
 	entry := domain.Prediction{BinaryDigest: p.binary, WardenVersion: p.version, Purpose: domain.PredictionPurpose, Version: 1, Step: step, BaseSHA: base, Contract: contract, CreatedAt: time.Now().UTC(), PublicKey: p.signer.PublicKey(), Algorithm: p.signer.Algorithm()}
 	payload, err := entry.SigningPayload()
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	entry.Signature, err = p.signer.Sign(payload)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	if os.MkdirAll(p.dir, 0o700) != nil {
-		return false
+		return time.Time{}, false
 	}
 	f, err := os.CreateTemp(p.dir, "prediction-*")
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
-		return false
+		return time.Time{}, false
 	}
 	if f.Close() != nil {
-		return false
+		return time.Time{}, false
 	}
-	return os.Rename(f.Name(), p.path(step)) == nil
+	if os.Rename(f.Name(), p.path(step)) != nil {
+		return time.Time{}, false
+	}
+	return entry.CreatedAt, true
 }
 
 // A rebuilt development binary must not inherit results from a different
