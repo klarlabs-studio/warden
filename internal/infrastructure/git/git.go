@@ -267,6 +267,25 @@ func changedPathsArgs(format string, rest ...string) []string {
 	return append(args, rest...)
 }
 
+// ChangedPaths returns the paths that differ between the trees of from and to
+// (commits or trees), with the same real-path guarantees as every other
+// changed-path listing: a rename is its old and its new path, and no path is
+// quoted. Workspace selection attributes each one to a workspace, so a path
+// in any other form would be owned by nothing.
+func (r *Repo) ChangedPaths(from, to string) ([]string, error) {
+	if from == "" || to == "" {
+		return nil, errors.New("changed paths: both revisions are required")
+	}
+	if strings.HasPrefix(from, "-") || strings.HasPrefix(to, "-") {
+		return nil, fmt.Errorf("changed paths: %q/%q: a revision cannot start with '-'", from, to)
+	}
+	out, err := runRawIn(r.Dir, changedPathsArgs("--name-only", from, to, "--")...)
+	if err != nil {
+		return nil, err
+	}
+	return splitNUL(out), nil
+}
+
 // DefaultBranchRef is the remote's default head, e.g. "origin/main". It names
 // the point a branch integrates INTO, which is the only sensible diff base for
 // a branch that has no upstream of its own yet.
