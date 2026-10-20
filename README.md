@@ -867,10 +867,10 @@ Editors can read what the watcher observed with `warden feedback status`; see
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
 | `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
 | `warden watch --staged [--once]` | warm opted-in staged container checks for local pre-commit reuse |
-| `warden feedback status [--format json]` | what the staged watcher last observed for this worktree, with freshness computed now ([background feedback](docs/background-feedback.md)) |
+| `warden feedback status [--format json\|sarif\|problems]` | what the staged watcher last observed for this worktree, with freshness computed now; `problems` feeds editor problem matchers, `sarif` exports SARIF 2.1.0 ([background feedback](docs/background-feedback.md)) |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
-| `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `policy-explain`, `steps`, `run-trigger`) |
+| `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `feedback`, `policy-explain`, `steps`, `run-trigger`) |
 | `warden mcp serve` | MCP server over stdio |
 
 ### Agent surfaces
@@ -887,6 +887,7 @@ structured answer, rather than having to run the gate to find out.
 | `doctor` | `doctor` | Which commits since adoption have no note — where was the gate bypassed? |
 | `audit` | `audit` | Full per-commit provenance export, for compliance |
 | `status` | `status` | Are the hooks actually armed? What would run? Which key signs here? |
+| `feedback_status` | `feedback` | What did the background staged watcher last observe, and does it still describe the worktree? (advisory, never provenance) |
 | `policy_explain` | `policy-explain` | What policy resolves for a hypothetical push? |
 | `steps_list` | `steps` | Which steps exist per hook? |
 | `run_trigger` | `run-trigger` | Run the pipeline (**gated on trust** — see below) |
