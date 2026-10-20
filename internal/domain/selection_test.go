@@ -184,6 +184,97 @@ func TestSelectForcesFull(t *testing.T) {
 	}
 }
 
+// nested is a repo with a root workspace and nested ones, including the
+// "a" / "a-b" / "a/c" layout whose sort order ("a-b" between "a" and "a/c")
+// trips neighbor-comparison shortcuts.
+func nested() WorkspaceGraph {
+	return graph(
+		Workspace{Path: ".", Name: "example.com/root", Ecosystem: "go"},
+		ws("a", "a"),
+		ws("a-b", "ab"),
+		ws("a/c", "c"),
+		ws("a/c/d", "d", "a"), // depends on its grandparent
+		ws("tools", "tools", "."),
+	)
+}
+
+func nestedInput(changed ...string) SelectionInput {
+	in := input(changed...)
+	in.Base, in.Head = nested(), nested()
+	return in
+}
+
+func TestSelectLongestPrefixOwnership(t *testing.T) {
+	cases := []struct {
+		name    string
+		changed []string
+		want    []string
+	}{
+		{"nested owner wins", []string{"a/c/x.go"}, []string{"a/c"}},
+		{"sibling sharing a prefix", []string{"a-b/x.go"}, []string{"a-b"}},
+		{"parent keeps the rest", []string{"a/x.go"}, []string{"a", "a/c/d"}},
+		{"deepest owner", []string{"a/c/d/e/f.go"}, []string{"a/c/d"}},
+		{"workspace directory itself", []string{"a/c"}, []string{"a/c"}},
+		// The root workspace owns what nobody else does, at lowest priority,
+		// and its dependents (tools uses the root module) follow.
+		{"root owns the rest", []string{"internal/x.go", "README.md"}, []string{".", "tools"}},
+		{"root files beside nested ones", []string{"cmd/main.go", "a-b/y.go"}, []string{".", "a-b", "tools"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := mustSelect(t, nestedInput(c.changed...))
+			if s.Kind != SelectionAffected {
+				t.Fatalf("Kind = %s (%+v), want affected", s.Kind, s.Full)
+			}
+			if got := s.Paths(); !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("selected %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// With a root workspace no path is unowned, but the rules checked before
+// ownership still force full: the config file, root manifests (including a
+// root module's go.mod), root lockfiles (including its go.sum) and globals.
+func TestSelectRootWorkspaceStillForcesFull(t *testing.T) {
+	cases := []struct {
+		path string
+		want FullRule
+	}{
+		{".warden.yaml", FullRuleConfiguration},
+		{"go.work", FullRuleRootManifest},
+		{"go.mod", FullRuleRootManifest},
+		{"package.json", FullRuleRootManifest},
+		{"go.work.sum", FullRuleLockfile},
+		{"go.sum", FullRuleLockfile},
+		{"pnpm-lock.yaml", FullRuleLockfile},
+		{"turbo.json", FullRuleGlobal},
+		{"/abs", FullRuleInvalidPath},
+	}
+	all := nested().Paths()
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			s := mustSelect(t, nestedInput("a/c/x.go", c.path))
+			if s.Kind != SelectionFull || s.Full.Rule != c.want {
+				t.Fatalf("Kind = %s, Full = %+v; want full by %s", s.Kind, s.Full, c.want)
+			}
+			if !reflect.DeepEqual(s.Paths(), all) {
+				t.Fatalf("selected %v, want %v", s.Paths(), all)
+			}
+		})
+	}
+	// Below the root, go.mod and go.sum are the owning workspace's files.
+	s := mustSelect(t, nestedInput("a/c/go.mod", "a/c/go.sum"))
+	if s.Kind != SelectionAffected || !reflect.DeepEqual(s.Paths(), []string{"a/c"}) {
+		t.Fatalf("nested go.mod: Kind = %s, selected %v", s.Kind, s.Paths())
+	}
+	// And no unowned path exists, so unowned never forces full.
+	s = mustSelect(t, nestedInput(".github/workflows/ci.yml", "Makefile"))
+	if s.Kind != SelectionAffected || !reflect.DeepEqual(s.Paths(), []string{".", "tools"}) {
+		t.Fatalf("root-owned paths: Kind = %s (%+v), selected %v", s.Kind, s.Full, s.Paths())
+	}
+}
+
 // A workspace the change deletes still reaches what depended on it, and a
 // deleted edge still carries a change in the old dependency.
 func TestSelectDeletedWorkspaceReachesDependents(t *testing.T) {

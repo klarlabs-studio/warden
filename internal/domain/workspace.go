@@ -68,10 +68,10 @@ type canonicalWorkspaceGraph struct {
 // workspace would quietly shrink what a check covers.
 //
 // It refuses: an invalid name or path, two workspaces with the same name or
-// path, a workspace nested inside another (a parent's commands may read the
-// nested workspace's files, so a change there would be attributed to the
-// nested workspace alone and the parent's check skipped), a dependency on a
-// path that is not a workspace, and a dependency cycle.
+// path, a dependency on a path that is not a workspace, and a dependency
+// cycle. Nested workspaces (including the root, ".") are allowed: a path
+// belongs to the workspace with the longest path containing it, the way
+// go.work modules and nested JS packages own their own directories.
 func (g WorkspaceGraph) Validate() error {
 	byPath := make(map[string]Workspace, len(g.Workspaces))
 	byName := make(map[string]string, len(g.Workspaces))
@@ -87,9 +87,6 @@ func (g WorkspaceGraph) Validate() error {
 		}
 		byPath[w.Path] = w
 		byName[w.Name] = w.Path
-	}
-	if err := g.checkNesting(); err != nil {
-		return err
 	}
 	for _, w := range g.Workspaces {
 		for _, d := range w.Deps {
@@ -115,19 +112,16 @@ func (w Workspace) validate() error {
 }
 
 // ValidateWorkspacePath reports why p is not a usable workspace directory:
-// it must be a clean, relative, "/"-separated path below the repository root.
-// The root itself (".") is refused, because every other workspace would be
-// nested inside it. So are ".." elements, backslashes, control characters
-// (NUL and newline among them) and elements starting with '-', which a
-// command would read as an option.
+// it must be the repository root (".") or a clean, relative, "/"-separated
+// path below it. ".." elements, backslashes, control characters (NUL and
+// newline among them) and elements starting with '-', which a command would
+// read as an option, are refused.
 func ValidateWorkspacePath(p string) error {
 	switch {
 	case p == "":
 		return fmt.Errorf("workspace path is empty")
 	case len(p) > maxGlobLen:
 		return fmt.Errorf("workspace path is longer than %d bytes", maxGlobLen)
-	case p == ".":
-		return fmt.Errorf("the repository root cannot be a workspace: every other workspace would be nested inside it")
 	case strings.HasPrefix(p, "/"):
 		return fmt.Errorf("workspace path %q must be relative to the repository root", p)
 	case strings.ContainsRune(p, '\\'):
@@ -146,25 +140,6 @@ func ValidateWorkspacePath(p string) error {
 		}
 		if strings.HasPrefix(elem, "-") {
 			return fmt.Errorf("workspace path %q has an element starting with '-'", p)
-		}
-	}
-	return nil
-}
-
-// checkNesting refuses a workspace whose directory lies inside another's. It
-// checks every proper ancestor directory of each path against the set of
-// workspace paths. (Comparing sorted neighbors is not enough: "a-b" sorts
-// between "a" and "a/c".)
-func (g WorkspaceGraph) checkNesting() error {
-	paths := make(map[string]bool, len(g.Workspaces))
-	for _, w := range g.Workspaces {
-		paths[w.Path] = true
-	}
-	for _, p := range sortedKeys(paths) {
-		for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
-			if paths[dir] {
-				return fmt.Errorf("workspace %q is nested inside workspace %q", p, dir)
-			}
 		}
 	}
 	return nil

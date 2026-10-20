@@ -17,9 +17,28 @@ type selectionCase struct {
 	Extra []string
 }
 
-const propUniverse = 7
+const propUniverse = 8
 
-func propPath(i int) string { return fmt.Sprintf("pkg/w%d", i) }
+// propPath gives the universe a root workspace (0) and nested ones (6 inside
+// 1, 7 inside 6), so ownership by longest prefix is exercised.
+func propPath(i int) string {
+	switch i {
+	case 0:
+		return "."
+	case 6:
+		return "pkg/w1/sub"
+	case 7:
+		return "pkg/w1/sub/deep"
+	}
+	return fmt.Sprintf("pkg/w%d", i)
+}
+
+func propFile(i, f int) string {
+	if i == 0 {
+		return fmt.Sprintf("f%d.ts", f)
+	}
+	return fmt.Sprintf("%s/f%d.ts", propPath(i), f)
+}
 
 func randomGraph(r *rand.Rand) WorkspaceGraph {
 	var members []int
@@ -47,7 +66,7 @@ func randomPaths(r *rand.Rand, n int) []string {
 	var out []string
 	for k := 0; k < n; k++ {
 		if r.Intn(10) < 8 {
-			out = append(out, fmt.Sprintf("%s/f%d.ts", propPath(r.Intn(propUniverse)), r.Intn(3)))
+			out = append(out, propFile(r.Intn(propUniverse), r.Intn(3)))
 		} else {
 			out = append(out, pool[r.Intn(len(pool))])
 		}

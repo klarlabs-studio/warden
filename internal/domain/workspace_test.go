@@ -18,7 +18,10 @@ func TestWorkspaceGraphValidateAccepts(t *testing.T) {
 		Workspace{Path: "modules/api", Name: "github.com/acme/mono/api", Ecosystem: "go"},
 		Workspace{Path: "tools/x_y.z", Name: "x_y.z~1"}, // ecosystem optional
 		ws("a-b", "ab"),
-		ws("a", "a"), // "a-b" sorts between "a" and "a/…" but is not nested
+		ws("a", "a"),
+		ws("a/c", "c"),     // nested workspaces are allowed
+		ws("a/c/d/e", "e"), // at any depth
+		ws(".", "root"),    // and so is the repository root
 	)
 	if err := g.Validate(); err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
@@ -51,7 +54,6 @@ func TestWorkspaceGraphValidateRefuses(t *testing.T) {
 		{"bad ecosystem", graph(Workspace{Path: "a", Name: "a", Ecosystem: "JS;"}), "invalid ecosystem"},
 		// Paths must be clean, relative and inside the repository.
 		{"empty path", graph(ws("", "a")), "empty"},
-		{"root path", graph(ws(".", "a")), "repository root"},
 		{"absolute path", graph(ws("/a", "a")), "relative"},
 		{"backslash path", graph(ws(`a\b`, "a")), "separators"},
 		{"dot-slash path", graph(ws("./a", "a")), "not clean"},
@@ -65,9 +67,9 @@ func TestWorkspaceGraphValidateRefuses(t *testing.T) {
 		{"path too long", graph(ws(strings.Repeat("a", maxGlobLen+1), "a")), "longer than"},
 		// Graph-level checks.
 		{"duplicate path", graph(ws("a", "a"), ws("a", "b")), "declared twice"},
+		{"duplicate root", graph(ws(".", "a"), ws(".", "b")), "declared twice"},
+		{"dot-prefixed path", graph(ws("./.", "a")), "not clean"},
 		{"duplicate name", graph(ws("a", "x"), ws("b", "x")), "used by both"},
-		{"nested", graph(ws("a", "a"), ws("a-b", "ab"), ws("a/c", "c")), `"a/c" is nested inside workspace "a"`},
-		{"deeply nested", graph(ws("a/b/c/d", "d"), ws("a/b", "b")), `"a/b/c/d" is nested inside workspace "a/b"`},
 		{"unknown dependency", graph(ws("a", "a", "b")), "not a workspace"},
 		{"self dependency", graph(ws("a", "a", "a")), "cycle: a -> a"},
 		{"cycle", graph(ws("a", "a", "b"), ws("b", "b", "c"), ws("c", "c", "a")), "cycle: a -> b -> c -> a"},

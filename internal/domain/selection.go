@@ -16,18 +16,25 @@ const SelectionVersion = 1
 // loader in infrastructure reads this constant.)
 const WardenConfigFile = ".warden.yaml"
 
-// WorkspaceRootManifests are the root files that declare which workspaces
-// exist. A change can add, remove or rewire workspaces in ways the per-path
-// rules cannot see, so it forces a full selection.
-var WorkspaceRootManifests = []string{"package.json", "pnpm-workspace.yaml", "go.work"}
+// WorkspaceRootManifests are the manifests at the repository root. A change
+// can add, remove or rewire workspaces in ways the per-path rules cannot see,
+// so it forces a full selection. The list is matched against root paths
+// only, before ownership: when the root is itself a workspace ("." in
+// go.work, or a root package), its go.mod and package.json still force full
+// rather than selecting just the root workspace. That is the conservative
+// reading: a root go.mod's replace and toolchain directives, like a root
+// package.json's overrides and workspaces, can change every workspace.
+var WorkspaceRootManifests = []string{"package.json", "pnpm-workspace.yaml", "go.work", "go.mod"}
 
 // RootLockfiles are the shared lockfiles at the repository root. One resolves
 // dependencies for every workspace and nothing attributes a change in it to
-// particular workspaces yet, so a change forces a full selection. A lockfile
-// inside a workspace belongs to that workspace like any other file there.
+// particular workspaces yet, so a change forces a full selection. A root
+// module's go.sum is included for the same reason as go.mod in
+// WorkspaceRootManifests. A lockfile inside a workspace below the root belongs
+// to that workspace like any other file there.
 var RootLockfiles = []string{
 	"package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock",
-	"bun.lock", "bun.lockb", "go.work.sum",
+	"bun.lock", "bun.lockb", "go.work.sum", "go.sum",
 }
 
 // DefaultGlobalPaths are the globs that affect every workspace in the
@@ -238,14 +245,17 @@ func (s Selection) Digest() (string, error) {
 //  1. the configuration digests differ or either is unknown, or
 //     WardenConfigFile changed;
 //  2. a changed path is not a clean, relative repository path;
-//  3. a WorkspaceRootManifests file changed;
-//  4. a RootLockfiles file changed;
+//  3. a WorkspaceRootManifests file changed at the root;
+//  4. a RootLockfiles file changed at the root;
 //  5. a changed path matches DefaultGlobalPaths or Rules.Global;
 //  6. a changed path belongs to no workspace of either graph, matches no
-//     Rules.Ignore glob, and Rules.Unowned is not "ignore".
+//     Rules.Ignore glob, and Rules.Unowned is not "ignore". (With a root
+//     workspace "." every path is owned, so this rule never fires; rules
+//     1-5 still apply, because they are checked before ownership.)
 //
 // Otherwise each changed path selects the workspace that owns it (the longest
-// workspace path that contains it, in the base and in the head graph), and
+// workspace path that contains it, "." lowest, in the base and in the head
+// graph), and
 // every workspace that depends on a selected one, transitively, over the
 // union of both graphs' edges, is selected too.
 //
@@ -415,18 +425,29 @@ func unionDeps(base, head WorkspaceGraph) map[string][]string {
 	return deps
 }
 
-// owner returns the path of the workspace of g that contains p: the longest
-// workspace path that is p or a directory above it, or "" if none is. In a
-// validated graph at most one workspace contains any path; taking the longest
-// keeps attribution well defined regardless.
+// owner returns the path of the workspace of g that owns p: the longest
+// workspace path that is p or a directory above it, with the root workspace
+// "." containing every path at the lowest priority. It returns "" when no
+// workspace contains p. A nested workspace therefore owns its own files, and
+// its parent owns only the rest (it is selected for the nested one's changes
+// only if it declares a dependency on it).
 func owner(g WorkspaceGraph, p string) string {
-	best := ""
+	best, bestRank := "", -1
 	for _, w := range g.Workspaces {
-		if pathWithin(p, w.Path) && len(w.Path) > len(best) {
-			best = w.Path
+		if pathWithin(p, w.Path) && ownerRank(w.Path) > bestRank {
+			best, bestRank = w.Path, ownerRank(w.Path)
 		}
 	}
 	return best
+}
+
+// ownerRank orders containing workspaces: the root "." lowest (rank 0, even
+// though it is as long as a one-letter path), then by path length.
+func ownerRank(dir string) int {
+	if dir == "." {
+		return 0
+	}
+	return len(dir)
 }
 
 // validChangedPath reports whether p is a clean, relative, "/"-separated
@@ -447,9 +468,10 @@ func validChangedPath(p string) bool {
 	return true
 }
 
-// pathWithin reports whether p is dir or lies beneath it.
+// pathWithin reports whether p is dir or lies beneath it. Every path lies
+// beneath the root, ".".
 func pathWithin(p, dir string) bool {
-	return p == dir || strings.HasPrefix(p, dir+"/")
+	return dir == "." || p == dir || strings.HasPrefix(p, dir+"/")
 }
 
 func matchesAny(globs []string, p string) bool {
