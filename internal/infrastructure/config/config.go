@@ -21,8 +21,9 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
-// FileName is the repo-root config file Warden reads.
-const FileName = ".warden.yaml"
+// FileName is the repo-root config file Warden reads. Workspace selection
+// forces a full run when it changes, so both read the one domain constant.
+const FileName = domain.WardenConfigFile
 
 // maxConfigBytes caps a single config file (the root .warden.yaml or any
 // extends target). A real Warden policy is a few KiB; the cap defends the
