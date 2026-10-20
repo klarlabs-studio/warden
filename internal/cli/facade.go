@@ -101,6 +101,7 @@ func (f facade) Verify(commitish string, trustedKeys []string) (mcpserver.Proven
 		SignatureValid: res.SignatureValid,
 		Signer:         res.Signer,
 		Trusted:        res.Trusted,
+		ScopeRefused:   res.ScopeRefused,
 		Record:         res.Record,
 	}, nil
 }

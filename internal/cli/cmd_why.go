@@ -80,13 +80,21 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "authorship:    %s\n", whyAuthorship(rec.Authorship))
 	}
 
+	if rec.Scope != nil {
+		_, _ = fmt.Fprintf(stdout, "scope:         %s\n", whyScope(rec))
+	}
+
 	if len(rec.MatchedRules) > 0 {
 		_, _ = fmt.Fprintf(stdout, "matched rules: %s\n", strings.Join(rec.MatchedRules, ", "))
 	} else {
 		_, _ = fmt.Fprintln(stdout, "matched rules: (none — base policy)")
 	}
 
-	_, _ = fmt.Fprintf(stdout, "evidence:      %d records, chain %s\n", len(rec.Evidence), chainState(res.Validated))
+	// A note refused only for its kind (external) or its scope (affected) has
+	// an intact chain; calling it BROKEN would accuse tampering that did not
+	// happen.
+	_, _ = fmt.Fprintf(stdout, "evidence:      %d records, chain %s\n", len(rec.Evidence),
+		chainState(res.Validated || res.ExternalRefused || res.ScopeRefused))
 	_, _ = fmt.Fprintf(stdout, "signature:     %s\n", whySignature(res))
 	// The trace is the agent's own claim; what warden adds is that this exact
 	// record existed when the commit was gated. Report whether it STILL matches,
@@ -109,6 +117,19 @@ func cmdWhy(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// whyScope renders a note's workspace scope, and for anything but a full
+// run, that verifiers refuse it by default.
+func whyScope(rec *domain.RunRecord) string {
+	out := rec.Scope.Summary()
+	if !rec.FullScope() {
+		out += " — a partial check; `warden verify` refuses it by default"
+		if rec.Scope.Anchor != "" {
+			out += ", the other workspaces rest on the full run at " + shortSHA(rec.Scope.Anchor)
+		}
+	}
+	return out
 }
 
 // whyOutcomesCaveat qualifies the step list read from a note, which does not

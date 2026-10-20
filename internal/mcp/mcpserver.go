@@ -64,7 +64,10 @@ type ProvenanceRecord struct {
 	SignatureValid bool
 	Signer         string
 	Trusted        bool
-	Record         *domain.RunRecord
+	// ScopeRefused: the note was otherwise sound and refused only because it
+	// attests an affected-scope run.
+	ScopeRefused bool
+	Record       *domain.RunRecord
 }
 
 // RangeVerifyRequest is the delivery-neutral option set for a range gate,

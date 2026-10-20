@@ -309,6 +309,9 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 		if res.Record != nil {
 			_, _ = fmt.Fprintf(w, " (%s, %d steps, chain-intact", res.Record.RunID, len(res.Record.StepsRun))
 			_, _ = fmt.Fprintf(w, "%s)", signerNote(res))
+			if res.Record.Scope != nil {
+				_, _ = fmt.Fprintf(w, "\n  scope: %s", res.Record.Scope.Summary())
+			}
 		}
 		_, _ = fmt.Fprintln(w)
 		return
@@ -324,6 +327,15 @@ func printVerify(w io.Writer, res service.VerifyResult, pinned bool) {
 	if res.ExternalRefused && !res.External {
 		_, _ = fmt.Fprintf(w, "unverified %s — --require-external was given and this is a local warden "+
 			"attestation, not a record of a CI run\n", short(res.SHA))
+		return
+	}
+	// Refused only for its scope: a sound, trusted note of a partial check.
+	// Name it as that, with the scope it records, rather than as unverified
+	// for some reason the reader would go looking for.
+	if res.ScopeRefused && res.Record != nil {
+		_, _ = fmt.Fprintf(w, "unverified %s — %s: the note attests an affected-scope run (%s), "+
+			"not a full validation; verifiers refuse it by default; run the checks\n",
+			short(res.SHA), domain.ReasonAffectedScope, res.Record.Scope.Summary())
 		return
 	}
 	// THERE IS NO NOTE. This has to be settled before any branch that describes
@@ -396,6 +408,8 @@ func reasonHint(r domain.VerifyReason) string {
 		return "signed by a key outside the trusted set"
 	case domain.ReasonProfile:
 		return "provenance is sound, but the note does not conform to a required compliance profile"
+	case domain.ReasonAffectedScope:
+		return "provenance is sound, but the note attests an affected-scope run (per-workspace checks for the affected workspaces only), which is not accepted as a full validation; a push span it covers is refused with it"
 	case domain.ReasonForgeAuthored:
 		return "authored by the forge (squash merge, web edit, or a bot), signed by its key — no developer machine was in this commit's path, so no local gate could have run; allow these with forge.accept_authored in .warden.yaml"
 	default:

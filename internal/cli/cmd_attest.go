@@ -132,7 +132,10 @@ type attestPredicate struct {
 	Evidence      *evidenceBlock              `json:"evidence,omitempty"`
 	Dependencies  []domain.DependencyManifest `json:"dependencies,omitempty"`
 	Signer        *signerBlock                `json:"signer,omitempty"`
-	Verification  verificationBlock           `json:"verification"`
+	// Scope is the note's signed workspace scope (design 0006), copied as
+	// recorded. Absent for a note without one, which attests a full run.
+	Scope        *domain.RunScope  `json:"scope,omitempty"`
+	Verification verificationBlock `json:"verification"`
 }
 
 type evidenceBlock struct {
@@ -153,6 +156,10 @@ type verificationBlock struct {
 	Attested       bool `json:"attested"`
 	SignatureValid bool `json:"signatureValid"`
 	Trusted        bool `json:"trusted"`
+	// FullScope is false when the note attests an affected-scope run, which
+	// `warden verify` refuses by default. Present on every statement, so a
+	// consumer never has to infer "full" from an absent field.
+	FullScope bool `json:"fullScope"`
 }
 
 // buildStatement projects a verified note into the in-toto Statement. It never
@@ -171,7 +178,9 @@ func buildStatement(res service.VerifyResult) intotoStatement {
 			Attested:       res.Validated || rec.Attests(res.SHA),
 			SignatureValid: res.SignatureValid,
 			Trusted:        res.Trusted,
+			FullScope:      rec.FullScope(),
 		},
+		Scope: rec.Scope,
 	}
 	if len(rec.Evidence) > 0 {
 		pred.Evidence = &evidenceBlock{ChainRoot: rec.EvidenceChainRoot, Entries: rec.Evidence}
