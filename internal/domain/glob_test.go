@@ -1,4 +1,4 @@
-package policy
+package domain
 
 import (
 	"strings"
@@ -37,8 +37,8 @@ func TestGlobMatch(t *testing.T) {
 		{"*.md", "docs/readme.md", false},
 	}
 	for _, c := range cases {
-		if got := globMatch(c.pattern, c.s); got != c.want {
-			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.s, got, c.want)
+		if got := GlobMatch(c.pattern, c.s); got != c.want {
+			t.Errorf("GlobMatch(%q, %q) = %v, want %v", c.pattern, c.s, got, c.want)
 		}
 	}
 }
@@ -98,14 +98,14 @@ func TestGlobMatchReDoS(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			done := make(chan bool, 1)
-			go func() { done <- globMatch(c.pattern, c.s) }()
+			go func() { done <- GlobMatch(c.pattern, c.s) }()
 			select {
 			case got := <-done:
 				if got != c.want {
-					t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.s, got, c.want)
+					t.Errorf("GlobMatch(%q, %q) = %v, want %v", c.pattern, c.s, got, c.want)
 				}
 			case <-time.After(2 * time.Second):
-				t.Fatalf("globMatch(%q, %q) did not return within 2s — "+
+				t.Fatalf("GlobMatch(%q, %q) did not return within 2s — "+
 					"likely exponential backtracking (ReDoS regression)", c.pattern, c.s)
 			}
 		})
@@ -116,14 +116,14 @@ func TestGlobMatchReDoS(t *testing.T) {
 // pathologically large input without affecting realistic globs.
 func TestGlobMatchCaps(t *testing.T) {
 	// Over the byte cap -> no match, returns immediately.
-	if globMatch(strings.Repeat("*", maxGlobLen+1), strings.Repeat("a", 10)) {
+	if GlobMatch(strings.Repeat("*", maxGlobLen+1), strings.Repeat("a", 10)) {
 		t.Error("oversized pattern should not match")
 	}
-	if globMatch("*", strings.Repeat("a", maxGlobLen+1)) {
+	if GlobMatch("*", strings.Repeat("a", maxGlobLen+1)) {
 		t.Error("oversized subject should not match")
 	}
 	// Over the segment cap -> no match.
-	if globMatch(strings.Repeat("*/", maxGlobSegments+1), strings.Repeat("a/", 3)+"a") {
+	if GlobMatch(strings.Repeat("*/", maxGlobSegments+1), strings.Repeat("a/", 3)+"a") {
 		t.Error("too many pattern segments should not match")
 	}
 }
