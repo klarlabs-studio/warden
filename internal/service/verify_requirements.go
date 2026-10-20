@@ -7,6 +7,10 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
+// scopeRequirementFailure is why a requirements check refuses a record of an
+// affected-scope run.
+const scopeRequirementFailure = "affected-scope: the note attests per-workspace checks for the affected workspaces only, and execution requirements need a full run"
+
 // VerifyRequirements narrows single-commit verification to fresh observations
 // matching protected consumer expectations. It never widens Attests or trust.
 func (s *Service) VerifyRequirements(commit string, policy ExternalPolicy, requirements domain.ExecutionRequirements, keys ...string) (VerifyResult, error) {
@@ -23,6 +27,15 @@ func (s *Service) VerifyRequirementsWithProfiles(commit string, policy ExternalP
 	result, err := s.VerifyWithPolicy(commit, policy, keys...)
 	if err != nil {
 		return result, err
+	}
+	// Version 1 requirements describe a full run. A record of an affected one
+	// is refused here in its own right, whatever the verification policy: its
+	// steps ran for some workspaces only, and its commands came from
+	// per-workspace templates no contract describes.
+	if result.Record != nil && (result.Affected || !result.Record.FullScope()) {
+		result.Validated = false
+		result.RequirementFailures = []string{scopeRequirementFailure}
+		return result, nil
 	}
 	if !result.Validated || !result.Trusted || result.External || result.Record == nil {
 		result.Validated = false

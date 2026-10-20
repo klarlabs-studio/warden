@@ -37,6 +37,10 @@ type RangeVerifyOptions struct {
 	// are checked IN ADDITION to the base ref's `profile:`, which VerifyRange
 	// always reads: each one applies, and a commit must conform to all of them.
 	MinProfiles []domain.ComplianceProfile
+	// ScopePolicy decides whether a note attesting an affected-scope run
+	// passes. The zero value, the only one there is, refuses it with
+	// ReasonAffectedScope.
+	ScopePolicy ScopePolicy
 }
 
 // RangeProfile is one minimum compliance profile a range gate enforced, and
@@ -279,7 +283,15 @@ func (s *Service) applySpanCoverage(res *RangeVerifyResult, shas []string, opts 
 		// satisfy — otherwise a span would be a cheaper path to "verified". That
 		// includes every profile in force: a covered commit is judged by its
 		// covering note, so a note that does not conform cannot cover.
-		if v := s.gateVerdict(sha, opts, profiles); !v.OK() {
+		//
+		// A covering note refused only for its affected scope covers nothing
+		// either, but its span commits are named for what they are: published
+		// by a gated push whose check was partial. Left as ReasonMissing they
+		// would read as --no-verify pushes, accusing a bypass that did not
+		// happen. They stay gaps, so a span that does pass can still cover them.
+		v := s.gateVerdict(sha, opts, profiles)
+		partial := v.Reason == domain.ReasonAffectedScope
+		if !v.OK() && !partial {
 			continue
 		}
 		covered, err := s.repo.CommitsInSpan(rec.CoversFrom, sha)
@@ -287,7 +299,12 @@ func (s *Service) applySpanCoverage(res *RangeVerifyResult, shas []string, opts 
 			continue
 		}
 		for _, c := range covered {
-			if i, isGap := gaps[c]; isGap {
+			i, isGap := gaps[c]
+			switch {
+			case !isGap:
+			case partial:
+				res.Commits[i] = domain.CommitVerdict{SHA: c, Reason: domain.ReasonAffectedScope, CoveredBy: sha}
+			default:
 				res.Commits[i] = domain.CommitVerdict{SHA: c, CoveredBy: sha}
 				delete(gaps, c)
 			}
@@ -345,6 +362,12 @@ func (s *Service) verdictFor(sha string, opts RangeVerifyOptions) (domain.Commit
 	}
 	if len(opts.TrustedKeys) > 0 && !keyTrusted(rec, opts.TrustedKeys) {
 		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonUntrusted}, rec
+	}
+	// Last, so the reason names a note that is sound in every other respect
+	// and refused only for attesting a partial check. Span coverage inherits
+	// this: a covering note has to pass this function.
+	if !opts.ScopePolicy.Accepts(rec) {
+		return domain.CommitVerdict{SHA: sha, Reason: domain.ReasonAffectedScope}, rec
 	}
 	return domain.CommitVerdict{SHA: sha}, rec
 }

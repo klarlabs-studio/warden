@@ -33,6 +33,7 @@ func (r ConformanceReport) OK() bool { return len(r.Failures) == 0 }
 // phrased as what was established, not as internal identifiers.
 const (
 	clauseTrusted   = "trusted, commit-bound local provenance"
+	clauseScope     = "the note attests a full run, not an affected-workspace selection"
 	clauseDigest    = "recorded profile matches this warden's built-in definition"
 	clauseRank      = "recorded profile ranks at least %s"
 	clauseSteps     = "required steps %s %s"
@@ -62,8 +63,21 @@ const (
 func Conformance(minimum domain.ComplianceProfile, res VerifyResult) ConformanceReport {
 	rep := ConformanceReport{Min: minimum.String(), Checked: []string{clauseTrusted}}
 	rec := res.Record
-	if !res.Validated || !res.Trusted || res.External || rec == nil {
+	// A note refused only for its scope is still judged on trust first, so the
+	// failure names the scope rather than calling a sound note untrusted.
+	if (!res.Validated && !res.ScopeRefused) || !res.Trusted || res.External || rec == nil {
 		rep.fail(clauseTrusted, "the note is missing, unbound, untrusted or external")
+		return rep
+	}
+
+	// Every profile describes what a gate observed of a FULL run. A record of
+	// an affected-scope run ran its per-workspace checks for some workspaces
+	// only, so it conforms to none of them, whatever its observations say.
+	// This is a rule of the verifier, not of a profile definition: the @1
+	// definitions and their digests are unchanged.
+	rep.Checked = append(rep.Checked, clauseScope)
+	if res.Affected || !rec.FullScope() {
+		rep.fail(clauseScope, "the note attests an affected-scope run ("+rec.Scope.Summary()+")")
 		return rep
 	}
 

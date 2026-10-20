@@ -36,6 +36,15 @@ type VerifyResult struct {
 	// delivery can say nothing but "unverified", sending someone to look for a
 	// missing note that is sitting right there.
 	ExternalRefused bool
+	// Affected reports that the note attests an AFFECTED-scope run: its
+	// per-workspace checks ran only for the workspaces a change affected
+	// (design 0006), or its scope is one this warden cannot read as full.
+	Affected bool
+	// ScopeRefused is set when the note was otherwise sound and was rejected
+	// ONLY because its scope is not full. Delivery can then say "partial check"
+	// rather than "unverified", which would send someone looking for a note
+	// that is sitting right there.
+	ScopeRefused bool
 	// Conformance holds one report per minimum compliance profile the caller
 	// demanded (--min-profile, or a version 2 requirements file). Empty when
 	// none was demanded.
@@ -60,6 +69,29 @@ const (
 	// policy is that CI, not a developer's machine, is the attester of record.
 	ExternalRequire
 )
+
+// ScopePolicy decides whether a verification accepts a record of an
+// affected-scope run (design 0006 §4).
+//
+// The zero value REFUSES, and it is the only policy this release has. An
+// affected record says "these workspaces were checked; the rest were checked
+// by an earlier full run and nothing they declare a dependency on changed",
+// which is weaker than every existing consumer of `warden verify` means.
+// Accepting it is a later, separate decision: it needs the verifier to
+// recompute the selection from rules read at a trusted base, never from the
+// candidate, and so is deliberately not a flag on the record's word.
+type ScopePolicy int
+
+// ScopeRejectAffected accepts full-scope records only: a record without a
+// scope, or with a scope this warden reads as full. The default.
+const ScopeRejectAffected ScopePolicy = iota
+
+// Accepts reports whether the policy accepts rec's scope. Every value of the
+// type, including one this warden does not define, accepts only full scope:
+// widening it is not something an unrecognized number may do.
+func (ScopePolicy) Accepts(rec *domain.RunRecord) bool {
+	return rec != nil && rec.FullScope()
+}
 
 // Verify checks whether a single commit carries an intact warden validation
 // note. It is the primitive behind `warden verify` and CI provenance-skip: CI
@@ -142,6 +174,14 @@ func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trus
 		}
 	case !res.External && policy == ExternalRequire:
 		res.ExternalRefused = res.Validated
+		res.Validated = false
+	}
+
+	// The scope policy, likewise, over an otherwise-decided result, so a sound
+	// note refused only for being a partial check is reported as exactly that.
+	res.Affected = !rec.FullScope()
+	if !ScopeRejectAffected.Accepts(rec) {
+		res.ScopeRefused = res.Validated
 		res.Validated = false
 	}
 	return res, nil
