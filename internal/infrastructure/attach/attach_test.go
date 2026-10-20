@@ -2,6 +2,8 @@ package attach
 
 import (
 	"context"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -96,4 +98,65 @@ func TestServer_NilIsNoOp(t *testing.T) {
 	s.OnStep(application.StepEvent{})
 	s.PublishDone(application.RunResult{})
 	s.Close()
+}
+
+// Live is the background watcher's "is a gate running?" probe. It must be true
+// exactly while a run publishes, and a socket file a crashed run left behind
+// must read as no run — otherwise a stale file would pause the watcher forever.
+func TestLive(t *testing.T) {
+	gitDir := t.TempDir()
+	if Live(gitDir) {
+		t.Fatal("live with no socket")
+	}
+	srv := NewServer(gitDir)
+	if srv == nil {
+		t.Fatal("NewServer returned nil")
+	}
+	if !Live(gitDir) {
+		t.Fatal("not live while a run publishes")
+	}
+	srv.Close()
+	if Live(gitDir) {
+		t.Fatal("live after the run closed its socket")
+	}
+
+	// A crashed run leaves the socket file with no listener behind it.
+	stale := t.TempDir()
+	srv = NewServer(stale)
+	if srv == nil {
+		t.Fatal("NewServer returned nil")
+	}
+	srv.ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	_ = srv.ln.Close()
+	if _, err := os.Lstat(SocketPath(stale)); err != nil {
+		t.Fatalf("expected a leftover socket file: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(SocketPath(stale)) })
+	if Live(stale) {
+		t.Fatal("a stale socket file read as a live run")
+	}
+	// A new run replaces the stale socket.
+	next := NewServer(stale)
+	if next == nil || !Live(stale) {
+		t.Fatal("a stale socket blocked the next run from publishing")
+	}
+	next.Close()
+}
+
+// A second run must not unlink the socket of a run still in progress: that
+// run's watchers, and the background watcher's gate probe, would lose it.
+func TestNewServerLeavesALiveSocketAlone(t *testing.T) {
+	gitDir := t.TempDir()
+	first := NewServer(gitDir)
+	if first == nil {
+		t.Fatal("NewServer returned nil")
+	}
+	defer first.Close()
+	if second := NewServer(gitDir); second != nil {
+		second.Close()
+		t.Fatal("a second run took over a live socket")
+	}
+	if !Live(gitDir) {
+		t.Fatal("the first run's socket was removed")
+	}
 }

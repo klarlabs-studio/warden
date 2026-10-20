@@ -30,6 +30,21 @@ Checks run in disposable, dependency-free container worktrees, not the live
 checkout. Obsolete background work is cancelled, and its teardown finishes
 before the replacement starts. Ctrl+C or SIGTERM stops the watcher.
 
+The container environment is part of what the watcher watches. At most every
+15 seconds it runs `image inspect` on `execution.image` (never engine `info`,
+a pull, or a container) and folds the runtime, image ID and platform into the
+snapshot. Rebuilding or retagging the image, switching runtime, or starting a
+stopped engine therefore starts a new evaluation instead of leaving a pass for
+the previous image on screen. The watcher prints the sampled environment when
+it starts and when it changes, and each finished step prints the runtime,
+image ID and platform it ran under. The sample only decides when to evaluate;
+the evaluation resolves the runtime itself, and a prediction records the
+environment the check actually ran in.
+
+While a gate run in the same worktree is in progress (it publishes on the
+`warden attach` socket), the watcher cancels its own work and waits, then
+evaluates again once the run ends. The hook never waits for the watcher.
+
 A passing check with complete input capture saves a signed local prediction.
 The next pre-commit gate can skip that check when all these still match:
 

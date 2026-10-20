@@ -34,27 +34,37 @@ func resolveCompatContainer(runtimeName, bin string, cfg domain.ExecutionConfig)
 	if err != nil {
 		return nil, err
 	}
-	out, err := containerProbe(bin, "image", "inspect", cfg.Image)
+	image, env, err := inspectCompatImage(containerProbe, runtimeName, bin, cfg)
 	if err != nil {
-		return nil, errors.New("image not available locally")
+		return nil, err
+	}
+	reference, err := compatRunReference(runtimeName, bin, image, env.Platform)
+	if err != nil {
+		return nil, err
+	}
+	return &application.ContainerExecution{Binary: bin, Reference: reference, Rootless: rootless, Environment: env}, nil
+}
+
+// inspectCompatImage reads the configured image's config ID and platform from
+// `image inspect` alone and returns the environment it would run in.
+func inspectCompatImage(probe probeFunc, runtimeName, bin string, cfg domain.ExecutionConfig) (compatImage, domain.ExecutionEnvironment, error) {
+	out, err := probe(bin, "image", "inspect", cfg.Image)
+	if err != nil {
+		return compatImage{}, domain.ExecutionEnvironment{}, errors.New("image not available locally")
 	}
 	image, err := parseCompatInspection(runtimeName, out)
 	if err != nil {
-		return nil, err
+		return compatImage{}, domain.ExecutionEnvironment{}, err
 	}
 	platform := image.OS + "/" + image.Architecture
 	if image.OS != "linux" || (image.Architecture != "amd64" && image.Architecture != "arm64") || (cfg.Platform != "" && cfg.Platform != platform) {
-		return nil, errors.New("image platform does not match supported/requested Linux platform")
-	}
-	reference, err := compatRunReference(runtimeName, bin, image, platform)
-	if err != nil {
-		return nil, err
+		return compatImage{}, domain.ExecutionEnvironment{}, errors.New("image platform does not match supported/requested Linux platform")
 	}
 	network := cfg.Network
 	if network == "" {
 		network = "none"
 	}
-	return &application.ContainerExecution{Binary: bin, Reference: reference, Rootless: rootless, Environment: domain.ExecutionEnvironment{Runtime: runtimeName, Image: cfg.Image, ImageID: image.ID, Platform: platform, Network: network, HostOS: runtime.GOOS, GuestOS: image.OS, ImageIDKind: "config"}}, nil
+	return image, domain.ExecutionEnvironment{Runtime: runtimeName, Image: cfg.Image, ImageID: image.ID, Platform: platform, Network: network, HostOS: runtime.GOOS, GuestOS: image.OS, ImageIDKind: "config"}, nil
 }
 
 // probeRootless doubles as the reachability probe. A rootless engine maps
