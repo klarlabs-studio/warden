@@ -20,6 +20,7 @@ var mergeDecisions = map[string]string{
 	"Timeouts":        "per key, child wins",
 	"Cache":           "per key, child wins",
 	"PredictiveCache": "child replaces when set",
+	"Diagnostics":     "per key, child wins",
 	"SymlinkDeps":     "child wins when set",
 	"MaterializeDeps": "child replaces when set (deprecated)",
 	"Writes":          "union",

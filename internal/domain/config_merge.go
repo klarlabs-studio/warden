@@ -36,6 +36,7 @@ func (c Config) OverlayOnto(base Config) Config {
 	out.Commands = mergeStringMap(base.Commands, c.Commands)
 	out.AgentCommands = mergeStringMap(base.AgentCommands, c.AgentCommands)
 	out.Timeouts = mergeStringMap(base.Timeouts, c.Timeouts)
+	out.Diagnostics = mergeStringMap(base.Diagnostics, c.Diagnostics)
 	out.Cache = mergeGlobMap(base.Cache, c.Cache)
 	out.Steps = mergeStepMap(base.Steps, c.Steps)
 	// MaterializeDeps: a child that names any step replaces the base's list (it is

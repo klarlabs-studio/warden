@@ -86,6 +86,7 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		// per-branch rule overlays: "which findings fail a push" should not vary
 		// silently with the branch you happen to be on.
 		SecurityScan: cfg.SecurityScan,
+		Diagnostics:  diagnostics(cfg.Diagnostics),
 	}
 
 	res.ConfigurationDigest, _ = domain.DigestJSON(cfg)
@@ -101,6 +102,18 @@ func Resolve(cfg domain.Config, in Input) domain.ResolvedPolicy {
 		res.MatchedRules = append(res.MatchedRules, m.name)
 	}
 	return res
+}
+
+// diagnostics keys Config.Diagnostics by step name, or nil when none is set.
+func diagnostics(in map[string]string) map[domain.StepName]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[domain.StepName]string, len(in))
+	for step, file := range in {
+		out[domain.StepName(step)] = file
+	}
+	return out
 }
 
 // stepSet builds a StepName set from a config string list (e.g. Config.Writes),

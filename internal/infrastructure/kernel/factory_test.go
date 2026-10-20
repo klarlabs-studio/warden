@@ -152,3 +152,35 @@ func TestKernel_ConfigCommandCustomStep(t *testing.T) {
 		t.Errorf("failing command: status = %s, want fail", got.Status)
 	}
 }
+
+// contextStep records the StepContext the kernel handed it.
+type contextStep struct {
+	name domain.StepName
+	got  application.StepContext
+}
+
+func (s *contextStep) Name() domain.StepName { return s.name }
+
+func (s *contextStep) Run(_ context.Context, sc application.StepContext) (domain.StepResult, error) {
+	s.got = sc
+	return domain.StepResult{Step: s.name, Status: domain.StepPass}, nil
+}
+
+func TestKernel_BindsEachStepsDeclaredDiagnostics(t *testing.T) {
+	lint := &contextStep{name: domain.StepLint}
+	test := &contextStep{name: domain.StepTest}
+	policy := policyFor(domain.StepLint, domain.StepTest)
+	policy.Diagnostics = map[domain.StepName]string{domain.StepLint: "out/lint.sarif"}
+	k, err := NewFactory(application.Registry{lint.name: lint, test.name: test}).New(policy, application.StepContext{}, new([]domain.Finding), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range policy.Steps {
+		if _, err := k.Execute(context.Background(), step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lint.got.Diagnostics != "out/lint.sarif" || test.got.Diagnostics != "" {
+		t.Fatalf("lint got %q, test got %q", lint.got.Diagnostics, test.got.Diagnostics)
+	}
+}

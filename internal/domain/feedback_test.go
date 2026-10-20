@@ -240,6 +240,8 @@ func TestFeedbackStepFromResult(t *testing.T) {
 			{Severity: SeverityHigh, Message: "lock held", Rule: "step/lock-contention"},
 			{Severity: SeverityLow, Message: "leak", File: "a.go", Line: 2, Rule: "SEC-1"},
 			{Severity: SeverityLow, Message: "structured", Rule: "nox/AI-001"},
+			{Severity: SeverityHigh, Message: "unchecked", File: "b.go", Line: 9, Rule: "errcheck", FromSARIF: true},
+			{Severity: SeverityHigh, Message: "no location", FromSARIF: true},
 		},
 	}, started, finished)
 	if failed.Status != FeedbackStepFail || failed.Blocker != BlockerContention || !failed.OutputTruncated {
@@ -248,7 +250,7 @@ func TestFeedbackStepFromResult(t *testing.T) {
 	if got := failed.Findings[0].Message; len(got) != FeedbackMessageLimit-1 || strings.Contains(got, "\xc3") {
 		t.Fatalf("message cut %d bytes, mid-rune=%v", len(got), strings.Contains(got, "\xc3"))
 	}
-	wantSources := []FeedbackFindingSource{FindingSourceOutput, FindingSourceOutput, FindingSourceStep, FindingSourceStep}
+	wantSources := []FeedbackFindingSource{FindingSourceOutput, FindingSourceOutput, FindingSourceStep, FindingSourceStep, FindingSourceSARIF, FindingSourceSARIF}
 	for i, want := range wantSources {
 		if failed.Findings[i].Source != want {
 			t.Errorf("finding %d source %q, want %q", i, failed.Findings[i].Source, want)

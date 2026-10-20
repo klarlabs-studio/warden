@@ -220,3 +220,16 @@ func TestResolve_CarriesSecurityScanConfig(t *testing.T) {
 		t.Errorf("resolved security scan config = %+v, want the configured one", got)
 	}
 }
+
+func TestResolve_CarriesDiagnostics(t *testing.T) {
+	// The shell step reads its SARIF path off the resolved policy (via the
+	// kernel); a Resolve that drops it would make the key a silent no-op.
+	cfg := domain.Config{Diagnostics: map[string]string{"lint": "out/lint.sarif"}}
+	got := Resolve(cfg, Input{Hook: domain.PreCommit}).Diagnostics
+	if got[domain.StepLint] != "out/lint.sarif" || len(got) != 1 {
+		t.Errorf("resolved diagnostics = %v", got)
+	}
+	if Resolve(domain.Config{}, Input{Hook: domain.PreCommit}).Diagnostics != nil {
+		t.Error("a config without diagnostics must resolve to none")
+	}
+}
