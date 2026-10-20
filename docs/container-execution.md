@@ -184,8 +184,11 @@ mode, so the scanner command must enforce the required severity policy.
 A nonzero exit still fails the gate.
 
 The existing step-result cache is disabled for container runs: it does not yet
-capture the full execution environment. `warden watch` rejects container
-configuration because it runs in the live tree; use the isolated gate commands.
+capture the full execution environment. `warden watch` under a container
+configuration does not run in the live tree: each evaluation checks a snapshot
+of the working tree (what `git add -A` would stage) in a disposable
+dependency-free worktree, and runs only read-only shell checks there (see
+[background feedback](background-feedback.md#live-mode)).
 A future staged-index predictor must key results to the final staged tree,
 command/configuration, resolved image, platform, and dependencies, and discard
 stale work before it can authorize a commit. No latency reduction is promised

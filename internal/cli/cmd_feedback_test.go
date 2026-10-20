@@ -359,7 +359,7 @@ func TestFeedbackSessionBeginFailure(t *testing.T) {
 	var errb bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	fb, code := startFeedback(ctx, svc, dir, &errb)
+	fb, code := startFeedback(ctx, svc, dir, domain.FeedbackModeStaged, &errb)
 	if fb == nil {
 		t.Fatalf("start: %d %s", code, errb.String())
 	}

@@ -8,7 +8,7 @@ import (
 	"go.klarlabs.de/warden/internal/domain"
 )
 
-// axiFeedback is `warden axi feedback`: what the staged watcher last
+// axiFeedback is `warden axi feedback`: what the background watcher last
 // observed, judged now, in TOON. It exits 1 when no document exists, so a
 // shell caller can tell "nothing observed" from an observation.
 func axiFeedback(f facade, args []string, stdout, stderr io.Writer) int {

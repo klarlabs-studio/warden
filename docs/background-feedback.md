@@ -1,7 +1,8 @@
 # Background feedback
 
-`warden watch --staged` (see [predictive staged checks](predictive-cache.md))
-writes what it observes to a document that editors and other tools can read:
+`warden watch --staged` (see [predictive staged checks](predictive-cache.md)),
+and `warden watch` under a container configuration ([live mode](#live-mode)),
+write what they observe to a document that editors and other tools can read:
 
 ```sh
 warden feedback status --format json       # the document, with freshness
@@ -18,6 +19,41 @@ tool `feedback_status` or `warden axi feedback` (see [agents](#agents)).
 Starting the watcher stays a user action (a terminal, a task), because it runs
 the repository's configured commands. An editor integration should read the
 document, not start the watcher, and should honour workspace trust.
+
+## Live mode
+
+Under a container configuration (`execution.image`), `warden watch` without
+`--staged` checks the working tree as `git add -A` would stage it: tracked
+files as they are on disk, deleted files gone, untracked files included,
+ignored files left out. `--once` evaluates once and exits.
+
+Each evaluation:
+
+- computes the snapshot's tree from a private copy of the index
+  (`GIT_INDEX_FILE`), so it never writes `.git/index` and never takes
+  `index.lock`. A commit made while a check runs is unaffected. Every git
+  command the watcher starts runs with `GIT_OPTIONAL_LOCKS=0`;
+- checks that tree out in a disposable worktree seeded at HEAD, without host
+  dependencies, and runs the read-only shell checks there: configured
+  commands for `lint`, `test` and custom steps in `steps.pre_commit`. Agent
+  steps, `security-scan`, native steps and steps that write the tree
+  (`auto_fix`, `writes:`) do not run;
+- saves no prediction, applies no fix, signs nothing and writes no note.
+
+The watcher's polls only walk the files and stat git's metadata; they write
+nothing. The snapshot is computed when that fingerprint changes. Computing it
+stores the contents of changed and untracked files as loose objects in the
+repository, which `git gc` collects once nothing refers to them. Content the
+store already holds is not written again, so a change that leaves the snapshot
+as it was (an ignored file, `git add`) writes nothing, and does not run the
+checks again.
+
+The document's `mode` is `live`, and its `snapshot.tree` is the working
+tree's. The reader computes the same snapshot to judge freshness, in a
+temporary object store, so asking never grows the repository.
+
+Host-mode live watch (no container configuration) still re-runs the commands
+in the live tree and writes no document.
 
 ## What it is, and what it is not
 
@@ -45,7 +81,7 @@ it again.
 
 One watcher per worktree writes it. The watcher holds
 `<absolute git dir>/warden/feedback/watch.lock`, which records its pid and
-start time. A second `warden watch --staged` in the same worktree exits 75 and
+start time. A second watcher in the same worktree, staged or live, exits 75 and
 names the pid of the watcher that holds the lock. A lock left by a watcher
 that crashed (its process is gone, or it stopped refreshing the lock for 15
 seconds) is taken over by the next watcher. A watcher that finds its lock was
@@ -59,7 +95,7 @@ describes the repository is a question about now, so the reader decides:
 
 | `freshness` | meaning |
 |---|---|
-| `stale_snapshot` | the staged tree, HEAD, branch or effective configuration changed since the watcher observed them |
+| `stale_snapshot` | the checked tree (the staged one, or in live mode the working tree), HEAD, branch or effective configuration changed since the watcher observed them |
 | `producer_gone` | the watcher did not stop cleanly, and its process is gone or its heartbeat is older than 15 seconds |
 | `stale_environment` | the watcher saw the container environment change (image rebuilt or retagged, runtime switched, engine stopped) after the snapshot was evaluated, and has not started evaluating it yet |
 | `expired` | a passing step's staged prediction is past its 10-minute expiry, so the gate would run the check again |
@@ -68,7 +104,8 @@ describes the repository is a question about now, so the reader decides:
 The first row that applies wins. `stale_snapshot` comes first because results
 for another snapshot say nothing about this one, whoever produced them. The
 reader recomputes the snapshot from git and the configuration, using a
-private copy of the index so it never takes `index.lock`. It never probes a
+private copy of the index so it never takes `index.lock`, and a temporary
+object store so it never writes to the repository. It never probes a
 container engine, which is why only the watcher can report
 `stale_environment`. The watcher refreshes `producer.heartbeat_at` every 5
 seconds.
@@ -309,7 +346,7 @@ Any tool that reads `file:line: message` lines can consume the format: match
   "message": "",
   "snapshot": {
     "id": "sha256:…",
-    "tree": "<tree the index would write>",
+    "tree": "<tree the index would write; in live mode, the working tree's>",
     "base": "<HEAD commit>",
     "branch": "feat/x",
     "configuration_digest": "sha256:…",
@@ -332,7 +369,9 @@ Any tool that reads `file:line: message` lines can consume the format: match
 }
 ```
 
-- `state`: `idle` (nothing staged), `pending` (known, not running, e.g. paused
+- `mode`: `staged` or `live`. It also tells the reader which tree to
+  recompute.
+- `state`: `idle` (nothing staged; staged mode only), `pending` (known, not running, e.g. paused
   while a gate run is in progress, with the reason in `message`), `running`,
   `complete`, `blocked` (the machine prevented the evaluation, such as a
   stopped engine; it is retried and is not a verdict), or `stopped`.

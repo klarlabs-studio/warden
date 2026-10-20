@@ -93,7 +93,13 @@ normal opted-in pre-commit execution can still populate the same cache.
 Remove the `predictive_cache` list (or set `predictive_cache: []` to override an
 inherited list) to disable reuse. Stop the foreground watcher as well.
 
-`warden watch` without `--staged` keeps its existing live-file feedback mode.
+`warden watch` without `--staged` is live mode. On the host it re-runs the
+commands in the live tree. Under a container configuration it checks a
+working-tree snapshot in a disposable container worktree, and it never looks
+up or saves a prediction: the snapshot is derived from the working tree, not
+the index a commit is built from, and reusing its results at the gate would
+rest on an equivalence nobody has proven (see
+[background feedback](background-feedback.md#live-mode)).
 This feature does not install an operating-system daemon or select affected
 monorepo workspaces. It precomputes configured commands against the staged
 snapshot; commands may scope themselves using `WARDEN_CHANGED_FILES`.

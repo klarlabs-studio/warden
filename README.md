@@ -870,9 +870,9 @@ The exit status stays the only verdict.
 | `warden trust add\|list\|remove [path]` | allow the agent surfaces to run **this** repo's commands (per-repo `run_trigger` opt-in) |
 | `warden why [commit]` | explain what the gate did for a commit — matched rules, steps, signer — from its note |
 | `warden recipes [name]` | list / print paste-able check recipes (gitleaks, semgrep, trivy, coverage-delta, …) |
-| `warden watch` | re-run the fast checks on save — a continuous dev feedback loop |
+| `warden watch [--once]` | re-run the fast checks on save — a continuous dev feedback loop; under container execution it checks a working-tree snapshot in a disposable container worktree and writes the feedback document |
 | `warden watch --staged [--once]` | warm opted-in staged container checks for local pre-commit reuse |
-| `warden feedback status [--format json\|sarif\|problems]` | what the staged watcher last observed for this worktree, with freshness computed now; `problems` feeds editor problem matchers, `sarif` exports SARIF 2.1.0 ([background feedback](docs/background-feedback.md)) |
+| `warden feedback status [--format json\|sarif\|problems]` | what the watcher last observed for this worktree, with freshness computed now; `problems` feeds editor problem matchers, `sarif` exports SARIF 2.1.0 ([background feedback](docs/background-feedback.md)) |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `feedback`, `policy-explain`, `steps`, `run-trigger`) |

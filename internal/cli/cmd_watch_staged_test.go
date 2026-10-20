@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,13 +22,17 @@ import (
 )
 
 func TestWatchStagedInvocation(t *testing.T) {
-	for _, args := range [][]string{{"--once"}, {"--unknown"}, {"extra"}} {
+	for _, args := range [][]string{{"--unknown"}, {"extra"}} {
 		var out, errb bytes.Buffer
 		if code := cmdWatch(args, &out, &errb); code != 2 {
 			t.Fatalf("%v: exit %d", args, code)
 		}
 	}
 	repoWithConfig(t, "commands: { test: 'true' }\n")
+	// Live mode on the host has no single evaluation to run once.
+	if code := cmdWatch([]string{"--once"}, io.Discard, io.Discard); code != 2 {
+		t.Fatalf("host --once: exit %d", code)
+	}
 	var out, errb bytes.Buffer
 	if code := cmdWatch([]string{"--staged", "--once"}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "predictive_cache") {
 		t.Fatalf("%d %s", code, errb.String())
