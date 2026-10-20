@@ -1,0 +1,9 @@
+warden: feedback complete, expired (staged, branch feat/x): 3 failed, 1 passed, 1 cached, 1 skipped
+warden: expired: a passing step's staged prediction has expired, so a commit would run it again
+warden: watcher: staged checks failed: lint, test, vet
+cmd/main.go:12: error: [lint/errcheck] Error return value is not checked
+internal/cfg dir/cfg.go:7: warning: [lint/SA1019] deprecated call
+util.go:3: info: [lint] consider a shorter name
+warden: test failed: test failed (exit 1)
+.warden.yaml:4: error: [test/config-anchor] test failed: test failed (exit 1)
+warden: vet failed: vet failed

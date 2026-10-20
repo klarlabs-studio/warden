@@ -1,0 +1,3 @@
+warden: feedback complete, stale_environment (staged, branch feat/x): 3 failed, 1 passed, 1 cached, 1 skipped
+warden: stale_environment: the container environment changed since these results were observed; diagnostics are withheld until the watcher checks again
+warden: watcher: staged checks failed: lint, test, vet

@@ -1,0 +1,3 @@
+warden: feedback blocked, current (staged, branch feat/x): 1 blocked
+warden: watcher: container execution unavailable: Cannot connect to the Docker daemon; retrying in 10s
+warden: lint could not run (environment): lint could not run: its toolchain or dependencies are not installed

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "warden",
+          "version": "0.38.0",
+          "informationUri": "https://github.com/klarlabs-studio/warden"
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-10-20T09:00:25Z",
+          "toolExecutionNotifications": [
+            {
+              "descriptor": {
+                "id": "warden/state"
+              },
+              "level": "note",
+              "message": {
+                "text": "nothing staged"
+              }
+            }
+          ]
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///abs/my%20checkout/"
+        }
+      },
+      "results": [],
+      "properties": {
+        "warden": {
+          "schema": "warden.feedback/v1",
+          "mode": "staged",
+          "state": "idle",
+          "freshness": "current",
+          "diagnostics": true,
+          "message": "nothing staged",
+          "snapshot": {
+            "id": "sha256:79c14edc635d7288462a281c50725af9dcad02915ab37598fede4b9c468568c2",
+            "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base": "",
+            "branch": "",
+            "configuration_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": ""
+          },
+          "evaluated_at": "2026-10-20T09:00:25Z",
+          "steps": []
+        }
+      }
+    }
+  ]
+}
