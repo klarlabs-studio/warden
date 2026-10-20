@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -187,3 +189,117 @@ func TestPruneStaleWardenWorktrees_NoWorktreesDirIsNotAnError(t *testing.T) {
 		t.Errorf("%d registrations, want 0", got)
 	}
 }
+
+// exitedPID is the pid of a process that has already exited.
+func exitedPID(t *testing.T) int {
+	t.Helper()
+	name, args := "sh", []string{"-c", "exit 0"}
+	if runtime.GOOS == "windows" {
+		name, args = "cmd", []string{"/c", "exit 0"}
+	}
+	cmd := exec.Command(name, args...)
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
+}
+
+// ownerFile is the owner marker of the worktree at dir.
+func ownerFile(t *testing.T, dir string) string {
+	t.Helper()
+	admin, err := worktreeAdminDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(admin, worktreeOwnerFile)
+}
+
+// A run killed outright (SIGKILL, a CI timeout) never runs its deferred
+// Remove, and its temp directory stays on disk until the OS reaps it. While
+// it does, the directory alone cannot tell a dead run's worktree from a
+// concurrent live one. The owner marker can: a worktree whose recorded owner
+// on this machine has exited is pruned, directory and registration both.
+func TestPruneStaleWardenWorktrees_RemovesADeadOwnersWorktree(t *testing.T) {
+	repo, _ := sweepTestRepo(t)
+	wt, err := repo.addDetachedWorktree("HEAD", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := ownerFile(t, wt.Dir)
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the new worktree records no owner: %v", err)
+	}
+	host, _ := os.Hostname()
+	if want := strconv.Itoa(os.Getpid()) + "\n" + host + "\n"; string(data) != want {
+		t.Fatalf("owner marker %q, want %q", data, want)
+	}
+
+	// The owner is alive: the sweep keeps it.
+	repo.pruneStaleWardenWorktrees()
+	if _, err := os.Stat(wt.Dir); err != nil || registrations(t, repo) != 1 {
+		t.Fatalf("a live owner's worktree was swept: %v", err)
+	}
+
+	// The owner has exited: the sweep removes it.
+	if err := os.WriteFile(marker, []byte(strconv.Itoa(exitedPID(t))+"\n"+host+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wt.Dir+"-golangci-cache", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	repo.pruneStaleWardenWorktrees()
+	if got := registrations(t, repo); got != 0 {
+		t.Fatalf("%d registrations survive a dead owner", got)
+	}
+	for _, dir := range []string{wt.Dir, wt.Dir + "-golangci-cache"} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("%s survives a dead owner: %v", dir, err)
+		}
+	}
+	out, err := repo.run("worktree", "list", "--porcelain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, wardenWorktreePrefix) {
+		t.Fatalf("git still lists the dead owner's worktree:\n%s", out)
+	}
+}
+
+// Only an owner the sweep can actually judge is judged. A marker naming
+// another machine (a repository on a shared volume) or one that cannot be
+// read leaves the worktree alone, as does a worktree with no marker at all
+// (created by an older warden, or between its creation and the marker).
+func TestPruneStaleWardenWorktrees_KeepsOwnersItCannotJudge(t *testing.T) {
+	repo, _ := sweepTestRepo(t)
+	dead := strconv.Itoa(exitedPID(t))
+	for name, content := range map[string]*string{
+		"another machine": ptr(dead + "\nsome-other-host\n"),
+		"unreadable":      ptr("not a pid\n"),
+		"no host":         ptr(dead + "\n"),
+		"no marker":       nil,
+	} {
+		wt, err := repo.addDetachedWorktree("HEAD", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := ownerFile(t, wt.Dir)
+		if content == nil {
+			err = os.Remove(marker)
+		} else {
+			err = os.WriteFile(marker, []byte(*content), 0o600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo.pruneStaleWardenWorktrees()
+		if _, err := os.Stat(wt.Dir); err != nil {
+			t.Fatalf("%s: the worktree was swept: %v", name, err)
+		}
+		if err := wt.Remove(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

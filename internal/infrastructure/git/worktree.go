@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/proc"
 )
 
 // Worktree is a disposable git worktree Warden validates in, isolated from the
@@ -147,6 +149,10 @@ func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree,
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
+	// Record who owns it, so a later sweep can tell this run's worktree from
+	// a killed one's while its directory is still on disk. Best-effort: an
+	// unmarked worktree is simply one the sweep never judges by owner.
+	recordWorktreeOwner(dir)
 	wt := &Worktree{Dir: dir, repo: r}
 	// A git worktree only contains tracked files, so gitignored dependency
 	// directories (node_modules) are absent — JS/TS steps (tsc, eslint, vitest)
@@ -164,8 +170,70 @@ func (r *Repo) addDetachedWorktree(ref string, materializeDeps bool) (*Worktree,
 // The sweep below keys on it so warden only ever removes its own leftovers.
 const wardenWorktreePrefix = "warden-wt-"
 
+// worktreeOwnerFile is the marker, inside a warden worktree's admin
+// directory under .git/worktrees, naming the process that created it and
+// the machine it ran on. Git ignores files it does not know there, and
+// removes the directory with the registration.
+const worktreeOwnerFile = "warden-owner"
+
+// worktreeAdminDir is the admin directory of the linked worktree at dir,
+// read from its .git file ("gitdir: <path>", relative to dir when git was
+// asked to write relative paths).
+func worktreeAdminDir(dir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, ".git")) //nolint:gosec // the worktree warden just created
+	if err != nil {
+		return "", err
+	}
+	admin, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !ok || admin == "" {
+		return "", fmt.Errorf("git: %s/.git is not a gitdir file", dir)
+	}
+	if !filepath.IsAbs(admin) {
+		admin = filepath.Join(dir, admin)
+	}
+	return filepath.Clean(admin), nil
+}
+
+// recordWorktreeOwner writes this process's pid and host name into the
+// worktree's owner marker.
+func recordWorktreeOwner(dir string) {
+	admin, err := worktreeAdminDir(dir)
+	if err != nil {
+		return
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return // an owner the sweep could not place on this machine
+	}
+	_ = os.WriteFile(filepath.Join(admin, worktreeOwnerFile), []byte(strconv.Itoa(os.Getpid())+"\n"+host+"\n"), 0o600)
+}
+
+// ownerGone reports whether the worktree whose admin directory is admin was
+// created by a process on this machine that has since exited. Anything it
+// cannot establish (no marker, an unreadable one, another machine's) is "not
+// gone": a worktree is only ever removed on positive evidence its run is
+// over. A recycled pid makes a dead run look alive, which keeps the worktree
+// until the OS reaps its directory; it never makes a live run look dead.
+func ownerGone(admin string) bool {
+	raw, err := os.ReadFile(filepath.Join(admin, worktreeOwnerFile)) //nolint:gosec // path built from git's own admin dir
+	if err != nil {
+		return false
+	}
+	pidText, host, _ := strings.Cut(string(raw), "\n")
+	host = strings.TrimSpace(host)
+	pid, err := strconv.Atoi(strings.TrimSpace(pidText))
+	if err != nil || pid <= 0 || host == "" {
+		return false
+	}
+	if self, err := os.Hostname(); err != nil || self != host {
+		return false
+	}
+	return pid != os.Getpid() && !proc.Alive(pid)
+}
+
 // pruneStaleWardenWorktrees drops the admin entries of warden worktrees whose
-// directory is gone.
+// directory is gone, and removes the worktrees of runs that were killed: those
+// whose recorded owner on this machine has exited.
 //
 // Teardown is a deferred Remove, which does not run when the process is killed
 // -- a CI timeout, a cancelled hook, a developer's Ctrl-C. The directory then
@@ -225,7 +293,12 @@ func (r *Repo) pruneStaleWardenWorktrees() {
 			continue // not ours
 		}
 		if _, err := os.Stat(wtDir); err == nil {
-			continue // still on disk: a live run, possibly a concurrent one
+			if !ownerGone(admin) {
+				continue // still on disk: a live run, possibly a concurrent one
+			}
+			// A killed run's directory outlives it until the OS reaps the
+			// temp dir; its owner marker says the run is over.
+			_ = os.RemoveAll(wtDir)
 		}
 
 		_ = os.RemoveAll(admin)

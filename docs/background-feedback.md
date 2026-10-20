@@ -88,6 +88,14 @@ seconds) is taken over by the next watcher. A watcher that finds its lock was
 taken over (for example after the machine was suspended) stops with exit
 code 75 and writes nothing more.
 
+A run that is killed outright (a watcher sent SIGKILL, a hook cut off by a CI
+timeout) never tears down what it started. Every disposable worktree records
+the pid and host name of the process that created it, and the next warden run
+in the repository removes the worktrees, directory and registration both,
+whose creator on this machine has exited. A worktree it cannot judge (another
+machine's, or one an older warden created) is left alone until its directory
+is gone.
+
 ## Freshness
 
 A producer can only say what it observed and when. Whether that still

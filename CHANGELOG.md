@@ -127,6 +127,16 @@ All notable changes to warden are documented here. The format follows
   could not be deleted, and a failing check still fails, with the note beside
   its output. The delete is also given 15 seconds. It is not a blocker,
   because a blocker means the step could not run, and this one did.
+- **A killed run's worktree is removed by the next run.** A run killed
+  outright (SIGKILL, a CI timeout) left its disposable `warden-wt-*`
+  worktree registered. The sweep that cleans those up kept every one whose
+  directory was still on disk, because it could not tell a dead run's from a
+  concurrent live one, and the temp directory survives until the OS reaps
+  it, so `git worktree list` kept showing the dead run's worktree and pinning
+  its HEAD. Each worktree now records the pid and host name of the process
+  that created it, and the next run removes those whose creator on this
+  machine has exited. A worktree created on another machine or by an older
+  warden is still only pruned once its directory is gone.
 
 ## [0.37.0] - 2026-10-19
 
