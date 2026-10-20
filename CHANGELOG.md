@@ -20,7 +20,11 @@ All notable changes to warden are documented here. The format follows
   workspace owns). Manifests are read from git objects, never from the working
   tree, and no package manager or go command runs. A manifest that cannot be
   read, or a workspace name warden cannot use, is an error naming the file
-  rather than a workspace left out. Nothing in the gate uses workspaces yet,
+  rather than a workspace left out. Dependency cycles between workspaces,
+  which real monorepos have (packages that list each other in
+  `devDependencies`, Go modules that require each other), are accepted: a
+  change to any workspace on a cycle selects the whole cycle and everything
+  that depends on it. Nothing in the gate uses workspaces yet,
   and the output may change between releases. See
   [monorepo mode](docs/monorepo.md). warden now depends on
   `golang.org/x/mod` (BSD-3-Clause) to parse `go.work` and `go.mod`.
