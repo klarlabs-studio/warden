@@ -156,6 +156,17 @@ type RunRecord struct {
 	// authorship: a profiled note without it does not say a person wrote the
 	// change.
 	Authorship *AuthorshipSignals `json:"authorship,omitempty"`
+	// Scope records which workspaces a monorepo run checked (design 0006 §4).
+	// Nil means a full run: every note without it, which is every note a
+	// repository without `workspaces:` writes, is byte-identical to one
+	// written before the field existed.
+	//
+	// Inside the signed payload, so a partial check cannot be passed off as a
+	// full one by deleting the field: an older warden drops it on unmarshal,
+	// recomputes a different payload and fails the signature, and so does a
+	// hand-edit. Verifiers refuse a record whose scope is not full by default
+	// (see FullScope).
+	Scope *RunScope `json:"scope,omitempty"`
 	// PublicKey is the signer's public key (§9). Its encoding follows Algorithm:
 	// a base64 ed25519 key for warden's own signer, or an authorized_keys-style
 	// "ssh-ed25519 AAAA…" line for an SSH signer. It is covered by Signature, so

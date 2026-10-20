@@ -49,6 +49,13 @@ const (
 	// force for the range (the base ref's `profile:`, or --min-profile). The
 	// verdict's ProfileFailures name each clause that did not hold.
 	ReasonProfile VerifyReason = "profile"
+	// ReasonAffectedScope: the note passed every provenance check the gate
+	// makes, but it attests an AFFECTED-scope run — per-workspace checks ran
+	// only for the workspaces a change affected (design 0006). That is a
+	// weaker claim than a full run, so the gate refuses it by default. A
+	// commit covered only by such a note's push span inherits the refusal:
+	// a covering note must pass the gate itself.
+	ReasonAffectedScope VerifyReason = "affected-scope"
 )
 
 // CommitVerdict is one commit's provenance outcome in a range gate. Reason is
@@ -60,7 +67,9 @@ type CommitVerdict struct {
 	// when it carries no note of its own. It records HOW the commit passed —
 	// covered by a gated push rather than individually attested — so an auditor
 	// reading the gate can tell the two apart instead of seeing an
-	// undifferentiated green.
+	// undifferentiated green. With ReasonAffectedScope it names the covering
+	// note that was refused for its scope: the commit was published by a gated
+	// push, but that push's check was partial.
 	CoveredBy string `json:"covered_by,omitempty"`
 	// ForgeSigner names the pinned forge key whose verified signature let this
 	// commit pass without a note, when ForgeAccept is in force. Recorded for the

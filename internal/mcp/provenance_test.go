@@ -336,3 +336,34 @@ func TestHandleVerifyRange_MinProfile(t *testing.T) {
 		t.Errorf("no min_profile asks for none: %v %v", err, f.rangeVerifyArg.opts.MinProfiles)
 	}
 }
+
+// An affected-scope note reaches the agent as refused for its scope, with the
+// signed scope and full_scope=false. full_scope is always present, so an agent
+// never reads "full" into a missing key, and a commit with no note is not full.
+func TestHandleVerify_ProjectsScope(t *testing.T) {
+	scope := &domain.RunScope{Version: 1, Kind: domain.SelectionAffected, Workspaces: []string{"a", "b"}}
+	f := &fakeFacade{verify: ProvenanceRecord{ScopeRefused: true, Trusted: true, Record: &domain.RunRecord{RunID: "run-1", Scope: scope}}}
+	out, err := handleVerify(f, VerifyInput{Commit: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Validated || !out.ScopeRefused || out.FullScope || out.Scope != scope {
+		t.Errorf("affected scope not projected: %+v", out)
+	}
+
+	for name, rec := range map[string]*domain.RunRecord{"unscoped note": {RunID: "run-2"}, "no note": nil} {
+		f = &fakeFacade{verify: ProvenanceRecord{Validated: rec != nil, Record: rec}}
+		out, err = handleVerify(f, VerifyInput{Commit: "abc"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `"full_scope":` + map[bool]string{true: "true", false: "false"}[rec != nil]
+		if !strings.Contains(string(raw), want) || strings.Contains(string(raw), `"scope"`) {
+			t.Errorf("%s: output %s, want %s and no scope", name, raw, want)
+		}
+	}
+}

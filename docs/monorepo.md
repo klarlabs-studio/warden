@@ -124,5 +124,54 @@ plus everything that depends on them.
 A selection is only as complete as the manifests. If one workspace reads
 files of another without declaring a dependency on it, a change to the second
 does not select the first. That is why a later release will record in the
-signed note which workspaces were checked, and verifiers will refuse such a
+signed note which workspaces were checked, and why verifiers refuse such a
 partial record by default.
+
+## How verifiers treat a partial record
+
+No warden writes a partial record yet. This release teaches every verifier
+to read one, so that the verifiers in your CI are ready before any warden
+that writes them ships. **Upgrade every verifier, then the developers'
+machines**: a pinned verifier older than this release refuses every note that
+records a scope, full ones included (see below).
+
+A repository that configures `workspaces:` will record a signed `scope` in
+each note: `full` when every workspace was checked, `affected` when the
+per-workspace steps ran only for the workspaces a change affected. The scope
+names the selection algorithm version, the trusted full run an affected
+selection was measured from, the tree, the configuration and graph digests,
+the selection digest, every workspace, the workspaces each per-workspace step
+ran for, and why each was selected. A note without a scope is a full run, as
+every note written today is.
+
+An affected record claims less than a full one: "these workspaces were
+checked on this tree; the others were checked by an earlier trusted full run,
+and nothing they declare a dependency on has changed since". So, by default:
+
+| Verifier | An affected note |
+|---|---|
+| `warden verify`, with or without `--key` | not validated; exits 1 with `affected-scope` and the scope, such as `affected: test[3/12 workspaces]` |
+| `warden verify --range` | the commit fails with reason `affected-scope`; commits inside its push span fail with the same reason and name it as their covering note |
+| `warden verify --requirements` | refused before any contract is compared |
+| `--min-profile`, or a version 2 requirements file | conforms to no profile; the failing clause is "the note attests a full run, not an affected-workspace selection" |
+| `warden attest --predicate vsa` | `FAILED`, with `WARDEN_SOURCE_AFFECTED_*` levels and never `WARDEN_SOURCE_GATED` |
+| `warden reattest` | carries the scope unchanged, so the relocated note stays affected and refused |
+| `warden why`, `warden axi verify`, the MCP `verify` tool | show the scope, and that verifiers refuse it |
+
+No flag accepts an affected note in this release. Accepting one safely needs
+the verifier to recompute the selection itself, from rules read at a trusted
+base rather than from the commit under test; that is planned as a separate
+option.
+
+A scope the verifier cannot read as full is treated as affected: an unknown
+kind, a selection algorithm version newer than the verifier's, or a recorded
+sparse checkout.
+
+The scope is inside the signature. Deleting it from a signed note, or changing
+`affected` to `full`, breaks the signature, and a pinned verify refuses the
+note as tampered. A warden older than this release that pins a key drops the
+`scope` field it does not know, computes a different payload and refuses the
+note the same way: it fails closed, for full scopes too, because it cannot
+tell them apart. A warden older than this release that verifies **without**
+a key would read an affected note as validated. Pin a key wherever a verdict
+skips work, which `warden-verify` already requires.

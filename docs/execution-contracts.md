@@ -96,7 +96,12 @@ exactly as before.
 
 Only shell checks freshly executed in containers with `network: none` qualify.
 Host execution, cached results, skipped checks, legacy records, and external
-attestations do not satisfy requirements. Initial worktrees must have clean
+attestations do not satisfy requirements. Neither does a note of an
+[affected-scope monorepo run](monorepo.md#how-verifiers-treat-a-partial-record):
+requirements describe a full run, so such a note fails with the reason
+`affected-scope` before any contract is compared, whatever the file asks for.
+The same note conforms to no compliance profile, under a version 2 file or
+`--min-profile`. Initial worktrees must have clean
 tracked contents and no untracked or ignored inputs. Hidden index entries and
 submodules are refused. Tracked contents and the
 recognized dependency-file map must remain unchanged after the check; generated

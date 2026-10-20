@@ -65,6 +65,19 @@ const (
 	levelTrusted = "WARDEN_SOURCE_TRUSTED"
 )
 
+// Levels for a note of an AFFECTED-scope run (design 0006): the policy ran,
+// but its per-workspace checks covered only the workspaces a change affected.
+// That is not GATED, so it never gets GATED or anything built on it. It gets
+// its own names instead, which share no prefix with the full ones, so a
+// consumer that requires WARDEN_SOURCE_GATED — even one matching by prefix —
+// fails closed, and one that wants to know what was checked can still read
+// how far the partial check was signed and trusted.
+const (
+	levelAffectedGated   = "WARDEN_SOURCE_AFFECTED_GATED"
+	levelAffectedSigned  = "WARDEN_SOURCE_AFFECTED_SIGNED"
+	levelAffectedTrusted = "WARDEN_SOURCE_AFFECTED_TRUSTED"
+)
+
 // vsaStatement is an in-toto Statement carrying a SLSA VSA predicate.
 type vsaStatement struct {
 	Type          string          `json:"_type"`
@@ -117,15 +130,26 @@ func buildVSA(res service.VerifyResult, remoteURL string, sourceRefs []string) v
 	// commit? A note that exists but binds elsewhere is FAILED, not PASSED.
 	result := "FAILED"
 	levels := []string{}
+	gated, signed, trusted := levelGated, levelSigned, levelTrusted
+	// A partial check is FAILED, as `warden verify` refuses it: a consumer
+	// that reads only verificationResult must not take it for a full one.
+	// Its levels still say how far the partial check went, under names no
+	// full-check consumer accepts.
+	full := rec.FullScope()
+	if !full {
+		gated, signed, trusted = levelAffectedGated, levelAffectedSigned, levelAffectedTrusted
+	}
 	if attested {
-		result = "PASSED"
-		levels = append(levels, levelGated)
+		if full {
+			result = "PASSED"
+		}
+		levels = append(levels, gated)
 		// Each further level requires the previous one: an unattested note's
 		// signature proves the note was signed, not that the commit was gated.
 		if res.SignatureValid {
-			levels = append(levels, levelSigned)
+			levels = append(levels, signed)
 			if res.Trusted {
-				levels = append(levels, levelTrusted)
+				levels = append(levels, trusted)
 			}
 		}
 	}

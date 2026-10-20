@@ -87,6 +87,15 @@ func axiVerify(f facade, args []string, stdout, stderr io.Writer) int {
 		out["steps"] = stepStrings(rec.Record.StepsRun)
 		out["warden_version"] = rec.Record.WardenVersion
 		addProfileObservations(out, rec.Record)
+		// Only a scoped note says anything here: a note without a scope is a
+		// full run, and its output stays as it was.
+		if sc := rec.Record.Scope; sc != nil {
+			out["scope"] = sc.Summary()
+			out["full_scope"] = rec.Record.FullScope()
+		}
+		if rec.ScopeRefused {
+			out["scope_refused"] = true
+		}
 	}
 	if code := emitTOON(stdout, stderr, out); code != 0 {
 		return code

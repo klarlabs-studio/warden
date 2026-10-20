@@ -65,6 +65,15 @@ type VerifyOutput struct {
 	// trailers on the attested commits and harness markers in its
 	// environment. Declarations, not authorship; absent when none matched.
 	Authorship *domain.AuthorshipSignals `json:"authorship,omitempty"`
+	// FullScope is false when the note attests an affected-scope monorepo run
+	// (per-workspace checks for the affected workspaces only), which is never
+	// validated by default. ScopeRefused says the note was sound otherwise and
+	// refused for that alone, and Scope is the signed scope it records.
+	// FullScope is always present and false when there is no note, so an
+	// agent never reads "full" into an absent field.
+	FullScope    bool             `json:"full_scope"`
+	ScopeRefused bool             `json:"scope_refused,omitempty"`
+	Scope        *domain.RunScope `json:"scope,omitempty"`
 }
 
 // RangeVerifyOutput gates a whole base..head span — the shape a PR check needs.
@@ -77,7 +86,8 @@ type RangeVerifyOutput struct {
 	// trivially OK.
 	OK bool `json:"ok"`
 	// Commits carries a verdict per commit with a reason: ok, missing,
-	// broken-chain, unsigned, or untrusted.
+	// broken-chain, unsigned, untrusted, affected-scope, and the others
+	// domain.VerifyReason defines.
 	Commits []domain.CommitVerdict `json:"commits"`
 	// RequireSigned and TrustedKeys report the depth actually enforced, which is
 	// not always what the caller asked for: when UseRoster resolves a roster from
@@ -251,8 +261,11 @@ func newVerifyOutput(sha string, r ProvenanceRecord) VerifyOutput {
 		SignatureValid: r.SignatureValid,
 		Signer:         r.Signer,
 		Trusted:        r.Trusted,
+		ScopeRefused:   r.ScopeRefused,
 	}
 	if r.Record != nil {
+		out.FullScope = r.Record.FullScope()
+		out.Scope = r.Record.Scope
 		out.RunID = r.Record.RunID
 		out.Steps = r.Record.StepsRun
 		out.MatchedRules = r.Record.MatchedRules
