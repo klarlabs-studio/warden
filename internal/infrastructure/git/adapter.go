@@ -104,8 +104,8 @@ func (w worktreeAdapter) Clone(materializeDeps bool) (application.Worktree, erro
 // DetectDepDrift implements application.DepDriftDetector. The live checkout is
 // supplied from the adapter's own repo, so callers never need to know that
 // warden exposes dependencies from the working copy rather than reinstalling.
-func (a *Adapter) DetectDepDrift(worktreeDir string) []domain.DepDrift {
-	return DetectDepDrift(worktreeDir, a.repo.Dir)
+func (a *Adapter) DetectDepDrift(worktreeDir, rev string) []domain.DepDrift {
+	return DetectDepDrift(worktreeDir, rev, a.repo.Dir)
 }
 
 // SeedDependencyFreeWorktree copies the adapter, so parallel clones inherit

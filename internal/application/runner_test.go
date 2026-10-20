@@ -54,11 +54,15 @@ func (w *fakeWorktree) Clone(bool) (Worktree, error) {
 }
 
 type fakeGit struct {
-	gitDir          string
-	root            string
-	branch          string
-	branchErr       error
-	head            string
+	gitDir    string
+	root      string
+	branch    string
+	branchErr error
+	head      string
+	// headFailAfter, when positive, makes HeadSHA fail on every call after
+	// that many — HEAD read at seed time, then lost before the note is bound.
+	headFailAfter   int
+	headCalls       int
 	pushed          bool
 	pushForce       domain.PushForce
 	rewritesHistory bool
@@ -99,7 +103,13 @@ type fakeGit struct {
 
 func (g *fakeGit) Root() string                   { return g.root }
 func (g *fakeGit) CurrentBranch() (string, error) { return g.branch, g.branchErr }
-func (g *fakeGit) HeadSHA() (string, error)       { return g.head, nil }
+func (g *fakeGit) HeadSHA() (string, error) {
+	g.headCalls++
+	if g.headFailAfter > 0 && g.headCalls > g.headFailAfter {
+		return "", errors.New("HEAD unreadable")
+	}
+	return g.head, nil
+}
 
 // GitDir returns gitDir, empty by default. An empty git dir is a supported
 // state — it disables build-cache reuse, which is an optimization a run must
@@ -1353,10 +1363,19 @@ func TestRunner_AllowDiscardRejectsFalseyValues(t *testing.T) {
 	}
 }
 
-// fakeDepDrift returns scripted drift.
-type fakeDepDrift struct{ drifts []domain.DepDrift }
+// fakeDepDrift returns scripted drift and, when revs is set, records the
+// commit it was asked to read.
+type fakeDepDrift struct {
+	drifts []domain.DepDrift
+	revs   *[]string
+}
 
-func (f fakeDepDrift) DetectDepDrift(string) []domain.DepDrift { return f.drifts }
+func (f fakeDepDrift) DetectDepDrift(_, rev string) []domain.DepDrift {
+	if f.revs != nil {
+		*f.revs = append(*f.revs, rev)
+	}
+	return f.drifts
+}
 
 // Drift has to reach the signed record, not just a terminal.
 //
@@ -1397,6 +1416,43 @@ func TestRunner_PrePushRecordsDependencyDrift(t *testing.T) {
 	// The SBOM still says what it always said; drift qualifies it, not replaces it.
 	if len(git.note.Dependencies) != 1 {
 		t.Errorf("recording drift must not drop the SBOM: %+v", git.note.Dependencies)
+	}
+}
+
+// Drift is a signed statement about the commit the note attests, read from
+// that commit's lockfiles, so the detector must be handed exactly that SHA —
+// and, when HEAD cannot be read, not consulted at all: no commit, no claim.
+func TestRunner_PrePushDepDriftReadsTheAttestedCommit(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha2"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	var revs []string
+	r.DepDrift = fakeDepDrift{revs: &revs}
+
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	if git.note.CommitSHA == "" {
+		t.Fatal("no note was written")
+	}
+	if len(revs) != 1 || revs[0] != git.note.CommitSHA {
+		t.Fatalf("drift read %q, want exactly the attested commit %q", revs, git.note.CommitSHA)
+	}
+}
+
+func TestRunner_PrePushDepDriftSkippedWithoutACommit(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", headFailAfter: 1, wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, prePushCfg())
+	var revs []string
+	r.DepDrift = fakeDepDrift{revs: &revs, drifts: []domain.DepDrift{{Lockfile: "package-lock.json", Missing: []string{"node_modules/a"}}}}
+
+	_, _ = r.Run(context.Background(), domain.PrePush)
+	if len(revs) != 0 {
+		t.Fatalf("drift detector consulted with no attested commit: %q", revs)
+	}
+	if len(git.note.DependenciesDrifted) != 0 {
+		t.Errorf("drift recorded with no attested commit: %+v", git.note.DependenciesDrifted)
 	}
 }
 

@@ -8,16 +8,9 @@
 package sbom
 
 import (
-	"bufio"
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"io"
-	"os/exec"
 	"path"
-	"strconv"
-	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
 	gitinfra "go.klarlabs.de/warden/internal/infrastructure/git"
@@ -68,20 +61,16 @@ func (Collector) Collect(dir, rev string) []domain.DependencyManifest {
 	if rev == "" {
 		return nil
 	}
-	entries, err := lockfileEntries(dir, rev)
-	if err != nil || len(entries) == 0 {
+	blobs, err := gitinfra.ReadTreeBlobs(dir, rev, isLockfilePath)
+	if err != nil || len(blobs) == 0 {
 		return nil
 	}
-	contents, err := readBlobs(dir, entries)
-	if err != nil {
-		return nil
-	}
-	out := make([]domain.DependencyManifest, 0, len(entries))
-	for i, e := range entries {
-		sum := sha256.Sum256(contents[i])
+	out := make([]domain.DependencyManifest, 0, len(blobs))
+	for _, b := range blobs {
+		sum := sha256.Sum256(b.Content)
 		out = append(out, domain.DependencyManifest{
-			Ecosystem: lockfiles[path.Base(e.path)],
-			Path:      e.path,
+			Ecosystem: lockfiles[path.Base(b.Path)],
+			Path:      b.Path,
 			Digest:    "sha256:" + hex.EncodeToString(sum[:]),
 		})
 	}
@@ -90,92 +79,8 @@ func (Collector) Collect(dir, rev string) []domain.DependencyManifest {
 	return out
 }
 
-// treeEntry is a lockfile blob in the attested tree.
-type treeEntry struct {
-	object string
-	path   string
-}
-
-// gitOut runs git in dir with the hook environment scrubbed, so a collector
-// invoked from inside a hook resolves against dir rather than the hook's index.
-func gitOut(dir string, stdin io.Reader, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = gitinfra.ScrubHookEnv(cmd.Environ())
-	cmd.Stdin = stdin
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
-}
-
-// lockfileEntries lists the regular-file lockfile blobs in rev's tree.
-// `ls-tree -z` records are "<mode> <type> <object><TAB><path><NUL>" with the
-// path unquoted.
-func lockfileEntries(dir, rev string) ([]treeEntry, error) {
-	out, err := gitOut(dir, nil, "ls-tree", "-r", "-z", "--full-tree", rev+"^{tree}")
-	if err != nil {
-		return nil, err
-	}
-	var entries []treeEntry
-	for _, rec := range strings.Split(string(out), "\x00") {
-		meta, p, ok := strings.Cut(rec, "\t")
-		if !ok {
-			continue
-		}
-		fields := strings.Fields(meta)
-		if len(fields) != 3 || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
-			continue
-		}
-		if _, known := lockfiles[path.Base(p)]; !known {
-			continue
-		}
-		entries = append(entries, treeEntry{object: fields[2], path: p})
-	}
-	return entries, nil
-}
-
-// readBlobs fetches each entry's content in one `git cat-file --batch`. Output
-// is "<object> <type> <size><LF><content><LF>" per request, in request order.
-func readBlobs(dir string, entries []treeEntry) ([][]byte, error) {
-	var req strings.Builder
-	for _, e := range entries {
-		req.WriteString(e.object)
-		req.WriteByte('\n')
-	}
-	out, err := gitOut(dir, strings.NewReader(req.String()), "cat-file", "--batch")
-	if err != nil {
-		return nil, err
-	}
-	r := bufio.NewReader(bytes.NewReader(out))
-	contents := make([][]byte, 0, len(entries))
-	for _, e := range entries {
-		header, err := r.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("cat-file: truncated output for %s", e.path)
-		}
-		fields := strings.Fields(header)
-		if len(fields) != 3 || fields[0] != e.object || fields[1] != "blob" {
-			return nil, fmt.Errorf("cat-file: unexpected header %q for %s", strings.TrimSpace(header), e.path)
-		}
-		size, err := strconv.Atoi(fields[2])
-		if err != nil || size < 0 {
-			return nil, fmt.Errorf("cat-file: bad size in %q", strings.TrimSpace(header))
-		}
-		content := make([]byte, size)
-		if _, err := io.ReadFull(r, content); err != nil {
-			return nil, fmt.Errorf("cat-file: short read for %s: %w", e.path, err)
-		}
-		if _, err := r.Discard(1); err != nil { // the trailing LF
-			return nil, fmt.Errorf("cat-file: missing terminator for %s", e.path)
-		}
-		contents = append(contents, content)
-	}
-	return contents, nil
-}
+// isLockfilePath reports whether a repository path names a known lockfile.
+func isLockfilePath(p string) bool { _, ok := lockfiles[path.Base(p)]; return ok }
 
 // sortManifests orders by path (a small, allocation-free insertion sort — the
 // lockfile count per repo is tiny).

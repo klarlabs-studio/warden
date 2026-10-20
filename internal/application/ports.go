@@ -232,7 +232,7 @@ type SBOM interface {
 // Optional, and best-effort even when set — nothing detected is reported as no
 // drift, never as verified clean.
 type DepDriftDetector interface {
-	DetectDepDrift(worktreeDir string) []domain.DepDrift
+	DetectDepDrift(worktreeDir, rev string) []domain.DepDrift
 }
 
 // Signer produces detached signatures over provenance payloads. It is optional:
