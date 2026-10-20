@@ -65,11 +65,16 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	// so steps in a parallel batch never race on the priors slice.
 	priorsMu := &sync.Mutex{}
 
+	// One pool for every per-workspace step of the run, so fan-out inside a
+	// parallel batch shares a single bound instead of multiplying it.
+	pool := steps.NewWorkspacePool(workspaceConcurrency(policy))
+
 	for _, name := range policy.Steps {
-		step, err := resolveStep(reg, name, policy.Commands)
+		step, err := resolveStep(reg, name, policy, pool)
 		if err != nil {
 			return nil, err
 		}
+		_, perWorkspace := step.(steps.WorkspaceStep)
 		stepSC := sc
 		// Commands are sourced from the resolved policy so a config-command
 		// custom step (and the built-in shell steps) always see them, regardless
@@ -95,7 +100,9 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 		// Wrap a cacheable, non-mutating step so an unchanged run is skipped. The
 		// command signature (shell + agent) is part of the key, so changing what a
 		// step runs busts its cache.
-		if cache != nil && sc.Container == nil && policy.Cacheable(name) {
+		// A per-workspace step is never cached: its inputs are the selection
+		// as well as the files, and config load refuses a cache: entry for it.
+		if cache != nil && sc.Container == nil && !perWorkspace && policy.Cacheable(name) {
 			cmdSig := policy.Commands[string(name)] + "\x00" + stepSC.AgentCommand
 			step = cachedStep{inner: step, cache: cache, globs: policy.CachePaths(name), command: cmdSig}
 		}
@@ -134,31 +141,48 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 }
 
 // resolveStep finds a step's implementation, in order of preference:
-//  1. a registered built-in step;
-//  2. a config-defined command step — a custom step whose name has a
+//  1. a per-workspace step — a step defined under per_workspace: fans out
+//     over the run's workspace selection, even when it shares a built-in's
+//     name (lint, test): the config says it runs per workspace;
+//  2. a registered built-in step;
+//  3. a config-defined command step — a custom step whose name has a
 //     commands.<name> entry runs that shell command, no code required;
-//  3. a subprocess step — a warden-step-<name> binary on PATH speaking the
+//  4. a subprocess step — a warden-step-<name> binary on PATH speaking the
 //     stepsdk wire protocol, for steps that need structured findings/approval.
 //
-// The command path (2) is the easy default: a repo adds a custom check by
+// The command path (3) is the easy default: a repo adds a custom check by
 // naming a command, not by writing and installing a Go binary. The subprocess
-// path (3) stays as the advanced escape hatch.
-func resolveStep(reg application.Registry, name domain.StepName, commands map[string]string) (application.Step, error) {
+// path (4) stays as the advanced escape hatch.
+func resolveStep(reg application.Registry, name domain.StepName, policy domain.ResolvedPolicy, pool *steps.WorkspacePool) (application.Step, error) {
+	if ws := policy.Workspaces; ws != nil {
+		if def, ok := ws.Steps[name]; ok {
+			return steps.NewWorkspaceStep(name, def, pool, policy.KeepsWrites(name)), nil
+		}
+	}
 	if step, ok := reg[name]; ok {
 		return step, nil
 	}
 	if name.IsBuiltin() {
 		return nil, fmt.Errorf("built-in step %q has no registered implementation", name)
 	}
-	if cmd, ok := commands[string(name)]; ok && strings.TrimSpace(cmd) != "" {
+	if cmd, ok := policy.Commands[string(name)]; ok && strings.TrimSpace(cmd) != "" {
 		return commandStep(name), nil
 	}
 	bin, err := exec.LookPath(customStepBinary(name))
 	if err != nil {
-		return nil, fmt.Errorf("custom step %q: define commands.%s in .warden.yaml, or install a %s binary on PATH: %w",
-			name, name, customStepBinary(name), err)
+		return nil, fmt.Errorf("custom step %q: define commands.%s or per_workspace.%s in .warden.yaml, or install a %s binary on PATH: %w",
+			name, name, name, customStepBinary(name), err)
 	}
 	return NewSubprocessStep(name, bin), nil
+}
+
+// workspaceConcurrency is the run's per-workspace pool size: the configured
+// workspaces.concurrency, or 0 for the default.
+func workspaceConcurrency(p domain.ResolvedPolicy) int {
+	if p.Workspaces == nil {
+		return 0
+	}
+	return p.Workspaces.Concurrency
 }
 
 // commandStep picks the implementation for a config-defined command step. Every

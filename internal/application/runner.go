@@ -117,7 +117,11 @@ type Runner struct {
 	// dependency drift it detected, so the note does not imply the run
 	// resolved against the lockfiles it digests (#204).
 	DepDrift DepDriftDetector
-	Settings Settings
+	// Workspaces is optional: it backs per-workspace steps (per_workspace:).
+	// A run whose steps include one fails when it is nil rather than run the
+	// step over nothing.
+	Workspaces WorkspaceSource
+	Settings   Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
 	NewID func() string
@@ -874,6 +878,8 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 	// unregistered step (a sequential barrier) falls back to the canonical wt.
 	reg := newWorktreeRegistry()
 	sc.WorktreeFor = reg.dirFor
+	sels := newWorkspaceSelections()
+	sc.Selection = sels.get
 
 	var priors []domain.Finding
 	kernel, err := r.Kernels.New(resolved, sc, &priors, push)
@@ -881,6 +887,9 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 		return nil, err
 	}
 	for _, batch := range resolved.Batches() {
+		if err := r.prepareWorkspaces(sels, sc.Hook, resolved, batch, wt); err != nil {
+			return nil, err
+		}
 		if err := r.runBatch(ctx, run, kernel, batch, wt, reg, resolved); err != nil {
 			return nil, err
 		}

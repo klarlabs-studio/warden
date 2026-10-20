@@ -21,6 +21,7 @@ import (
 	"go.klarlabs.de/warden/internal/infrastructure/sbom"
 	"go.klarlabs.de/warden/internal/infrastructure/signing"
 	"go.klarlabs.de/warden/internal/infrastructure/steps"
+	"go.klarlabs.de/warden/internal/infrastructure/workspace"
 	"go.klarlabs.de/warden/internal/policy"
 )
 
@@ -56,14 +57,15 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 	}
 	gitAdapter := git.NewAdapter(repo)
 	runner := &application.Runner{
-		Git:      gitAdapter,
-		DepDrift: gitAdapter,
-		Configs:  configs,
-		Kernels:  factory,
-		Approver: approver,
-		Forge:    gh,
-		SBOM:     sbom.New(),
-		Settings: application.Settings{Version: version, Remote: DefaultRemote},
+		Git:        gitAdapter,
+		DepDrift:   gitAdapter,
+		Configs:    configs,
+		Kernels:    factory,
+		Approver:   approver,
+		Forge:      gh,
+		SBOM:       sbom.New(),
+		Workspaces: workspace.NewRunSource(repo),
+		Settings:   application.Settings{Version: version, Remote: DefaultRemote},
 	}
 	// Provenance signing is best-effort: if the key can't be loaded (e.g. a
 	// locked-down home in CI), runs still validate and write unsigned notes —
