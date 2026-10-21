@@ -76,7 +76,7 @@ func TestStatusDescription_QualifiesSkippedSteps(t *testing.T) {
 	run := domain.NewRun("run_1", domain.PrePush, domain.ResolvedPolicy{Steps: []domain.StepName{"lint", "review"}}, "main")
 	_ = run.RecordStep(domain.StepResult{Step: "lint", Status: domain.StepPass})
 	_ = run.RecordStep(domain.StepResult{Step: "review", Status: domain.StepPass, Outcome: domain.StepSkipped, OutcomeReason: "no agent configured"})
-	if got, want := statusDescription(run), "warden gate passed (lint; review: skipped, no agent configured)"; got != want {
+	if got, want := statusDescription(run, nil), "warden gate passed (lint; review: skipped, no agent configured)"; got != want {
 		t.Errorf("statusDescription = %q, want %q", got, want)
 	}
 }

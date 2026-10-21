@@ -49,7 +49,7 @@ func TestHandlePolicyExplain_CarriesWhatRunsPerWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(got)
-	for _, want := range []string{`"Active":true`, `"Each":"pnpm test"`, "every discovered workspace at pre-push"} {
+	for _, want := range []string{`"Active":true`, `"Each":"pnpm test"`, "trusted full-scope note"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("policy_explain JSON missing %s: %s", want, b)
 		}
