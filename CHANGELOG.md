@@ -6,6 +6,43 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Preview: Cargo workspaces, and Nx `implicitDependencies`.** Workspace
+  discovery read only JS and `go.work` manifests, so in a Rust monorepo every
+  crate's files belonged to no workspace and any change selected everything.
+  `workspaces.discover` now accepts `rust`: the members of the root
+  `Cargo.toml`'s `[workspace]` (`members` globs, `exclude`, the root package,
+  and every in-repository crate a member reaches by a `path`, which Cargo makes
+  a member too), with an edge wherever a normal, dev, build or
+  target-specific dependency reaches another member through `path`,
+  `workspace = true` or a root `[patch]`/`[replace]`. A path that leaves the
+  repository is no edge. A root `Cargo.toml` and `Cargo.lock`, and
+  `rust-toolchain.toml` and `.cargo/config.toml`, select every workspace. For
+  JS workspaces, an Nx `implicitDependencies` entry (in `project.json` or the
+  `package.json` `"nx"` object) naming another workspace's project now adds an
+  edge; Nx projects outside the package manager's workspaces are still not
+  discovered, because Nx infers their edges from source imports. Manifests are
+  read from git objects only, as before, with a TOML parser
+  (`github.com/pelletier/go-toml/v2`) as the one new dependency. A root
+  lockfile change still selects every workspace: attributing a
+  `pnpm-lock.yaml` change to the importers it touches cannot account for
+  shared entries and hoisted packages. See
+  [monorepo mode](docs/monorepo.md#where-workspaces-come-from).
+
+### Changed
+
+- **Discovery reads only the ecosystems `workspaces.discover` names.** A run
+  already ignored workspaces of other ecosystems, but it read and validated
+  their manifests first, so a broken manifest of an ecosystem a repository
+  never asked for could fail its commit, and `warden workspaces` listed every
+  ecosystem whatever the configuration said. Discovery now reads nothing
+  else, at every hook and in `warden workspaces` and `--affected`, which also
+  keeps a Cargo crate that shares a directory with a JS package (a native
+  Node addon) from colliding with it unless both are discovered. Without a
+  `workspaces:` block, `warden workspaces` still previews every ecosystem. A
+  workspace's malformed `project.json` is now an error naming it.
+
 ## [0.40.0] - 2026-10-21
 
 A minor release in which monorepo mode records what it checked. Under

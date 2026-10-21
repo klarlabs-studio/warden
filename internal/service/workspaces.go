@@ -38,13 +38,20 @@ type AffectedWorkspaces struct {
 }
 
 // Workspaces discovers the workspace graph committed at rev. It reads git
-// objects only, so files that are not committed at rev play no part.
+// objects only, so files that are not committed at rev play no part. The
+// ecosystems are the ones workspaces.discover names in the configuration
+// committed at rev, as a run discovers them; without the block, every
+// ecosystem warden knows.
 func (s *Service) Workspaces(rev string) (WorkspaceList, error) {
 	commit, err := s.resolveCommit(rev)
 	if err != nil {
 		return WorkspaceList{}, err
 	}
-	g, err := workspace.DiscoverAt(s.repo.Dir, commit)
+	cfg, _, err := s.configurationAt(commit)
+	if err != nil {
+		return WorkspaceList{}, fmt.Errorf("configuration at %s: %w", shortSHA(commit), err)
+	}
+	g, err := workspace.DiscoverAt(s.repo.Dir, commit, discoverEcosystems(cfg)...)
 	if err != nil {
 		return WorkspaceList{}, err
 	}
@@ -65,7 +72,8 @@ func (s *Service) Workspaces(rev string) (WorkspaceList, error) {
 // the configuration digest, which forces a full selection, so the anchor's
 // rules never need consulting. An anchor whose configuration cannot be loaded
 // counts as an unknown configuration, which forces a full selection rather
-// than failing the command.
+// than failing the command. Both graphs are discovered for the ecosystems the
+// HEAD configuration names, as a run discovers them.
 func (s *Service) AffectedWorkspaces(base string) (AffectedWorkspaces, error) {
 	if base == "" || strings.HasPrefix(base, "-") {
 		return AffectedWorkspaces{}, fmt.Errorf("affected workspaces: invalid base %q", base)
@@ -78,21 +86,22 @@ func (s *Service) AffectedWorkspaces(base string) (AffectedWorkspaces, error) {
 	if err != nil {
 		return AffectedWorkspaces{}, fmt.Errorf("no common ancestor of HEAD and %s: %w", base, err)
 	}
-	baseGraph, err := workspace.DiscoverAt(s.repo.Dir, anchor)
+	headCfg, headConfig, err := s.configurationAt(head)
+	if err != nil {
+		return AffectedWorkspaces{}, fmt.Errorf("configuration at HEAD: %w", err)
+	}
+	ecosystems := discoverEcosystems(headCfg)
+	baseGraph, err := workspace.DiscoverAt(s.repo.Dir, anchor, ecosystems...)
 	if err != nil {
 		return AffectedWorkspaces{}, fmt.Errorf("workspaces at the anchor %s: %w", shortSHA(anchor), err)
 	}
-	headGraph, err := workspace.DiscoverAt(s.repo.Dir, head)
+	headGraph, err := workspace.DiscoverAt(s.repo.Dir, head, ecosystems...)
 	if err != nil {
 		return AffectedWorkspaces{}, fmt.Errorf("workspaces at HEAD %s: %w", shortSHA(head), err)
 	}
 	changed, err := s.repo.ChangedPaths(anchor, head)
 	if err != nil {
 		return AffectedWorkspaces{}, err
-	}
-	headCfg, headConfig, err := s.configurationAt(head)
-	if err != nil {
-		return AffectedWorkspaces{}, fmt.Errorf("configuration at HEAD: %w", err)
 	}
 	_, anchorConfig, err := s.configurationAt(anchor)
 	if err != nil {
@@ -110,6 +119,16 @@ func (s *Service) AffectedWorkspaces(base string) (AffectedWorkspaces, error) {
 		return AffectedWorkspaces{}, err
 	}
 	return AffectedWorkspaces{Base: base, Anchor: anchor, Head: head, HeadWorkspaces: len(headGraph.Workspaces), SelectionDigest: digest, Selection: sel}, nil
+}
+
+// discoverEcosystems is what a configuration's workspaces.discover names, or
+// nil (every ecosystem) when it names none: `warden workspaces` previews a
+// repository that has not configured the block yet.
+func discoverEcosystems(cfg domain.Config) []string {
+	if cfg.Workspaces == nil {
+		return nil
+	}
+	return cfg.Workspaces.Discover
 }
 
 // DefaultAffectedBase is the base `warden workspaces --affected` measures

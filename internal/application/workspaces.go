@@ -129,7 +129,7 @@ func (r *Runner) selectWorkspaces(sels *workspaceSelections, hook domain.Hook, r
 		return nil, selectionContext{}, fmt.Errorf("read the checked tree: %w", err)
 	}
 	ctx := selectionContext{tree: tree}
-	head, err := r.Workspaces.Discover(tree)
+	head, err := r.Workspaces.Discover(tree, ws.Discover)
 	if err != nil {
 		return nil, ctx, err
 	}
@@ -157,7 +157,7 @@ func (r *Runner) selectWorkspaces(sels *workspaceSelections, hook domain.Hook, r
 	var anchorDigest string
 	changed := []string{}
 	if anchor, err := wt.HeadSHA(); err == nil && anchor != "" {
-		if base, err = r.Workspaces.Discover(anchor); err != nil {
+		if base, err = r.Workspaces.Discover(anchor, ws.Discover); err != nil {
 			return nil, ctx, fmt.Errorf("workspaces at HEAD: %w", err)
 		}
 		base = base.Only(ws.Discover)
@@ -204,7 +204,7 @@ func (r *Runner) selectAtPrePush(sels *workspaceSelections, resolved domain.Reso
 	if !found {
 		return full(domain.FullRuleNoAnchor)
 	}
-	base, err := r.Workspaces.Discover(anchor.SHA)
+	base, err := r.Workspaces.Discover(anchor.SHA, ws.Discover)
 	if err != nil {
 		return nil, ctx, fmt.Errorf("workspaces at the anchor %s: %w", short12(anchor.SHA), err)
 	}

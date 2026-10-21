@@ -75,6 +75,48 @@ func TestService_WorkspacesAtHead(t *testing.T) {
 	}
 }
 
+// `warden workspaces` discovers what the committed workspaces.discover names,
+// as a run does: a Cargo workspace beside a go.work is listed only once rust
+// is named, and a broken Cargo.toml cannot fail a repository that does not
+// discover rust. Without the block every ecosystem is previewed.
+func TestService_WorkspacesHonourDiscover(t *testing.T) {
+	dir, _ := goWorkRepo(t)
+	commitFiles(t, dir, "cargo", map[string]string{
+		"Cargo.toml":          "[workspace]\nmembers = [\"crates/*\"]\n",
+		"crates/a/Cargo.toml": "[package]\nname = \"a\"\n",
+	})
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		t.Helper()
+		list, err := svc.Workspaces("HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(list.Workspaces)
+	}
+	if n := count(); n != 4 {
+		t.Fatalf("without a workspaces block: %d workspaces, want 3 go + 1 rust", n)
+	}
+	commitFiles(t, dir, "config", map[string]string{
+		".warden.yaml":        "workspaces:\n  discover: [go]\n",
+		"crates/b/Cargo.toml": "[package\n",
+		"Cargo.toml":          "[workspace]\nmembers = [\"crates/*\"]\n",
+	})
+	if n := count(); n != 3 {
+		t.Fatalf("discover [go]: %d workspaces, want the 3 go modules", n)
+	}
+	if _, err := svc.AffectedWorkspaces("HEAD~1"); err != nil {
+		t.Fatalf("affected under discover [go] read the broken Cargo.toml: %v", err)
+	}
+	commitFiles(t, dir, "rust too", map[string]string{".warden.yaml": "workspaces:\n  discover: [go, rust]\n"})
+	if _, err := svc.Workspaces("HEAD"); err == nil || !strings.Contains(err.Error(), "crates/b/Cargo.toml") {
+		t.Fatalf("discover [go, rust] error = %v, want the broken manifest named", err)
+	}
+}
+
 // With a root module ("use ."), a file outside every nested module belongs to
 // the root; a change in lib reaches svc and, through svc, the root.
 func TestService_AffectedWorkspacesGoWork(t *testing.T) {

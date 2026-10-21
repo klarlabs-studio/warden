@@ -82,7 +82,7 @@ func writeJSON(stdout, stderr io.Writer, v any) int {
 
 func renderWorkspaceList(w io.Writer, list service.WorkspaceList) {
 	if len(list.Workspaces) == 0 {
-		_, _ = fmt.Fprintf(w, "no workspaces at %s: no pnpm-workspace.yaml, package.json \"workspaces\" or go.work declares any\n", short(list.Commit))
+		_, _ = fmt.Fprintf(w, "no workspaces at %s: no pnpm-workspace.yaml, package.json \"workspaces\", go.work or Cargo.toml [workspace] declares any\n", short(list.Commit))
 		return
 	}
 	_, _ = fmt.Fprintf(w, "%d workspace(s) at %s (graph %s)\n", len(list.Workspaces), short(list.Commit), list.GraphDigest)

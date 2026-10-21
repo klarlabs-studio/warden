@@ -14,8 +14,10 @@ type WorkspaceSource interface {
 	// plus unstaged edits to tracked files, untracked files excluded — and
 	// returns its name. dir's own index is left untouched.
 	TrackedTree(dir string) (string, error)
-	// Discover reads the workspace graph of a commit or tree.
-	Discover(rev string) (domain.WorkspaceGraph, error)
+	// Discover reads the workspace graph of a commit or tree for the named
+	// ecosystems. Manifests of other ecosystems are not read, so they can
+	// neither fail discovery nor change the graph.
+	Discover(rev string, ecosystems []string) (domain.WorkspaceGraph, error)
 	// ChangedPaths lists the paths that differ between two commits or trees,
 	// a rename reported as a delete plus an add.
 	ChangedPaths(from, to string) ([]string, error)

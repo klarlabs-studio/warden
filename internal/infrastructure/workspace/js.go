@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"slices"
-	"sort"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -19,6 +18,10 @@ const EcosystemJS = "js"
 const (
 	packageJSON   = "package.json"
 	pnpmWorkspace = "pnpm-workspace.yaml"
+	// nxProject is an Nx project's configuration. Discovery reads it only in
+	// a directory that is a workspace already, for its `name` and
+	// `implicitDependencies`.
+	nxProject = "project.json"
 )
 
 // jsDependencyFields are the package.json fields whose keys name packages a
@@ -34,7 +37,13 @@ var jsDependencyFields = []string{"dependencies", "devDependencies", "peerDepend
 //
 // A matched directory is a workspace when it holds a package.json. Its edges
 // are the dependencies, of any kind and any version spec, that name another
-// workspace's package.
+// workspace's package, and the Nx `implicitDependencies` (in its project.json
+// or its package.json "nx" object) that name another workspace's Nx project.
+//
+// Nx is read only this far. A project.json outside the package manager's
+// workspaces is not discovered as a workspace: Nx infers most edges between
+// such projects from their source imports, which no manifest declares, so a
+// graph built from manifests alone would miss them and select too little.
 func discoverJS(src Source, files fileSet) ([]domain.Workspace, error) {
 	patterns, origin, err := jsPatterns(src, files)
 	if err != nil || origin == "" {
@@ -55,6 +64,9 @@ func discoverJS(src Source, files fileSet) ([]domain.Workspace, error) {
 		}
 		dirs = append(dirs, dir)
 		manifests = append(manifests, f)
+		if files[joinPath(dir, nxProject)] {
+			manifests = append(manifests, joinPath(dir, nxProject))
+		}
 	}
 	data, err := readManifests(src, manifests)
 	if err != nil {
@@ -67,6 +79,11 @@ func discoverJS(src Source, files fileSet) ([]domain.Workspace, error) {
 			return nil, err
 		}
 		p.dir = dir
+		if proj, ok := data[joinPath(dir, nxProject)]; ok {
+			if err := p.readNxProject(joinPath(dir, nxProject), proj); err != nil {
+				return nil, err
+			}
+		}
 		pkgs = append(pkgs, p)
 	}
 	return jsWorkspaces(pkgs), nil
@@ -211,6 +228,49 @@ type jsPackage struct {
 	name string
 	// deps are the package names its dependency fields refer to.
 	deps []string
+	// nxNames are the names Nx may know the project by besides its package
+	// name: project.json "name" and package.json "nx"."name".
+	nxNames []string
+	// implicit are its Nx implicitDependencies entries: project names or
+	// globs over them, a "!" entry removing an inferred edge.
+	implicit []string
+}
+
+// nxConfig is the part of an Nx project configuration discovery reads, from
+// project.json or from package.json "nx".
+type nxConfig struct {
+	Name                 json.RawMessage `json:"name"`
+	ImplicitDependencies json.RawMessage `json:"implicitDependencies"`
+}
+
+// readNx adds an Nx project configuration's name and implicitDependencies.
+func (p *jsPackage) readNx(file string, cfg nxConfig) error {
+	if len(cfg.Name) > 0 && string(cfg.Name) != "null" {
+		var name string
+		if err := json.Unmarshal(cfg.Name, &name); err != nil {
+			return fmt.Errorf("%s: Nx \"name\" must be a string", file)
+		}
+		if name != "" {
+			p.nxNames = append(p.nxNames, name)
+		}
+	}
+	if len(cfg.ImplicitDependencies) > 0 && string(cfg.ImplicitDependencies) != "null" {
+		var deps []string
+		if err := json.Unmarshal(cfg.ImplicitDependencies, &deps); err != nil {
+			return fmt.Errorf("%s: \"implicitDependencies\" must be a list of project names", file)
+		}
+		p.implicit = append(p.implicit, deps...)
+	}
+	return nil
+}
+
+// readNxProject reads a workspace's project.json.
+func (p *jsPackage) readNxProject(file string, data []byte) error {
+	var cfg nxConfig
+	if err := json.Unmarshal(trimBOM(data), &cfg); err != nil {
+		return fmt.Errorf("%s: %w", file, err)
+	}
+	return p.readNx(file, cfg)
 }
 
 // parsePackage reads a workspace's name and the package names it depends on.
@@ -227,6 +287,15 @@ func parsePackage(file string, data []byte) (jsPackage, error) {
 	}
 	if p.name == "" {
 		return jsPackage{}, fmt.Errorf("%s: a workspace package needs a \"name\"", file)
+	}
+	if raw, ok := doc["nx"]; ok && string(raw) != "null" {
+		var cfg nxConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return jsPackage{}, fmt.Errorf("%s: \"nx\" must be an object", file)
+		}
+		if err := p.readNx(file, cfg); err != nil {
+			return jsPackage{}, err
+		}
 	}
 	for _, field := range jsDependencyFields {
 		raw, ok := doc[field]
@@ -267,11 +336,18 @@ func workspaceAlias(spec string) string {
 }
 
 // jsWorkspaces turns parsed packages into workspaces, with an edge wherever a
-// package depends on another workspace's name.
+// package depends on another workspace's name, or names another workspace's
+// Nx project in implicitDependencies.
 func jsWorkspaces(pkgs []jsPackage) []domain.Workspace {
 	byName := make(map[string]string, len(pkgs))
+	projects := map[string][]string{} // every name Nx may use -> dirs
 	for _, p := range pkgs {
 		byName[p.name] = p.dir
+		for _, n := range append([]string{p.name}, p.nxNames...) {
+			if !slices.Contains(projects[n], p.dir) {
+				projects[n] = append(projects[n], p.dir)
+			}
+		}
 	}
 	out := make([]domain.Workspace, 0, len(pkgs))
 	for _, p := range pkgs {
@@ -281,8 +357,33 @@ func jsWorkspaces(pkgs []jsPackage) []domain.Workspace {
 				deps = append(deps, dir)
 			}
 		}
-		sort.Strings(deps)
+		for _, entry := range p.implicit {
+			deps = append(deps, nxImplicitTargets(entry, projects)...)
+		}
+		deps = uniqueSorted(deps)
 		out = append(out, domain.Workspace{Path: p.dir, Name: p.name, Ecosystem: EcosystemJS, Deps: deps})
+	}
+	return out
+}
+
+// nxImplicitTargets returns the workspaces one implicitDependencies entry
+// names: the projects called entry, or matched by it when it is a glob. A "!"
+// entry, which tells Nx to drop an edge it inferred from source, adds and
+// removes nothing: warden infers no such edge, and an edge declared elsewhere
+// must not be dropped. An entry naming no workspace (an Nx-only project, or
+// a typo) adds nothing.
+func nxImplicitTargets(entry string, projects map[string][]string) []string {
+	if entry == "" || strings.HasPrefix(entry, "!") {
+		return nil
+	}
+	if !strings.ContainsAny(entry, "*?") {
+		return projects[entry]
+	}
+	var out []string
+	for _, name := range sortedKeys(projects) {
+		if domain.GlobMatch(entry, name) {
+			out = append(out, projects[name]...)
+		}
 	}
 	return out
 }

@@ -268,3 +268,119 @@ func TestGoldenFleet_WorkspacesCycles(t *testing.T) {
 		t.Fatalf("Go cycle: kind %s, selected %v\nwant %v", got.Selection.Kind, got.selected(), want)
 	}
 }
+
+// Cargo: core <- net <- cli, and cli build-depends on tools/bench, which no
+// members glob names: Cargo makes a crate a member when a member reaches it by
+// a path, so warden does too. crates/experimental is excluded, so its path
+// dependency on core links nothing, and cli's path dependency outside the
+// repository links nothing either. An untracked crate on disk is not a
+// member. A root Cargo.lock forces full.
+func TestGoldenFleet_WorkspacesAffectedCargo(t *testing.T) {
+	g := newGoldenRepoNoRemote(t)
+	g.writeFiles(map[string]string{
+		".warden.yaml": "workspaces:\n  discover: [rust]\n",
+		"Cargo.toml": `[workspace]
+members = ["crates/*", "apps/cli"]
+exclude = ["crates/experimental"]
+
+[workspace.dependencies]
+fx-core = { path = "crates/core" }
+serde = "1"
+`,
+		"crates/core/Cargo.toml":         "[package]\nname = \"fx-core\"\n\n[dependencies]\nserde.workspace = true\n",
+		"crates/core/src/lib.rs":         "pub fn core() {}\n",
+		"crates/net/Cargo.toml":          "[package]\nname = \"fx-net\"\n\n[dependencies]\nfx-core = { workspace = true }\n",
+		"crates/net/src/lib.rs":          "pub fn net() {}\n",
+		"crates/experimental/Cargo.toml": "[package]\nname = \"fx-exp\"\n\n[dependencies]\nfx-core = { path = \"../core\" }\n",
+		"apps/cli/Cargo.toml": `[package]
+name = "fx-cli"
+
+[dependencies]
+fx-net = { path = "../../crates/net" }
+
+[target.'cfg(unix)'.dev-dependencies]
+elsewhere = { path = "../../../outside-the-repo" }
+
+[build-dependencies]
+fx-bench = { path = "../../tools/bench" }
+`,
+		"apps/cli/src/main.rs":   "fn main() {}\n",
+		"tools/bench/Cargo.toml": "[package]\nname = \"fx-bench\"\n",
+		"tools/bench/src/lib.rs": "pub fn bench() {}\n",
+	})
+	g.commit("fixture")
+	// Untracked, matched by crates/*, depending on core: not committed, so
+	// not a member.
+	if err := os.MkdirAll(filepath.Join(g.dir, "crates", "scratch"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.dir, "crates", "scratch", "Cargo.toml"), []byte("[package]\nname = \"scratch\"\n[dependencies]\nfx-core = { path = \"../core\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(wardenBin, "workspaces", "--json")
+	cmd.Dir = g.dir
+	cmd.Env = append(hookEnv(), "WARDEN_CONFIG_DIR="+t.TempDir())
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("warden workspaces: %v: %s", err, stderr.String())
+	}
+	var list struct {
+		Workspaces []struct {
+			ID        string   `json:"id"`
+			Name      string   `json:"name"`
+			Ecosystem string   `json:"ecosystem"`
+			Deps      []string `json:"deps"`
+		} `json:"workspaces"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		t.Fatalf("decode %q: %v", stdout.String(), err)
+	}
+	gotGraph := map[string]string{}
+	for _, w := range list.Workspaces {
+		gotGraph[w.ID] = w.Name + " " + w.Ecosystem + " [" + join(w.Deps) + "]"
+	}
+	wantGraph := map[string]string{
+		"apps/cli":    "fx-cli rust [crates/net,tools/bench]",
+		"crates/core": "fx-core rust []",
+		"crates/net":  "fx-net rust [crates/core]",
+		"tools/bench": "fx-bench rust []",
+	}
+	if !reflect.DeepEqual(gotGraph, wantGraph) {
+		t.Fatalf("graph %v\nwant  %v", gotGraph, wantGraph)
+	}
+
+	g.git("checkout", "-q", "-b", "feat")
+	g.writeFiles(map[string]string{"crates/core/src/lib.rs": "pub fn core() { /* edited */ }\n"})
+	g.commit("core")
+	want := map[string][]string{
+		"apps/cli":    {"dependent:crates/net"},
+		"crates/core": {"changed:crates/core/src/lib.rs"},
+		"crates/net":  {"dependent:crates/core"},
+	}
+	got := g.affected()
+	if got.Selection.Kind != "affected" || !reflect.DeepEqual(got.selected(), want) {
+		t.Fatalf("core change: kind %s (%+v), selected %v\nwant %v", got.Selection.Kind, got.Selection.Full, got.selected(), want)
+	}
+
+	g.writeFiles(map[string]string{"tools/bench/src/lib.rs": "pub fn bench() { /* edited */ }\n"})
+	g.commit("bench")
+	want = map[string][]string{
+		"apps/cli":    {"dependent:crates/net,tools/bench"},
+		"crates/core": {"changed:crates/core/src/lib.rs"},
+		"crates/net":  {"dependent:crates/core"},
+		"tools/bench": {"changed:tools/bench/src/lib.rs"},
+	}
+	got = g.affected()
+	if got.Selection.Kind != "affected" || !reflect.DeepEqual(got.selected(), want) {
+		t.Fatalf("implicit member change: kind %s (%+v), selected %v\nwant %v", got.Selection.Kind, got.Selection.Full, got.selected(), want)
+	}
+
+	g.writeFiles(map[string]string{"Cargo.lock": "version = 4\n"})
+	g.commit("lockfile")
+	got = g.affected()
+	if got.Selection.Kind != "full" || got.Selection.Full == nil || got.Selection.Full.Rule != "lockfile" || got.Selection.Full.Path != "Cargo.lock" || len(got.Selection.Workspaces) != 4 {
+		t.Fatalf("Cargo.lock change: kind %s %+v with %d workspaces, want full by lockfile over all 4", got.Selection.Kind, got.Selection.Full, len(got.Selection.Workspaces))
+	}
+}

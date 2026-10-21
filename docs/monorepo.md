@@ -63,20 +63,28 @@ names the reason, when any of these holds:
 |---|---|
 | `configuration` | `.warden.yaml` changed, or the effective configuration (including any `extends:` base) differs from the one at the merge-base, or that one could not be read |
 | `invalid-path` | a changed path cannot be attributed to a directory |
-| `root-manifest` | `package.json`, `pnpm-workspace.yaml`, `go.work` or `go.mod` at the repository root changed |
-| `lockfile` | a lockfile at the repository root changed (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.work.sum`, `go.sum`, …) |
-| `global` | a changed path matches a shared build setting (`.npmrc`, `turbo.json`, `nx.json`, `tsconfig.base.json`, …) |
+| `root-manifest` | `package.json`, `pnpm-workspace.yaml`, `go.work`, `go.mod` or `Cargo.toml` at the repository root changed |
+| `lockfile` | a lockfile at the repository root changed (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.work.sum`, `go.sum`, `Cargo.lock`, …) |
+| `global` | a changed path matches a shared build setting (`.npmrc`, `turbo.json`, `nx.json`, `tsconfig.base.json`, `rust-toolchain.toml`, `.cargo/config.toml`, …) |
 | `unowned` | a changed path belongs to no workspace, for example a CI workflow or a doc at the root |
 
 A workspace the change deletes is listed under `removed`, and the workspaces
 that depended on it are still selected.
+
+A root lockfile change selects every workspace, even when only one
+workspace's dependencies moved. Attributing a `pnpm-lock.yaml` change to the
+importers it touches is not done: a change to a shared entry under
+`packages:` or `snapshots:` reaches every importer that resolves it, and pnpm
+hoists packages (by default every `*eslint*` and `*prettier*` package, to the
+root `node_modules`) where workspaces that never declared them can load them.
+No reading of the lockfile alone can bound who is affected.
 
 The `workspaces:` block in `.warden.yaml` adjusts these rules, and
 `--affected` reads it from the configuration committed at HEAD:
 
 ```yaml
 workspaces:
-  discover: [js, go]
+  discover: [js, go, rust]
   global: ["tools/build/**"]          # also select every workspace
   ignore: ["docs/**", ".github/**"]   # unowned paths that select nothing
   unowned: full                       # default; `ignore` lets every unowned path select nothing
@@ -250,15 +258,22 @@ The step's `timeouts:` entry covers all of its workspaces together.
 ## Where workspaces come from
 
 Discovery reads manifests from the commit's git objects. It never reads the
-working tree and never runs npm, pnpm, yarn or the go command. A
-`package.json` that is not committed is not a workspace, and anyone with the
-same commits computes the same graph.
+working tree and never runs npm, pnpm, yarn, nx, cargo or the go command. A
+`package.json` or `Cargo.toml` that is not committed is not a workspace, and
+anyone with the same commits computes the same graph.
+
+Only the ecosystems `workspaces.discover` names are read (`js`, `go`,
+`rust`), at every hook and by `warden workspaces`; a manifest of another
+ecosystem can neither fail discovery nor add a workspace. Without a
+`workspaces:` block, `warden workspaces` previews every ecosystem.
 
 | Ecosystem | Workspaces | Dependencies |
 |---|---|---|
 | pnpm | directories matched by `packages` in `pnpm-workspace.yaml` that hold a `package.json`; `!` patterns exclude | any of `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` naming another workspace's package, with any version spec, including `workspace:` and `workspace:` aliases |
 | npm, yarn | the same, from `workspaces` in the root `package.json` (an array, or yarn's `{"packages": [...]}`); used only when there is no `pnpm-workspace.yaml` | as for pnpm |
+| Nx (`js`) | Nx projects are the package manager's workspaces above; Nx adds no workspaces of its own | in addition, an `implicitDependencies` entry (in the workspace's `project.json`, or `"nx"` in its `package.json`) naming another workspace's Nx project name or package name, or a `*` glob over them |
 | Go | every `use` directory of a root `go.work`, including `use .` | a `require` of another workspace module's path, or a `replace` (in `go.work` or the module's `go.mod`) pointing at another workspace module's directory |
+| Cargo (`rust`) | directories matched by `members` in the root `Cargo.toml`'s `[workspace]` that hold a `Cargo.toml`, minus those at or below an `exclude` entry (unless a member names them without a glob); the root package when the root manifest has `[package]`; and, as Cargo does, every crate in the repository a member reaches by a `path` dependency, unless excluded | an entry in `[dependencies]`, `[dev-dependencies]` or `[build-dependencies]` (also under `[target.<cfg>]`) with a `path` to another member, with `workspace = true` resolving to a `[workspace.dependencies]` entry with such a `path`, or naming a crate the root `[patch]` or `[replace]` points at another member's directory |
 
 Details:
 
@@ -268,15 +283,30 @@ Details:
 - `node_modules` directories are never workspaces. The root package is a
   workspace only when a pattern names `.` itself.
 - A repository with one `go.mod` and no `go.work` has no Go workspaces: relating
-  its packages would need `go list`, which discovery does not run.
+  its packages would need `go list`, which discovery does not run. Likewise a
+  `Cargo.toml` without `[workspace]` is a single crate, and a Cargo workspace
+  whose root is below the repository root is not discovered.
+- A Cargo `path` dependency that leaves the repository, or names an excluded
+  crate, is no edge. Cargo reads `exclude` entries as directories, not globs,
+  and so does warden.
+- Nx infers most edges between projects from their source imports, which no
+  manifest records. That is why a `project.json` outside the package
+  manager's workspaces is not discovered: its files are unowned, and a change
+  to them selects every workspace unless `workspaces.ignore` covers them. A
+  `!` entry in `implicitDependencies`, which drops an inferred edge in Nx,
+  drops nothing here. `nx.json` is a global path.
 
 Discovery fails, with a message naming the file, instead of leaving a
 workspace out. That happens for a manifest that does not parse, a workspace
 package without a `name`, a `go.work` `use` outside the repository or without
 a `go.mod`, a workspace name with characters outside letters, digits, `.`,
-`_`, `~`, `-` and `/` (plus a leading `@scope/`), two workspaces with one name
-or directory (including a directory that is both a JS workspace and a Go
-module).
+`_`, `~`, `-` and `/` (plus a leading `@scope/`), a Cargo member without
+`[package]` `name`, a literal `members` entry or in-repository `path`
+dependency without a `Cargo.toml`, a `workspace = true` dependency the root
+does not declare, two workspaces with one name or directory (including a
+directory that is both a JS workspace and a Go module or a Cargo member).
+Such a shared directory is common for native Node addons; discover only one
+of the two ecosystems for such a repository.
 
 Dependency cycles between workspaces are fine. Two packages that list each
 other in `devDependencies`, or Go modules that require each other, form a

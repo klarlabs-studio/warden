@@ -747,7 +747,7 @@ diagnostics: { lint: out/lint.sarif }   # optional — a SARIF 2.1.0 file the ch
 # refuses every scoped note, so add them only once warden >= 0.39.0 runs on every
 # machine and CI runner that reads this config (see docs/monorepo.md).
 workspaces:
-  discover: [js, go]   # required with the block — ecosystems to read workspaces from (js = npm/yarn/pnpm, go = go.work)
+  discover: [js, go]   # required with the block — ecosystems to read workspaces from (js = npm/yarn/pnpm, incl. Nx implicitDependencies; go = go.work; rust = Cargo workspace)
   select: all          # default — `affected` runs per-workspace steps only for changed workspaces and their dependents, and records that scope in the note
   global: ["tools/build/**"]   # changes here select every workspace (added to the lockfile/tool-config defaults)
   ignore: ["docs/**", ".github/**"]   # changed paths no workspace owns that select nothing
@@ -876,7 +876,7 @@ The exit status stays the only verdict.
 | `warden run <pre-commit\|pre-push>` | run the gate (invoked by the hook shims) |
 | `warden policy explain [--hook h] [--branch b] [--paths glob,...] [--chart]` | print resolved policy (or an XState statechart) |
 | `warden steps list` | list built-in + custom steps by hook |
-| `warden workspaces [--affected [--base rev]] [--json]` | **preview:** list the monorepo's workspaces committed at HEAD (pnpm, npm, yarn, `go.work`), or the ones a change since the merge-base with `--base` affects, each with its reason; read-only ([monorepo mode](docs/monorepo.md)) |
+| `warden workspaces [--affected [--base rev]] [--json]` | **preview:** list the monorepo's workspaces committed at HEAD (pnpm, npm, yarn, Nx, `go.work`, Cargo), or the ones a change since the merge-base with `--base` affects, each with its reason; read-only ([monorepo mode](docs/monorepo.md)) |
 | `warden import [--write]` | generate `.warden.yaml` from an existing Makefile / package.json / `.pre-commit-config.yaml` / `.husky` / lefthook / CI |
 | `warden status` | show gate state: armed hooks, adoption point, resolved steps |
 | `warden doctor [--branch b] [--ci]` | audit which commits since adoption carry a validation note (`--ci`: exit 3 on drift, so CI can tell drift from a doctor that could not run) |

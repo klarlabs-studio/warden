@@ -51,9 +51,12 @@ func TestRunSource(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(changed, []string{"packages/a/index.ts"}) {
 		t.Fatalf("changed %v (%v)", changed, err)
 	}
-	g, err := src.Discover(tree)
+	g, err := src.Discover(tree, []string{"js"})
 	if err != nil || !reflect.DeepEqual(g.Paths(), []string{"packages/a"}) {
 		t.Fatalf("graph %v (%v)", g.Paths(), err)
+	}
+	if _, err := src.Discover(tree, nil); err == nil {
+		t.Fatal("a run naming no ecosystem must not discover every one")
 	}
 	if _, err := src.ConfigurationDigestAt("no-such-rev"); err != nil {
 		// A missing ref reads as no config; either way it must not equal HEAD's.

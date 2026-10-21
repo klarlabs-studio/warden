@@ -9,10 +9,11 @@ import (
 )
 
 // WorkspaceEcosystems are the ecosystem labels workspace discovery knows:
-// "js" (npm, yarn and pnpm workspaces) and "go" (go.work multi-module repos).
+// "js" (npm, yarn and pnpm workspaces), "go" (go.work multi-module repos) and
+// "rust" (Cargo workspaces).
 // They are the values `workspaces.discover` and `per_workspace.<step>.ecosystems`
 // accept, and the label a discovered Workspace carries.
-var WorkspaceEcosystems = []string{"js", "go"}
+var WorkspaceEcosystems = []string{"js", "go", "rust"}
 
 // WorkspaceSelectMode says which workspaces a per-workspace step runs for.
 type WorkspaceSelectMode string
