@@ -134,6 +134,9 @@ type AuditOutput struct {
 	// pile of unchecked commits.
 	Covered int `json:"covered"`
 	Unknown int `json:"unknown"`
+	// Affected counts commits gated by an affected-scope run: a partial
+	// check, neither verified nor a gap.
+	Affected int `json:"affected"`
 	// Reattestable counts the unverified commits a tree-identical validated
 	// commit can vouch for — the recoverable share of the gap (the squash-merge
 	// signature), as opposed to commits that were genuinely never gated.
@@ -159,6 +162,9 @@ type AuditCommit struct {
 	// exactly. It turns a bare "unverified" into an actionable one: the content
 	// WAS gated under a different commit id.
 	ReattestableFrom string `json:"reattestable_from,omitempty"`
+	// Scope labels a commit gated by an affected-scope run ("affected 3/12"):
+	// a partial check, which verify refuses by default.
+	Scope string `json:"scope,omitempty"`
 }
 
 // StatusOutput describes the gate's installed state — what an agent needs to
@@ -293,6 +299,7 @@ func newAuditOutput(rep domain.AuditReport) AuditOutput {
 		Unverified:   t.Unverified,
 		Covered:      t.Covered,
 		Unknown:      t.Unknown,
+		Affected:     t.Affected,
 		Reattestable: len(rep.Reattestable()),
 		Commits:      make([]AuditCommit, 0, len(rep.Commits)),
 	}
@@ -310,6 +317,7 @@ func newAuditOutput(rep domain.AuditReport) AuditOutput {
 			RunID:            c.RunID,
 			Steps:            c.Steps,
 			ReattestableFrom: c.ReattestableFrom,
+			Scope:            c.Scope,
 		})
 	}
 	return out

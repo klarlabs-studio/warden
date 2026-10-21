@@ -304,6 +304,9 @@ func printEvidenceMarkdown(w io.Writer, e domain.Evidence) {
 	p("| Classification | Count | Meaning |\n|---|---:|---|\n")
 	p("| Gated and verified | %d | Checks ran and passed against this exact tree; record signed and bound to the commit |\n", t.Verified)
 	p("| Covered by a gated push | %d | Published inside a signed push span — gated as a unit with the span's tip |\n", t.Covered)
+	if t.Affected > 0 {
+		p("| Gated, affected scope | %d | Gated by a partial check: per-workspace checks ran only for the workspaces the change affected (or its push span's tip did). Not verified: `warden verify` refuses these records by default |\n", t.Affected)
+	}
 	p("| Exceptions | %d | warden could not vouch for these; enumerated below |\n", t.Unverified)
 	p("| Outside the control | %d | Predates adoption, or otherwise unattributable |\n", t.Unknown)
 	p("| **Total** | **%d** | |\n\n", t.Total())
@@ -471,6 +474,9 @@ type summaryJSON struct {
 	Covered    int `json:"covered_by_gated_push"`
 	Exceptions int `json:"exceptions"`
 	Outside    int `json:"outside_control"`
+	// Affected counts commits gated by an affected-scope run: a partial
+	// check, neither verified nor an exception.
+	Affected int `json:"gated_affected_scope"`
 }
 
 type populationJSON struct {
@@ -482,6 +488,7 @@ type populationJSON struct {
 	Steps     []string `json:"steps,omitempty"`
 	RunID     string   `json:"run_id,omitempty"`
 	CoveredBy string   `json:"covered_by,omitempty"`
+	Scope     string   `json:"scope,omitempty"`
 	PR        int      `json:"pull_request,omitempty"`
 	PRAuthor  string   `json:"pull_request_author,omitempty"`
 	Approvers []string `json:"approvers,omitempty"`
@@ -526,7 +533,7 @@ func printEvidenceJSON(stdout, stderr io.Writer, e domain.Evidence) int {
 		Verify:     e.VerifyCommand(),
 		Summary: summaryJSON{
 			Total: e.Tally.Total(), Verified: e.Tally.Verified, Covered: e.Tally.Covered,
-			Exceptions: e.Tally.Unverified, Outside: e.Tally.Unknown,
+			Exceptions: e.Tally.Unverified, Outside: e.Tally.Unknown, Affected: e.Tally.Affected,
 		},
 		Population: make([]populationJSON, 0, len(e.Population)),
 		Exceptions: []exceptionJSON{},
@@ -544,7 +551,7 @@ func printEvidenceJSON(stdout, stderr io.Writer, e domain.Evidence) int {
 		}
 		row := populationJSON{
 			SHA: c.SHA, Date: c.Date, Author: c.Author, Subject: c.Subject,
-			State: stateOf(c), Steps: steps, RunID: c.RunID, CoveredBy: c.CoveredBy,
+			State: stateOf(c), Steps: steps, RunID: c.RunID, CoveredBy: c.CoveredBy, Scope: c.Scope,
 		}
 		if a, ok := e.ApprovalByCommit[c.SHA]; ok {
 			if a.Found {
@@ -591,6 +598,8 @@ func printEvidenceJSON(stdout, stderr io.Writer, e domain.Evidence) int {
 
 func stateOf(c *domain.CommitStatus) string {
 	switch {
+	case c.Affected && (c.ChainIntact || c.CoveredBy != ""):
+		return "gated_affected_scope"
 	case c.ChainIntact:
 		return "verified"
 	case c.CoveredBy != "":
@@ -704,9 +713,9 @@ func printEvidenceOSCAL(stdout, stderr io.Writer, e domain.Evidence) int {
 		Title: "Source change-gate evidence",
 		Description: fmt.Sprintf(
 			"Population of %d source changes on branch %s of %s for the period %s. "+
-				"%d gated and verified, %d covered by a gated push, %d exceptions, %d outside the control.",
+				"%d gated and verified, %d covered by a gated push, %d gated by an affected-scope (partial) check, %d exceptions, %d outside the control.",
 			e.Tally.Total(), e.Branch, e.Repository, periodLabel(e),
-			e.Tally.Verified, e.Tally.Covered, e.Tally.Unverified, e.Tally.Unknown),
+			e.Tally.Verified, e.Tally.Covered, e.Tally.Affected, e.Tally.Unverified, e.Tally.Unknown),
 		Start:            start.Format(time.RFC3339),
 		ReviewedControls: oscalReviewed{ControlSelections: []oscalSelection{sel}},
 		Remarks:          oscalRemarks(e),
@@ -730,6 +739,9 @@ func printEvidenceOSCAL(stdout, stderr io.Writer, e domain.Evidence) int {
 		}
 		if c.CoveredBy != "" {
 			desc += " Published inside the signed push span of " + short(c.CoveredBy) + "."
+		}
+		if c.Affected {
+			desc += " Affected scope (" + c.Scope + "): per-workspace checks ran only for the workspaces the change affected; this is a partial check, and warden verify refuses the record by default."
 		}
 		if a, ok := e.ApprovalByCommit[c.SHA]; ok && a.Undetermined {
 			desc += " warden could not read the forge's approval record for this change; no approval claim is made about it."
