@@ -200,7 +200,7 @@ const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATEL
 	"(no human in the loop), so it is refused unless the operator has explicitly trusted this " +
 	"repo (`warden trust add`, the axi --trust flag, or WARDEN_MCP_ALLOW_RUN=1). " +
 	"Approval: without a profile, or under profile permissive, this surface auto-approves the " +
-	"gate. Under profile standard or strict it cannot: a run that needs approval (a rule's " +
+	"gate and says so in summary.warnings; a later release will stop that in every repository. Under profile standard or strict it cannot: a run that needs approval (a rule's " +
 	"require_approval, or a high-severity finding) ends with summary.outcome=needs_approval, " +
 	"nothing pushed and no note written, and summary.message says how a person approves it " +
 	"(run `git push` from an interactive terminal). Do not retry it from here. " +

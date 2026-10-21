@@ -45,7 +45,13 @@ func TestAgentSurfaceApprover(t *testing.T) {
 				if !d.Approved || d.NeedsHuman || d.Principal != "warden-auto" {
 					t.Fatalf("want today's auto-approval, got %+v", d)
 				}
+				if d.Notice != agentSelfApprovalNotice {
+					t.Errorf("a self-approval must announce the coming change (#295), notice = %q", d.Notice)
+				}
 				return
+			}
+			if d.Notice != "" {
+				t.Errorf("a gate the surface did not approve needs no self-approval notice, got %q", d.Notice)
 			}
 			if d.Approved || !d.NeedsHuman {
 				t.Fatalf("the agent surface must not satisfy the gate under %s: %+v", c.profile.Name, d)
@@ -121,5 +127,12 @@ func TestAxi_RunTriggerCannotSelfApproveUnderAProfile(t *testing.T) {
 	code, out, errb = run("axi", "run-trigger", "--trust")
 	if code != 0 || !strings.Contains(out, "outcome: passed") {
 		t.Fatalf("without a profile the agent surface must still auto-approve: code=%d out=%q err=%q", code, out, errb)
+	}
+	// ...and says, on the run it approved, that no person did and that this
+	// is going away (#295).
+	for _, want := range []string{"warnings[", "answered by this agent surface", "not by a person", "will end needs_approval"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("an unprofiled self-approval must carry the notice; missing %q: %s", want, out)
+		}
 	}
 }

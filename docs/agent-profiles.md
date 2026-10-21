@@ -108,7 +108,15 @@ does not match every push.
 The MCP `run_trigger` tool and `warden axi run-trigger` have no person at a
 prompt, so without a profile they approve the gate themselves, as
 `warden-auto`. That means a rule with `require_approval: true` is met by the
-same agent that started the run.
+same agent that started the run. Each run they approve this way says so in its
+warnings (`summary.warnings` on MCP, `warnings` in axi output).
+
+That is going away ([#295](https://github.com/klarlabs-studio/warden/issues/295)):
+a later minor release will make these surfaces stop approving in every
+repository, with or without a profile, so a run that needs approval ends
+`needs_approval` as it does under `standard` and `strict` below. Where no
+human approval was intended, drop `require_approval` from the rule; a
+high-severity finding will still need a person.
 
 Under `standard` and `strict` these surfaces do not approve. When a run they
 started reaches an approval gate (a rule's `require_approval`, or a
@@ -135,7 +143,8 @@ drives a pseudo-terminal can type the answer. ADR 0007 records that limit, and
 it is why the agent surfaces themselves refuse rather than rely on the prompt.
 
 `permissive` keeps today's behavior, so a repository can record a profile
-before it changes who approves. Repositories without a profile are unchanged.
+before it changes who approves. Repositories without a profile are unchanged,
+until the release #295 describes.
 
 ### Agent step boundaries (checked at run time)
 

@@ -127,15 +127,18 @@ const agentSurfacePrincipal = "warden-agent-surface"
 
 // agentSurfaceApprover answers the approval gate for runs an agent starts
 // through MCP or axi. Without a profile, and under permissive, it approves
-// every gate, as these surfaces always have. Under a profile that withholds
-// approval from the agent surface (standard, strict) it does not decide: the
-// agent that asked for the run cannot also be the person who approves it, so
-// the run ends needs_approval with nothing pushed and no note written.
+// every gate, as these surfaces always have, and says so in a notice: a later
+// release stops it (#295). Under a profile that withholds approval from the
+// agent surface (standard, strict) it does not decide: the agent that asked
+// for the run cannot also be the person who approves it, so the run ends
+// needs_approval with nothing pushed and no note written.
 type agentSurfaceApprover struct{}
 
 func (agentSurfaceApprover) Approve(ctx context.Context, req application.ApprovalRequest) (application.Decision, error) {
 	if agentSurfaceMayApprove(req.Profile) {
-		return autoApprover{}.Approve(ctx, req)
+		d, err := autoApprover{}.Approve(ctx, req)
+		d.Notice = agentSelfApprovalNotice
+		return d, err
 	}
 	return application.Decision{
 		NeedsHuman: true,
@@ -143,6 +146,14 @@ func (agentSurfaceApprover) Approve(ctx context.Context, req application.Approva
 		Rationale:  agentApprovalRequired(req),
 	}, nil
 }
+
+// agentSelfApprovalNotice announces the change #295 proposes, on the runs it
+// will affect: no person approved this gate, and a later release will stop
+// these surfaces approving it in every repository.
+const agentSelfApprovalNotice = "the approval gate was answered by this agent surface (MCP, axi) as warden-auto, not by a person. " +
+	"A later minor release will stop the agent surfaces approving in every repository, as standard and strict already do: " +
+	"a run like this one will end needs_approval, with nothing pushed and no note written, until a person approves from an interactive terminal. " +
+	"Drop require_approval from rules where no human approval was intended; a blocking finding will still need a person"
 
 // agentSurfaceMayApprove reports whether the agent surface may satisfy an
 // approval gate under profile. No profile keeps today's auto-approval. A
