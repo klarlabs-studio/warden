@@ -88,6 +88,16 @@ type Git interface {
 	// form. Each entry is a short sha and subject, for naming them in a refusal.
 	UnmergedRemoteCommits(remote, branch string) ([]string, error)
 	WriteNote(sha string, rec domain.RunRecord) error
+	// CommitTree is the tree object of a commit.
+	CommitTree(rev string) (string, error)
+	// FullScopeAnchor walks the first-parent ancestors of rev, nearest
+	// first and rev itself excluded, at most limit of them, and returns the
+	// first commit carrying a note that accept takes (found false when none
+	// does). Before walking it fetches remote's notes, best-effort and
+	// fast-forward only, so a full-scope note CI wrote can anchor; a fetch
+	// that fails or would discard a local note changes nothing. Notes that
+	// cannot be read are skipped, never accepted.
+	FullScopeAnchor(remote, rev string, limit int, accept func(AnchorCandidate) bool) (AnchorCandidate, bool, error)
 	// AnchorAttested keeps an attested commit reachable so gc cannot prune the
 	// object out from under its own note (#212 §3).
 	AnchorAttested(sha string) error
@@ -97,6 +107,14 @@ type Git interface {
 	// refuses a status for a SHA it has never seen.
 	PushAnchor(remote, sha string) error
 	PushNotes(remote string) error
+}
+
+// AnchorCandidate is a noted commit a FullScopeAnchor walk offers: the commit,
+// its tree read from git, and the record its note holds.
+type AnchorCandidate struct {
+	SHA    string
+	Tree   string
+	Record domain.RunRecord
 }
 
 // Worktree is a disposable checkout the pipeline mutates. Remove tears it down.

@@ -33,9 +33,9 @@ func TestResolve_WorkspacesDefaults(t *testing.T) {
 	}
 }
 
-// The notice says what runs where for the hook resolved: every workspace at
-// pre-push whatever select says, the affected ones at pre-commit only when
-// select: affected.
+// The notice says what runs where for the hook resolved: the affected ones
+// (measured from a full-scope anchor at pre-push, from HEAD at pre-commit)
+// under select: affected, every workspace otherwise.
 func TestResolve_WorkspacesNoticePerHook(t *testing.T) {
 	for _, tc := range []struct {
 		hook   domain.Hook
@@ -43,7 +43,8 @@ func TestResolve_WorkspacesNoticePerHook(t *testing.T) {
 		want   string
 		forbid string
 	}{
-		{domain.PrePush, domain.WorkspaceSelectAffected, "every discovered workspace at pre-push", "staged change"},
+		{domain.PrePush, domain.WorkspaceSelectAffected, "trusted full-scope note", "staged change"},
+		{domain.PrePush, domain.WorkspaceSelectAll, "every discovered workspace at pre-push", "staged change"},
 		{domain.PreCommit, domain.WorkspaceSelectAffected, "staged change affects", "at pre-push"},
 		{domain.PreCommit, domain.WorkspaceSelectAll, "every discovered workspace (select: all)", "staged change"},
 	} {

@@ -158,7 +158,8 @@ func TestRunner_WorkspaceSelectionForcedFull(t *testing.T) {
 		cfg  domain.Config
 		rule domain.FullRule // "" = affected
 	}{
-		{"pre-push runs every workspace whatever select says", domain.PrePush, wsConfig(map[string][]domain.StepName{"pre_push": {"test"}}, domain.WorkspaceSelectAffected), domain.FullRulePrePush},
+		{"pre-push without a signer", domain.PrePush, wsConfig(map[string][]domain.StepName{"pre_push": {"test"}}, domain.WorkspaceSelectAffected), domain.FullRuleNoSigner},
+		{"pre-push under select: all", domain.PrePush, wsConfig(map[string][]domain.StepName{"pre_push": {"test"}}, ""), domain.FullRuleSelectAll},
 		{"select: all", domain.PreCommit, wsConfig(map[string][]domain.StepName{"pre_commit": {"test"}}, ""), domain.FullRuleSelectAll},
 		{"a kept writer after the per-workspace step", domain.PreCommit, writerAfter, domain.FullRuleWriterOrder},
 		{"a per-workspace step that keeps its own writes", domain.PreCommit, perWorkspaceWriter, domain.FullRuleWriterOrder},

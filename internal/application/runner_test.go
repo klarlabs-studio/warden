@@ -99,6 +99,13 @@ type fakeGit struct {
 	defaultBranchErr error
 	emptyTree        string
 	wt               *fakeWorktree
+	// trees scripts CommitTree; ancestors scripts the noted first-parent
+	// history FullScopeAnchor walks, nearest first; anchorSearches records
+	// every rev a search started from.
+	trees          map[string]string
+	ancestors      []AnchorCandidate
+	anchorSearches []string
+	anchorErr2     error
 }
 
 func (g *fakeGit) Root() string                   { return g.root }
@@ -199,6 +206,31 @@ func (g *fakeGit) WriteNote(_ string, rec domain.RunRecord) error {
 	return nil
 }
 func (g *fakeGit) AnchorAttested(sha string) error { g.anchored = append(g.anchored, sha); return nil }
+
+// CommitTree answers from trees, defaulting to "tree-<rev>".
+func (g *fakeGit) CommitTree(rev string) (string, error) {
+	if t, ok := g.trees[rev]; ok {
+		return t, nil
+	}
+	return "tree-" + rev, nil
+}
+
+// FullScopeAnchor walks ancestors in order, offering each noted one.
+func (g *fakeGit) FullScopeAnchor(remote, rev string, limit int, accept func(AnchorCandidate) bool) (AnchorCandidate, bool, error) {
+	g.anchorSearches = append(g.anchorSearches, rev)
+	if g.anchorErr2 != nil {
+		return AnchorCandidate{}, false, g.anchorErr2
+	}
+	for i, c := range g.ancestors {
+		if i >= limit {
+			break
+		}
+		if accept(c) {
+			return c, true, nil
+		}
+	}
+	return AnchorCandidate{}, false, nil
+}
 func (g *fakeGit) PushNotes(string) error {
 	if g.pushNotesErr != nil {
 		return g.pushNotesErr

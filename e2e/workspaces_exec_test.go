@@ -156,8 +156,9 @@ func TestGoldenFleet_PerWorkspaceUnstagedConfigForcesFull(t *testing.T) {
 	}
 }
 
-// Pre-push runs per-workspace steps for every workspace, whatever select
-// says, and the signed note's evidence chain holds one record per workspace.
+// A first pre-push with no full-scope anchor below it runs per-workspace steps
+// for every workspace, and the signed note's evidence chain holds one record
+// per workspace.
 func TestGoldenFleet_PerWorkspacePrePushRunsAll(t *testing.T) {
 	r := newExecRepo(t, execConfig)
 	r.stage(map[string]string{"packages/ui/index.ts": "export const ui = 2;\n"})
@@ -190,14 +191,14 @@ func TestGoldenFleet_PerWorkspacePrePushRunsAll(t *testing.T) {
 	if n != len(allExecWorkspaces) {
 		t.Fatalf("note holds %d test.workspace records, want %d: %s", n, len(allExecWorkspaces), note)
 	}
-	// This release writes no workspace scope: the note is a plain full run,
-	// which every verifier reads as before.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(note, &raw); err != nil {
+	// Under select: affected the note records its scope: nothing anchors this
+	// first gated push, so it is full, says why, and verifies as a full run.
+	var scoped domain.RunRecord
+	if err := json.Unmarshal(note, &scoped); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := raw["scope"]; ok {
-		t.Fatalf("pre-push wrote a scope, which this release must not: %s", note)
+	if s := scoped.Scope; s == nil || !s.IsFull() || s.Full == nil || s.Full.Rule != domain.FullRuleNoAnchor {
+		t.Fatalf("want a full scope forced by no-anchor: %s", note)
 	}
 	if out, code := r.warden("verify", "--commit", "HEAD"); code != 0 {
 		t.Fatalf("the note must verify as a full run: %d %s", code, out)

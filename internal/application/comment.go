@@ -57,6 +57,7 @@ func prComment(res RunResult, branch string) string {
 			b.WriteString(" · unsigned")
 		}
 		b.WriteString("\n\n")
+		b.WriteString(scopeComment(rec))
 	}
 
 	if len(res.Findings) == 0 {
@@ -96,4 +97,44 @@ func finding(f domain.Finding) string {
 		return fmt.Sprintf("**[%s]** ", f.Severity) + "`" + loc + "` — " + f.Message
 	}
 	return fmt.Sprintf("**[%s]** %s", f.Severity, f.Message)
+}
+
+// maxScopeNames bounds how many workspace paths the comment spells out.
+const maxScopeNames = 10
+
+// scopeComment says plainly which workspaces the per-workspace steps checked,
+// when the note records a scope, and "" otherwise. An affected scope is named
+// as the partial check it is, with the full-scope run it rests on and how
+// verifiers treat it, so nobody reads a green comment as a full gate.
+func scopeComment(rec *domain.RunRecord) string {
+	scope := rec.Scope
+	if scope == nil {
+		return ""
+	}
+	n, m := scope.Proportion()
+	if rec.FullScope() {
+		return fmt.Sprintf("**Scope:** full — per-workspace steps ran for every workspace (%d).\n\n", m)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "**Scope:** affected — per-workspace steps ran for **%d of %d** workspaces", n, m)
+	if n > 0 {
+		names := make([]string, 0, maxScopeNames)
+		for i, w := range scope.Selected {
+			if i == maxScopeNames {
+				names = append(names, fmt.Sprintf("and %d more", n-maxScopeNames))
+				break
+			}
+			names = append(names, "`"+w.Path+"`")
+		}
+		b.WriteString(" (" + strings.Join(names, ", ") + ")")
+	}
+	if scope.Anchor != "" {
+		anchor := scope.Anchor
+		if len(anchor) > 12 {
+			anchor = anchor[:12]
+		}
+		fmt.Fprintf(&b, "; the rest rest on the full-scope run on `%s`", anchor)
+	}
+	b.WriteString(". This is a partial check: `warden verify` refuses an affected-scope note by default.\n\n")
+	return b.String()
 }

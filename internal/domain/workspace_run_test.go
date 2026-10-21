@@ -19,7 +19,7 @@ func runGraph() WorkspaceGraph {
 // full: every head workspace, each for the full reason.
 func TestFullSelection_MatchesSelectsFullShape(t *testing.T) {
 	g := runGraph()
-	got, err := FullSelection(g, ForcedFull{Rule: FullRulePrePush})
+	got, err := FullSelection(g, ForcedFull{Rule: FullRuleNoAnchor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestFullSelection_MatchesSelectsFullShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Kind != SelectionFull || got.Full == nil || got.Full.Rule != FullRulePrePush {
+	if got.Kind != SelectionFull || got.Full == nil || got.Full.Rule != FullRuleNoAnchor {
 		t.Fatalf("kind %s full %+v", got.Kind, got.Full)
 	}
 	if !reflect.DeepEqual(got.Workspaces, viaSelect.Workspaces) || !reflect.DeepEqual(got.Paths(), g.Paths()) {
@@ -98,8 +98,11 @@ func TestStepResult_FailedWorkspacesNamesOnlyEachFailures(t *testing.T) {
 }
 
 func TestWorkspaceExecutionNotice(t *testing.T) {
-	if n := WorkspaceExecutionNotice(PrePush, WorkspaceSelectAffected); !strings.Contains(n, "every discovered workspace at pre-push") || !strings.Contains(n, "no workspace scope") {
-		t.Errorf("pre-push notice %q", n)
+	if n := WorkspaceExecutionNotice(PrePush, WorkspaceSelectAffected); !strings.Contains(n, "trusted full-scope note") || !strings.Contains(n, "refuse an affected-scope note by default") {
+		t.Errorf("pre-push affected notice %q", n)
+	}
+	if n := WorkspaceExecutionNotice(PrePush, WorkspaceSelectAll); !strings.Contains(n, "every discovered workspace at pre-push") || !strings.Contains(n, "records no workspace scope") {
+		t.Errorf("pre-push all notice %q", n)
 	}
 	if n := WorkspaceExecutionNotice(PreCommit, WorkspaceSelectAffected); !strings.Contains(n, "staged change affects") {
 		t.Errorf("pre-commit affected notice %q", n)
