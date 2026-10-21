@@ -6,6 +6,19 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-21
+
+A minor release that brings monorepo mode as a preview. `warden workspaces`
+reads a repository's npm, yarn, pnpm and `go.work` workspaces from committed
+manifests, without running a package manager, and shows which workspaces a
+change affects. Steps under the new `per_workspace:` key run once per
+workspace: at pre-commit for the affected workspaces and their dependents, at
+pre-push for all of them. Notes do not record a workspace scope yet. This
+release also teaches every verifier to refuse a note that records a partial
+run, ahead of the release that writes one, so upgrade your CI verifiers first.
+`workspaces:` and `per_workspace:` are new configuration keys: add them only
+once every machine and CI runner runs 0.39.0.
+
 ### Added
 
 - **Preview: `warden workspaces` shows a monorepo's workspaces and what a

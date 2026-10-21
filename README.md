@@ -742,8 +742,8 @@ diagnostics: { lint: out/lint.sarif }   # optional — a SARIF 2.1.0 file the ch
 # at pre-commit for the workspaces the staged change affects (select: affected) or
 # for all of them (select: all); at pre-push always for all of them. Notes carry
 # each workspace's result as evidence but no workspace scope yet. Older wardens
-# reject both keys, so add them only once the release that ships them runs on
-# every machine and CI runner that reads this config (see docs/monorepo.md).
+# reject both keys, so add them only once warden >= 0.39.0 runs on every machine
+# and CI runner that reads this config (see docs/monorepo.md).
 workspaces:
   discover: [js, go]   # required with the block — ecosystems to read workspaces from (js = npm/yarn/pnpm, go = go.work)
   select: all          # default — `affected` runs pre-commit per-workspace steps only for changed workspaces and their dependents
