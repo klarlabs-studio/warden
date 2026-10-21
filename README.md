@@ -883,7 +883,7 @@ The exit status stays the only verdict.
 | `warden fleet status [--root d] [PATH...]` | gate coverage and **bypass rate** across many repos |
 | `warden audit [--branch b] [--format text\|json\|md]` | export a commit-provenance report (compliance) |
 | `warden evidence [--from D] [--to D] [--format md\|json\|oscal] [--frameworks soc2,iso27001] [--approvals]` | the same records as audit evidence: period-scoped population, exceptions with reasons, control mapping with its limits; `--approvals` adds the forge's review record |
-| `warden verify [--commit c] [--key fp] [--quiet]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive |
+| `warden verify [--commit c] [--key fp] [--quiet\|--json]` | exit 0 if a commit is warden-validated — the CI provenance-skip primitive; `--json` adds the monorepo scope and the workspaces checked on that tree |
 | `warden verify --range base..head [--require-signed] [--key fp] [--json]` | gate a whole range — exit non-zero if any commit lacks trusted provenance |
 | `warden attest [--commit c] [--predicate warden\|vsa] [--sign]` | export a commit's provenance as an in-toto statement (sigstore/GUAC interop); `vsa` emits a SLSA Verification Summary Attestation, `--sign` a signed DSSE envelope |
 | `warden reattest [--commit c] [--push]` | re-attest a squash-merge commit from the tree-identical validated commit |

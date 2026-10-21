@@ -101,7 +101,13 @@ attestations do not satisfy requirements. Neither does a note of an
 requirements describe a full run, so such a note fails with the reason
 `affected-scope` before any contract is compared, whatever the file asks for.
 The same note conforms to no compliance profile, under a version 2 file or
-`--min-profile`. Initial worktrees must have clean
+`--min-profile`. Nor does a requirements file combine with per-workspace
+reuse: with `requirements` set, the `warden-verify` action reports
+`scope=none` and no `validated-workspaces` for an affected note, because the
+note failed a check other than its scope. To skip the workspaces an affected
+note checked, gate that reuse on a verification without a requirements file
+(see [CI provenance-skip](ci-provenance-skip.md#monorepo-mode-skip-only-the-workspaces-already-checked)),
+and keep any job a contract was meant to cover running. Initial worktrees must have clean
 tracked contents and no untracked or ignored inputs. Hidden index entries and
 submodules are refused. Tracked contents and the
 recognized dependency-file map must remain unchanged after the check; generated

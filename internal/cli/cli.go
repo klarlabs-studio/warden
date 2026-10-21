@@ -101,7 +101,7 @@ Usage:
                                               the ones a change from --base affects, with reasons
   warden doctor [--branch b] [--ci]           audit provenance since adoption (--ci: exit 3 on drift)
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
-  warden verify [--commit c] [--key fp] [--quiet]  exit 0 if the commit is warden-validated (CI skip)
+  warden verify [--commit c] [--key fp] [--quiet|--json]  exit 0 if the commit is warden-validated (CI skip)
   warden verify --range base..head [--require-signed] [--key fp] [--json]  gate every commit in a range
   warden attest [--commit c] [--key fp]       emit a commit's provenance as an in-toto statement (SLSA/sigstore interop)
   warden reattest [--commit c] [--push]       re-attest a squash-merge commit from the tree-identical validated commit

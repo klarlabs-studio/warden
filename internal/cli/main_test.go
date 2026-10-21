@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.klarlabs.de/warden/internal/infrastructure/proc"
+	"go.klarlabs.de/warden/internal/testenv"
 )
 
 // idleLoad is the machine reading every test in this package sees unless it
@@ -31,6 +32,10 @@ const envVanishStartDir = "WARDEN_TEST_VANISH_START_DIR"
 // prefix is ever removed, so a stray variable cannot delete a real checkout.
 const vanishStartPrefix = "warden-vanish-"
 
+// TestMain also points warden's config dir at a scratch directory for the
+// whole package (see testenv.RunWithScratchConfigDir): commands load the
+// signing key, the trust store and the machine id from it, and a test must
+// neither read the developer's own nor mint a key in it.
 func TestMain(m *testing.M) {
 	proc.SetLoadProbe(func() proc.Load { return idleLoad })
 	if os.Getenv(envVanishStartDir) == "1" {
@@ -38,7 +43,7 @@ func TestMain(m *testing.M) {
 			_ = os.Remove(wd)
 		}
 	}
-	os.Exit(m.Run())
+	os.Exit(testenv.RunWithScratchConfigDir(m))
 }
 
 // forceLoad makes every step in the calling test run on a machine reading l.

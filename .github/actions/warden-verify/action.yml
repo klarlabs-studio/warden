@@ -54,6 +54,23 @@ outputs:
   validated:
     description: "true when the exact commit has intact provenance from an explicitly trusted signer"
     value: ${{ steps.check.outputs.validated }}
+  scope:
+    description: >-
+      What the trusted note lets CI rely on (monorepo mode). "full" when
+      validated is true. "affected" when a sound note from a trusted signer was
+      refused only because it attests an affected-scope run: validated stays
+      false, and validated-workspaces names the workspaces it checked on this
+      exact tree. "none" otherwise, including a warden release too old to
+      report a scope. Needs jq on the runner; without it the scope is "none".
+    value: ${{ steps.check.outputs.scope }}
+  validated-workspaces:
+    description: >-
+      JSON array of workspace paths checked on exactly this commit's tree:
+      every workspace for scope full (empty for a repository without
+      monorepo mode), the affected selection for scope affected, and [] for
+      scope none. Skip only those workspaces' equivalent jobs; discover the
+      full list yourself (`warden workspaces --json`), never from this output.
+    value: ${{ steps.check.outputs.validated-workspaces }}
 
 runs:
   using: composite

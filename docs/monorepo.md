@@ -8,7 +8,9 @@
 > ancestor carrying a trusted full-scope note, and the signed note records
 > which workspaces were checked. Verifiers refuse such an affected-scope note
 > by default (see
-> [how verifiers treat a partial record](#how-verifiers-treat-a-partial-record)).
+> [how verifiers treat a partial record](#how-verifiers-treat-a-partial-record)),
+> and CI can still skip the workspaces such a note checked
+> ([using the scope in CI](#using-the-scope-in-ci)).
 > Configuration keys and output formats may still change between releases.
 
 Monorepo mode teaches warden what a workspace is, so that it can run
@@ -326,6 +328,44 @@ No flag accepts an affected note in this release. Accepting one safely needs
 the verifier to recompute the selection itself, from rules read at a trusted
 base rather than from the commit under test; that is planned as a separate
 option.
+
+### Using the scope in CI
+
+Refusing an affected note does not mean CI must recheck every workspace.
+What the note does establish needs no trust in earlier runs: the workspaces
+it selected were checked, by its signer, on exactly the commit's tree.
+`warden verify --json` reports that, with the same exit code as without
+`--json`:
+
+```json
+{
+  "commit": "9df3ceae9dc5…",
+  "validated": false,
+  "trusted": true,
+  "signer": "…",
+  "external": false,
+  "scope": "affected",
+  "validated_workspaces": ["apps/web", "packages/ui"],
+  "failures": ["affected-scope"],
+  "record_scope": { "kind": "affected", "…": "…" }
+}
+```
+
+`scope` is `full` when the commit verified, and `validated_workspaces` then
+lists every workspace (none for a note without a scope). It is `affected` only
+when the note was refused for its scope alone: bound to the commit, signed by
+a pinned key, local rather than external, and passing every other check the
+command was asked for (so never with `--requirements`, `--min-profile` or
+`--container-steps`, which refuse an affected note). Even then
+`validated_workspaces` is empty when the tree warden reads from git for the
+commit is not the tree the note's checks ran on, or when the scope is one this
+warden cannot read. Everything else is `none`, with no workspaces.
+
+The `warden-verify` action publishes these as its `scope` and
+`validated-workspaces` outputs; [CI provenance-skip](ci-provenance-skip.md#monorepo-mode-skip-only-the-workspaces-already-checked)
+has a workflow that runs CI only for the workspaces the note did not check
+and still ends in one check that covers every workspace. The GitLab component
+does not publish a scope yet.
 
 A scope the verifier cannot read as full is treated as affected: an unknown
 kind, a selection algorithm version newer than the verifier's, or a recorded

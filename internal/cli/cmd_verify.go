@@ -29,7 +29,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	rangeSpec := fs.String("range", "", "gate every commit in a BASE..HEAD range (e.g. origin/main..HEAD); exits non-zero if any commit lacks trusted provenance")
 	requireSigned := fs.Bool("require-signed", false, "require each note to carry a signature that verifies (implied by --key)")
 	skipMerges := fs.Bool("skip-merges", true, "in --range, skip merge commits (their parents are gated individually)")
-	jsonOut := fs.Bool("json", false, "in --range, emit per-commit verdicts as JSON")
+	jsonOut := fs.Bool("json", false, "emit the verdict as JSON: per-commit verdicts in --range; for one commit, its scope and validated workspaces")
 	quiet := fs.Bool("quiet", false, "print nothing; communicate only via exit code")
 	keys := fs.String("key", "", "comma-separated trusted signer key(s) or fingerprint(s); require a matching signature")
 	// External-run attestations assert something weaker than a local one: CI ran
@@ -124,10 +124,21 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 	if containerRefused {
 		res.Validated = false
 	}
-	if *requireSigned && !res.SignatureValid && !res.CarriedTrust {
+	signatureMissing := *requireSigned && !res.SignatureValid && !res.CarriedTrust
+	if signatureMissing {
 		res.Validated = false
 	}
-	if !*quiet {
+	if *jsonOut && !*quiet {
+		// Checks this command adds over the service's verification, judged
+		// apart from the scope: an affected note never passes the container
+		// check above, which requires a validated result.
+		containerMissing := len(requiredContainerSteps) > 0 &&
+			(!res.Trusted || res.External || res.Record == nil || !res.Record.ContainerChecks(requiredContainerSteps, *containerImageID))
+		claim := svc.ClaimScope(res, res.Validated, !signatureMissing && !containerMissing)
+		if code := printVerifyJSON(stdout, stderr, res, claim, containerMissing, signatureMissing); code != 0 {
+			return code
+		}
+	} else if !*quiet {
 		if fromRoster {
 			_, _ = fmt.Fprintf(stdout, "warden: requiring a trusted signer from .warden.yaml (%d key(s))\n", len(trusted))
 		}
@@ -136,7 +147,7 @@ func cmdVerify(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintf(stdout, "unverified %s — %s; run the checks\n", short(res.SHA), strings.Join(res.RequirementFailures, "; "))
 		case containerRefused:
 			_, _ = fmt.Fprintf(stdout, "unverified %s — required trusted container execution evidence is missing or does not match; run the checks\n", short(res.SHA))
-		case *requireSigned && !res.SignatureValid && !res.CarriedTrust:
+		case signatureMissing:
 			_, _ = fmt.Fprintf(stdout, "unverified %s — a valid signature is required\n", short(res.SHA))
 		default:
 			printVerify(stdout, res, len(trusted) > 0)
@@ -675,4 +686,60 @@ func rejectDuplicateJSONKeys(dec *json.Decoder) error {
 	}
 	_, err = dec.Token()
 	return err
+}
+
+// verifyExport is single-commit `verify --json`: the verdict, and what CI may
+// rely on per workspace (design 0006, Phase B). The exit code is the same as
+// without --json; the warden-verify action reads its scope outputs from here
+// rather than from the human text.
+type verifyExport struct {
+	Commit    string `json:"commit"`
+	Validated bool   `json:"validated"`
+	Trusted   bool   `json:"trusted"`
+	Signer    string `json:"signer,omitempty"`
+	External  bool   `json:"external"`
+	// Scope is "full" when the commit validated, "affected" when a sound,
+	// trusted note was refused only for attesting an affected-scope run, and
+	// "none" otherwise.
+	Scope service.ScopeClaimKind `json:"scope"`
+	// ValidatedWorkspaces are the workspaces checked on exactly this tree:
+	// every one for a full scope, the selection for an affected one, none
+	// otherwise. Always an array.
+	ValidatedWorkspaces []string `json:"validated_workspaces"`
+	// Failures names the checks a refused note failed, for a reader.
+	Failures []string `json:"failures,omitempty"`
+	// RecordScope is the scope the note records, when the claim rests on it.
+	RecordScope *domain.RunScope `json:"record_scope,omitempty"`
+}
+
+func printVerifyJSON(stdout, stderr io.Writer, res service.VerifyResult, claim service.ScopeClaim, containerMissing, signatureMissing bool) int {
+	out := verifyExport{
+		Commit:              res.SHA,
+		Validated:           res.Validated,
+		Trusted:             res.Trusted,
+		Signer:              res.Signer,
+		External:            res.External,
+		Scope:               claim.Kind,
+		ValidatedWorkspaces: claim.ValidatedWorkspaces,
+		Failures:            append([]string{}, res.RequirementFailures...),
+	}
+	if claim.Kind != service.ScopeClaimNone && res.Record != nil {
+		out.RecordScope = res.Record.Scope
+	}
+	switch {
+	case res.Validated:
+		out.Failures = nil
+	case res.ScopeRefused:
+		out.Failures = append(out.Failures, string(domain.ReasonAffectedScope))
+	}
+	if containerMissing && !res.Validated {
+		out.Failures = append(out.Failures, "required trusted container execution evidence is missing or does not match")
+	}
+	if signatureMissing {
+		out.Failures = append(out.Failures, "a valid signature is required")
+	}
+	if !res.Validated && len(out.Failures) == 0 {
+		out.Failures = append(out.Failures, "no intact, trusted note attests this commit")
+	}
+	return writeJSON(stdout, stderr, out)
 }
