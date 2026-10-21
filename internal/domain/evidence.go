@@ -150,7 +150,9 @@ func inPeriod(date string, from, to time.Time) bool {
 // Exceptions are the commits an auditor will ask about: every commit warden
 // could not vouch for, with the reason it could not.
 //
-// Verified and Covered commits are not exceptions. Everything else is, and
+// Verified and Covered commits are not exceptions, and neither are Affected
+// ones: they were gated, by a partial check the report names on its own row.
+// Everything else is, and
 // each carries the most specific reason the audit could determine rather than
 // a bare "unverified" — an exception list where every row says the same thing
 // is a list nobody can act on.
@@ -260,8 +262,14 @@ func (e Evidence) Digest() string {
 		for _, s := range c.Steps {
 			steps = append(steps, string(s))
 		}
-		rows = append(rows, fmt.Sprintf("%s|%t|%t|%s|%s|%s",
-			c.SHA, c.HasNote, c.ChainIntact, c.CoveredBy, c.NoteDefect, strings.Join(steps, ",")))
+		row := fmt.Sprintf("%s|%t|%t|%s|%s|%s",
+			c.SHA, c.HasNote, c.ChainIntact, c.CoveredBy, c.NoteDefect, strings.Join(steps, ","))
+		// Appended only when set, so the digest of a population without an
+		// affected-scope commit is what it was before scopes existed.
+		if c.Affected {
+			row += "|affected:" + c.Scope
+		}
+		rows = append(rows, row)
 	}
 	sort.Strings(rows)
 	for _, r := range rows {

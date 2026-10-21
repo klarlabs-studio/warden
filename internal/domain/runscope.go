@@ -147,3 +147,181 @@ func (r RunRecord) FullScope() bool {
 	}
 	return true
 }
+
+// Proportion returns how many workspaces the scope selected and how many were
+// discovered, for an "affected 3/12" label. A nil scope selects nothing of
+// nothing.
+func (s *RunScope) Proportion() (selected, total int) {
+	if s == nil {
+		return 0, 0
+	}
+	return len(s.Selected), len(s.Workspaces)
+}
+
+// Label renders the scope in a few words for a one-line status, such as
+// "affected 3/12". It is "full" for a full scope and "" for none, so a
+// surface can append it only when there is something to say.
+func (s *RunScope) Label() string {
+	switch {
+	case s == nil:
+		return ""
+	case s.IsFull():
+		return string(SelectionFull)
+	}
+	n, m := s.Proportion()
+	return fmt.Sprintf("%s %d/%d", SelectionAffected, n, m)
+}
+
+// SignedByAny reports whether r's signer is one of keys, each given as a full
+// public key or a fingerprint in either scheme's encoding (an ed25519
+// fingerprint from `warden key show`, or an SSH key or SHA256 fingerprint off
+// a forge). It checks identity only: the caller checks the signature verifies.
+func (r RunRecord) SignedByAny(keys []string) bool {
+	fp := r.SignerFingerprint()
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		if k == r.PublicKey || k == fp || KeyFingerprint(k) == fp || SSHKeyFingerprint(k) == fp {
+			return true
+		}
+	}
+	return false
+}
+
+// AnchorRequirement is what a full-scope anchor must match for an affected
+// selection to be measured from it (design 0006 §4).
+type AnchorRequirement struct {
+	// ConfigurationDigest is the effective configuration of the run that
+	// wants an anchor. The anchor must have run under the same one.
+	ConfigurationDigest string
+	// Steps maps every per-workspace step of that run to its template
+	// digest. The anchor must have run each of them, from the same template.
+	Steps map[StepName]string
+	// TrustedKeys are the signers whose full runs may anchor.
+	TrustedKeys []string
+}
+
+// QualifiesAsAnchor reports whether r, read from the note on commit sha whose
+// tree is tree, is a full-scope run an affected selection may rest on:
+//
+//   - it attests sha (bound to it, evidence chain intact) and is a local run,
+//     not an external-run attestation;
+//   - it is signed, the signature verifies, and the signer is trusted;
+//   - it records a scope, and that scope (with any carried original's) is
+//     full: a note without a scope says nothing about which per-workspace
+//     steps ran or under which configuration, so it never anchors;
+//   - the scope's HeadTree is the commit's tree: its per-workspace checks ran
+//     on exactly what the commit holds, not on a tree a later writer changed;
+//   - it ran under the same configuration digest, and ran every step the
+//     requirement names from the same template.
+//
+// An affected record never qualifies, so a partial check can only ever rest on
+// a full one: the chain is one level deep.
+func (r RunRecord) QualifiesAsAnchor(sha, tree string, req AnchorRequirement) bool {
+	if r.Scope == nil || !r.FullScope() || r.IsExternal() || !r.Attests(sha) {
+		return false
+	}
+	if len(req.TrustedKeys) == 0 || !r.VerifySignature() || !r.SignedByAny(req.TrustedKeys) {
+		return false
+	}
+	if tree == "" || r.Scope.HeadTree != tree {
+		return false
+	}
+	if req.ConfigurationDigest == "" || r.Scope.ConfigurationDigest != req.ConfigurationDigest {
+		return false
+	}
+	for step, digest := range req.Steps {
+		got, ok := r.Scope.Steps[step]
+		if !ok || digest == "" || got.TemplateDigest != digest {
+			return false
+		}
+	}
+	return true
+}
+
+// TemplateDigest is the digest of a per-workspace step's definition: its
+// command template, mode and ecosystems. A scope records it per step, so an
+// anchor that ran the step from a different template does not anchor it.
+func (s PerWorkspaceStep) TemplateDigest() (string, error) {
+	return DigestJSON(s)
+}
+
+// ScopeInput is what a run knows when it records its scope.
+type ScopeInput struct {
+	// Selection is the selection the run's per-workspace steps ran over.
+	Selection WorkspaceSelection
+	// HeadTree is the tree the selection was computed on, which the
+	// per-workspace checks ran on.
+	HeadTree string
+	// Anchor and AnchorTree name the full-scope run an affected selection
+	// was measured from. Empty for a full selection.
+	Anchor, AnchorTree string
+	// ConfigurationDigest is the effective configuration's digest.
+	ConfigurationDigest string
+	// Steps are the per-workspace steps that ran, with their definitions.
+	Steps map[StepName]PerWorkspaceStep
+}
+
+// NewRunScope builds the scope a run records. It refuses an affected
+// selection without an anchor and a selection whose kind it cannot name: a
+// scope is a signed claim, and a malformed one must fail the write rather
+// than reach a note.
+func NewRunScope(in ScopeInput) (RunScope, error) {
+	sel := in.Selection.Selection
+	switch sel.Kind {
+	case SelectionFull:
+		if sel.Full == nil {
+			return RunScope{}, fmt.Errorf("a full selection must name the rule that forced it")
+		}
+	case SelectionAffected:
+		if in.Anchor == "" || in.AnchorTree == "" {
+			return RunScope{}, fmt.Errorf("an affected selection must name the full-scope anchor it was measured from")
+		}
+	default:
+		return RunScope{}, fmt.Errorf("unknown selection kind %q", sel.Kind)
+	}
+	if in.HeadTree == "" {
+		return RunScope{}, fmt.Errorf("a scope must name the tree its checks ran on")
+	}
+	digest, err := sel.Digest()
+	if err != nil {
+		return RunScope{}, fmt.Errorf("selection digest: %w", err)
+	}
+	graph := in.Selection.Graph.Canonical()
+	all := make([]string, 0, len(graph.Workspaces))
+	for _, w := range graph.Workspaces {
+		all = append(all, w.Path)
+	}
+	slices.Sort(all)
+	scope := RunScope{
+		Version:             sel.Version,
+		Kind:                sel.Kind,
+		HeadTree:            in.HeadTree,
+		ConfigurationDigest: in.ConfigurationDigest,
+		GraphDigest:         sel.HeadGraphDigest,
+		SelectionDigest:     digest,
+		Workspaces:          all,
+		Full:                sel.Full,
+		Selected:            sel.Workspaces,
+		Removed:             sel.Removed,
+	}
+	if sel.Kind == SelectionAffected {
+		scope.Anchor, scope.AnchorTree = in.Anchor, in.AnchorTree
+	}
+	if len(in.Steps) > 0 {
+		scope.Steps = make(map[StepName]StepScope, len(in.Steps))
+		for name, def := range in.Steps {
+			tmpl, err := def.TemplateDigest()
+			if err != nil {
+				return RunScope{}, fmt.Errorf("template digest of %s: %w", name, err)
+			}
+			selected := []string{}
+			for _, w := range in.Selection.Targets(def.Ecosystems) {
+				selected = append(selected, w.Path)
+			}
+			scope.Steps[name] = StepScope{Selected: selected, TemplateDigest: tmpl}
+		}
+	}
+	return scope, nil
+}
