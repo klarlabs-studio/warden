@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -31,19 +30,6 @@ func TestDispatch_VersionHelpUnknown(t *testing.T) {
 	}
 }
 
-// chdir switches to dir for the duration of the test.
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-}
-
 func TestDispatch_InitStepsPolicyInRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -61,7 +47,7 @@ func TestDispatch_InitStepsPolicyInRepo(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	if code, _, errb := run("init", "--hooks=pre-push"); code != 0 {
 		t.Fatalf("init: code=%d err=%q", code, errb)
@@ -83,7 +69,7 @@ func TestDispatch_BadHookErrors(t *testing.T) {
 	}
 	// Outside a repo, hook commands should error cleanly (non-zero), not panic.
 	dir := t.TempDir()
-	chdir(t, dir)
+	t.Chdir(dir)
 	if code, _, _ := run("run", "not-a-hook"); code == 0 {
 		t.Error("run with a bad hook should be non-zero")
 	}

@@ -35,7 +35,7 @@ func TestCmdImport_DryRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte("lint:\n\tx\ntest:\n\ty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	var out, errb bytes.Buffer
 	if code := cmdImport(nil, &out, &errb); code != 0 {
@@ -56,7 +56,7 @@ func TestCmdImport_Write(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"lint":"eslint .","test":"jest"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	var out, errb bytes.Buffer
 	if code := cmdImport([]string{"--write"}, &out, &errb); code != 0 {
@@ -74,7 +74,7 @@ func TestCmdImport_Write(t *testing.T) {
 func TestCmdImport_Empty(t *testing.T) {
 	dir := t.TempDir()
 	gitInit(t, dir)
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	var out, errb bytes.Buffer
 	if code := cmdImport(nil, &out, &errb); code != 0 {

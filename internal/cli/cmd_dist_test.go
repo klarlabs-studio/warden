@@ -20,7 +20,7 @@ func TestDispatch_VerifyCiAuditImport(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	dir := gitRepo(t)
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	// import: a Makefile with lint/test targets should be detected.
 	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte("lint:\n\ttrue\ntest:\n\ttrue\n"), 0o644); err != nil {

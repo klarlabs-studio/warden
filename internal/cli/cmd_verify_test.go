@@ -35,7 +35,7 @@ func repoWithConfig(t *testing.T, yaml string) string {
 			t.Fatal(err)
 		}
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 	return dir
 }
 
@@ -210,7 +210,7 @@ func TestCmdVerifyRange_EndToEnd(t *testing.T) {
 	base := git("rev-parse", "HEAD")
 	git("commit", "--allow-empty", "--no-verify", "-m", "c1")
 	git("commit", "--allow-empty", "--no-verify", "-m", "c2")
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	// Un-noted commits → gate fails with a per-commit reason, exit 1.
 	var out, errb bytes.Buffer
@@ -294,7 +294,7 @@ func TestCmdVerifyRange_RosterFromBase(t *testing.T) {
 	git("commit", "--no-verify", "-m", "widen roster + attacker change")
 	head := git("rev-parse", "HEAD")
 
-	chdir(t, dir)
+	t.Chdir(dir)
 	svc, err := newService(autoApprover{})
 	if err != nil {
 		t.Fatal(err)
