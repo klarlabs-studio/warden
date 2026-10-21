@@ -119,7 +119,7 @@ func TestAdapterFullScopeAnchor_FetchesNotesWithoutForcing(t *testing.T) {
 
 	// "CI" notes base in its own clone and publishes the note.
 	ci := t.TempDir()
-	anchorGit(t, ci, "clone", "-q", remote, ".")
+	anchorGit(t, ci, "clone", "-q", "-b", "main", remote, ".")
 	anchorGit(t, ci, "config", "user.email", "warden-ci")
 	anchorGit(t, ci, "config", "user.name", "warden-ci")
 	ciRepo := &Repo{Dir: ci}
@@ -139,7 +139,7 @@ func TestAdapterFullScopeAnchor_FetchesNotesWithoutForcing(t *testing.T) {
 	noteOn(t, local, head, "local-unpublished")
 	other := commitFile(t, ci, "ci-only")
 	noteOn(t, ciRepo, other, "ci-later")
-	anchorGit(t, ci, "push", "-q", "origin", "main", NotesRef+":"+NotesRef)
+	anchorGit(t, ci, "push", "-q", "origin", "HEAD:main", NotesRef+":"+NotesRef)
 	_, _, _ = a.FullScopeAnchor("origin", head, 500, func(application.AnchorCandidate) bool { return false })
 	if rec, err := local.ReadNote(head); err != nil || rec == nil || rec.RunID != "local-unpublished" {
 		t.Fatalf("the local note must survive the fetch: %+v %v", rec, err)
