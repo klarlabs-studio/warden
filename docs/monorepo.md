@@ -84,7 +84,7 @@ workspace's own files, `.warden.yaml`, a root manifest, a root lockfile or a
 global path. A configuration that differs from the merge-base's forces a full
 selection, so editing these rules never narrows the selection of the change
 that edits them. Older wardens reject the `workspaces:` and `per_workspace:`
-keys, so add them only once a release that knows them runs on every machine
+keys, so add them only once warden 0.39.0 or later runs on every machine
 and CI runner that reads the configuration.
 
 ## Running checks per workspace
@@ -248,10 +248,10 @@ applies only at pre-commit, where nothing is signed.
 
 ## How verifiers treat a partial record
 
-No warden writes a partial record yet. This release teaches every verifier
+No warden writes a partial record yet. Release 0.39.0 teaches every verifier
 to read one, so that the verifiers in your CI are ready before any warden
 that writes them ships. **Upgrade every verifier, then the developers'
-machines**: a pinned verifier older than this release refuses every note that
+machines**: a pinned verifier older than 0.39.0 refuses every note that
 records a scope, full ones included (see below).
 
 A repository that configures `workspaces:` will record a signed `scope` in
