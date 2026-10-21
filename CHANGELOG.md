@@ -6,6 +6,56 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+Upgrade every verifier (CI, `warden-verify`, the GitLab component) to 0.39.0
+or later before turning on `workspaces.select: affected`: a pinned verifier
+older than 0.39.0 refuses every note that records a scope, full ones included.
+
+### Added
+
+- **Preview: pre-push runs only the affected workspaces, and the signed note
+  says so.** Under `select: affected`, per-workspace steps ran for the affected
+  workspaces only at pre-commit; every push still ran them for every
+  workspace, however small the change, because nothing recorded that a push
+  had checked less. A pre-push run now measures its change from an anchor:
+  the nearest first-parent ancestor (within 500 commits) whose note is a
+  signed full-scope run by a trusted key (the committed `trusted_keys`
+  roster, or without one this machine's key), whose checks ran on that
+  commit's own tree, under the same configuration and per-workspace commands.
+  It runs the per-workspace steps for the workspaces changed since then and
+  their dependents, and records a signed `scope` in the note: kind, selection
+  version and digest, anchor, tree, the workspaces each step ran for, why
+  each was selected, and removed workspaces. An affected note never anchors,
+  so a partial check always rests on a full one. The run checks every
+  workspace instead, and records a full scope naming why, when no anchor
+  qualifies, when no signing key is available (an unsigned partial note would
+  prove nothing), under `--attest-only`, when a selection rule forces full, or
+  when a step that keeps its writes runs at or after a per-workspace step; all
+  of these are decided before any step runs. The run refuses to write an
+  affected note, and pushes nothing, if the tree the checks ran on is not the
+  pushed commit's tree or if the note could not be signed. The run's output,
+  the forge commit status (scope first, ahead of what the forge clips) and
+  the PR comment name the scope. Every verifier refuses an affected note by
+  default, as 0.39.0 already did. With `select: all`, or a push with no
+  per-workspace step, notes are byte-identical to before. Before searching,
+  the run fetches the remote's notes fast-forward only, so a full-scope note
+  CI wrote can anchor. See [monorepo mode](docs/monorepo.md#at-pre-push-affected-scope).
+
+### Changed
+
+- **`doctor`, `audit`, `evidence` and `fleet status` count an affected-scope
+  note as gated, not verified.** A note recording an affected scope has an
+  intact chain, so the provenance reports would have counted it, and the
+  commits its push span published, as verified, while `warden verify` refuses
+  the same note. They now count such commits in their own bucket, shown as
+  `affected n/m` with a `~` glyph: gated by a partial check, neither verified
+  nor a bypass, and not something doctor's exit code fails on. The JSON
+  outputs gain `affected` (audit, fleet, MCP and axi audit),
+  `gated_affected_scope` (evidence) and a per-commit `scope`, and audit
+  exports such a commit with `validated: false`. `warden audit`'s text report
+  also lists a commit published inside a gated push span as covered, as
+  doctor already did, instead of as unverified. The evidence digest of a
+  population without an affected-scope commit is unchanged.
+
 ## [0.39.0] - 2026-10-21
 
 A minor release that brings monorepo mode as a preview. `warden workspaces`
