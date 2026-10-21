@@ -6,6 +6,20 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-21
+
+A minor release in which monorepo mode records what it checked. Under
+`workspaces.select: affected`, a pre-push now checks only the workspaces a
+change affects, measured from the nearest earlier commit whose signed note
+records a trusted full run, and writes an affected-scope note saying so.
+Without such a commit, a signer, or for an attest-only run, it checks
+everything. Verifiers refuse an affected note by default, as 0.39.0 already
+does; `warden-verify` now reports which workspaces a note checked, so CI can
+run only the rest. Upgrade every verifier to 0.39.0 or later before setting
+`select: affected`: an older verifier that pins a key refuses every scoped
+note, and one that verifies without a key reads an affected note as
+validated.
+
 Upgrade every verifier (CI, `warden-verify`, the GitLab component) to 0.39.0
 or later before turning on `workspaces.select: affected`: a pinned verifier
 older than 0.39.0 refuses every note that records a scope, full ones included.

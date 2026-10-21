@@ -324,7 +324,7 @@ and nothing they declare a dependency on has changed since". So, by default:
 | `warden why`, `warden axi verify`, the MCP `verify` tool | show the scope, and that verifiers refuse it |
 | `warden doctor`, `audit`, `evidence`, `fleet status` | count it, and the commits its push span covers, as gated by a partial check (`affected n/m`): neither verified nor a bypass, so doctor's exit code does not fail on it |
 
-No flag accepts an affected note in this release. Accepting one safely needs
+No flag accepts an affected note yet. Accepting one safely needs
 the verifier to recompute the selection itself, from rules read at a trusted
 base rather than from the commit under test; that is planned as a separate
 option.
@@ -373,9 +373,9 @@ sparse checkout.
 
 The scope is inside the signature. Deleting it from a signed note, or changing
 `affected` to `full`, breaks the signature, and a pinned verify refuses the
-note as tampered. A warden older than this release that pins a key drops the
+note as tampered. A warden older than 0.39.0 that pins a key drops the
 `scope` field it does not know, computes a different payload and refuses the
 note the same way: it fails closed, for full scopes too, because it cannot
-tell them apart. A warden older than this release that verifies **without**
+tell them apart. A warden older than 0.39.0 that verifies **without**
 a key would read an affected note as validated. Pin a key wherever a verdict
 skips work, which `warden-verify` already requires.

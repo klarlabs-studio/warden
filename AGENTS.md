@@ -11,7 +11,7 @@ Review mode: critique hard on correctness (esp. provenance/security invariants),
 Project: warden (klarlabs OSS) — a local provenance git-gate.
 Module: `go.klarlabs.de/warden` (vanity). Repo: klarlabs-studio/warden.
 What it does: runs a validation pipeline in disposable per-step worktrees, records commit-bound provenance RunRecords, gates pushes on attestation. Cosign-keyless signed releases (goreleaser + SBOM + npm + GHCR, triggered by a `v*` tag).
-Phase: active — v0.39.0 released 2026-10-21 (monorepo mode preview: `warden workspaces`, `workspaces:`/`per_workspace:` config, per-workspace execution; verifiers refuse affected-scope notes). Next: 0006 PR 5b (writer side), then 6–9.
+Phase: active — v0.40.0 released 2026-10-21 (monorepo mode writes affected-scope notes at pre-push from a trusted full anchor; warden-verify scope outputs). Next: 0006 PR 9 (more ecosystems); PR 7 (--accept-affected) and PR 8 (sparse) wait on real use / a benchmark.
 Stack: Go 1.26.3 (toolchain go1.26.7). Key subsystems: `internal/infrastructure/git` (worktrees, notes, dep exposure), `internal/domain` (policy, runrecord, audit states), `internal/infrastructure/kernel` (build/executor), `internal/application` (runner, ports), `internal/service` (verify, doctor, reattest, attest-external).
 
 ## Constraints
