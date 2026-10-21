@@ -39,6 +39,24 @@ older than 0.39.0 refuses every note that records a scope, full ones included.
   per-workspace step, notes are byte-identical to before. Before searching,
   the run fetches the remote's notes fast-forward only, so a full-scope note
   CI wrote can anchor. See [monorepo mode](docs/monorepo.md#at-pre-push-affected-scope).
+- **Preview: CI can skip the workspaces an affected-scope note checked.**
+  An affected note fails verification, so CI gated on `warden-verify` reran
+  every workspace for it, including the ones the push had just checked on the
+  same tree. `warden verify --json` now works for one commit, with the same
+  exit code, and reports `scope` (`full`, `affected` or `none`) and
+  `validated_workspaces`: every workspace for a verified commit, and for an
+  affected note refused for its scope alone (bound to the commit, signed by a
+  pinned key, local, passing every other check asked for, its checks run on
+  the tree git holds for the commit) the workspaces it selected. The
+  `warden-verify` action publishes them as its `scope` and
+  `validated-workspaces` outputs, read from that JSON with `jq`, and only
+  when the JSON agrees with the exit code; anything else, including an older
+  warden or a runner without `jq`, reports `none` and `[]`. `validated` is
+  unchanged: an affected note still reports `false`. See
+  [CI provenance-skip](docs/ci-provenance-skip.md#monorepo-mode-skip-only-the-workspaces-already-checked)
+  for a workflow that runs only the remaining workspaces and still ends in
+  one check covering all of them. The GitLab component does not publish a
+  scope yet.
 
 ### Changed
 

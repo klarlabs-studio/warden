@@ -17,6 +17,7 @@ the pipeline fails (enforcement).
 | `include: remote:` from a release tag's raw URL | Works from `v0.36.0`: pin the tag, or a commit SHA for an immutable include |
 | `include: component:` from the GitLab CI/CD Catalog | **Not published.** No GitLab catalog project mirrors warden yet. The layout (`templates/<name>.yml` with `spec: inputs:`) is what a catalog project needs, so mirroring the repository is enough. The component path below is the shape it will have, not an address that resolves today |
 | Range gate (`warden-gate`), `warden-doctor`, `warden-reattest` for GitLab | Not ported. This template verifies one commit |
+| Monorepo scope (`scope`, `validated-workspaces` on the GitHub action) | Not ported. The verdict file carries no scope, so an affected-scope note means "run every workspace" here. Monorepo mode's design scoped this step to the GitHub action. A port would read `warden verify --json` the same way, and its consumers would have to read the verdict file, not the variables, for the reason given under [Skipping downstream work](#skipping-downstream-work) |
 | Windows (PowerShell) runners | Not supported. The job needs a POSIX shell and bash |
 
 The template was tested by running its job scripts the way GitLab

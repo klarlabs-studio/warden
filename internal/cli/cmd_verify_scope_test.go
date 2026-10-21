@@ -37,6 +37,13 @@ func cliScope(kind domain.SelectionKind) *domain.RunScope {
 // the base, the commit between and the tip, plus the signer's fingerprint.
 func scopedNoteOnHead(t *testing.T, scope *domain.RunScope) (base, mid, tip, fp string) {
 	t.Helper()
+	return scopedNoteOnHeadFor(t, func(string) *domain.RunScope { return scope })
+}
+
+// scopedNoteOnHeadFor is scopedNoteOnHead with the scope built from the tip's
+// tree, for a scope that must name the tree its checks ran on.
+func scopedNoteOnHeadFor(t *testing.T, scopeFor func(tree string) *domain.RunScope) (base, mid, tip, fp string) {
+	t.Helper()
 	dir := repoWithConfig(t, "")
 	git := func(args ...string) string {
 		t.Helper()
@@ -72,7 +79,7 @@ func scopedNoteOnHead(t *testing.T, scope *domain.RunScope) (base, mid, tip, fp 
 		Profile:      &ref,
 		StepOutcomes: map[domain.StepName]domain.StepObservation{domain.StepCredentials: executed, domain.StepLint: executed, domain.StepTest: executed},
 		Approval:     &domain.ApprovalRef{Channel: domain.ApprovalNone},
-		Scope:        scope,
+		Scope:        scopeFor(git("rev-parse", tip+"^{tree}")),
 	}
 	payload, err := rec.SigningPayload()
 	if err != nil {

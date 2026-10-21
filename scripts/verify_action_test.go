@@ -1,6 +1,7 @@
 package scripts_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,9 +92,12 @@ func TestVerifyActionPinnedTrust(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "validated=false\n"
+			want := "validated=false\nscope=none\nvalidated-workspaces=[]\n"
 			if tt.validated {
-				want = "validated=true\n"
+				// The mock prints no JSON, as a release older than
+				// single-commit --json prints text: the verdict stands on the
+				// exit code, and the scope is none.
+				want = "validated=true\nscope=none\nvalidated-workspaces=[]\n"
 			}
 			if string(got) != want {
 				t.Fatalf("output = %q, want %q", got, want)
@@ -103,7 +107,7 @@ func TestVerifyActionPinnedTrust(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wantArgs := []string{"verify", "--commit", commit, "--key", tt.keys, "--quiet"}
+				wantArgs := []string{"verify", "--commit", commit, "--key", tt.keys, "--json"}
 				if gotArgs := strings.Split(strings.TrimSuffix(string(argv), "\n"), "\n"); !reflect.DeepEqual(gotArgs, wantArgs) {
 					t.Fatalf("arguments = %q, want %q", gotArgs, wantArgs)
 				}
@@ -148,7 +152,7 @@ func TestVerifyActionContainerRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"verify", "--commit", "tip", "--key", actionTestPin, "--requirements", requirements, "--container-steps", "lint,test", "--container-image-id", image, "--min-profile", "strict", "--quiet"}
+	want := []string{"verify", "--commit", "tip", "--key", actionTestPin, "--requirements", requirements, "--container-steps", "lint,test", "--container-image-id", image, "--min-profile", "strict", "--json"}
 	if got := strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("arguments: %q want %q", got, want)
 	}
@@ -195,10 +199,10 @@ func TestVerifyActionMinProfile(t *testing.T) {
 		profile, status, want string
 		wantFlag              bool
 	}{
-		{"", "0", "validated=true\n", false},
-		{"strict", "0", "validated=true\n", true},
-		{"strict", "2", "validated=false\n", true},
-		{"strict", "1", "validated=false\n", true},
+		{"", "0", "validated=true\nscope=none\nvalidated-workspaces=[]\n", false},
+		{"strict", "0", "validated=true\nscope=none\nvalidated-workspaces=[]\n", true},
+		{"strict", "2", "validated=false\nscope=none\nvalidated-workspaces=[]\n", true},
+		{"strict", "1", "validated=false\nscope=none\nvalidated-workspaces=[]\n", true},
 	} {
 		dir := t.TempDir()
 		mock := "#!/bin/sh\nprintf '%s\\000' \"$@\" > \"$VERIFY_ARGS\"\nexit \"$VERIFY_STATUS\"\n"
@@ -304,6 +308,118 @@ func TestGateActionMinProfileFailsClosed(t *testing.T) {
 		}
 		if got := strings.Contains(string(args), "--min-profile\x00"+tc.profile+"\x00"); got != tc.wantFlag {
 			t.Errorf("profile %q: --min-profile passed=%v want %v (%q)", tc.profile, got, tc.wantFlag, args)
+		}
+	}
+}
+
+// The scope outputs come from warden's own JSON, and only when that JSON
+// agrees with the exit code; the verdict itself is still the exit code
+// alone. Workspace paths are data: they reach the output as JSON, never as
+// shell code.
+func TestVerifyActionScopeOutputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX action")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	jq, err := exec.LookPath("jq")
+	if err != nil {
+		t.Skip("jq not available")
+	}
+	weird := `apps/w $(touch injected) "q" \ ` + "`touch injected`"
+	weirdJSON := `"apps/w $(touch injected) \"q\" \\ ` + "`touch injected`" + `"`
+	full := `{"commit":"c","validated":true,"scope":"full","validated_workspaces":["apps/web","packages/ui"]}`
+	affected := `{"commit":"c","validated":false,"scope":"affected","validated_workspaces":["apps/web",` + weirdJSON + `]}`
+	for _, tc := range []struct {
+		name, status, report string
+		noJQ                 bool
+		want                 string
+	}{
+		{"full", "0", full, false, `validated=true` + "\nscope=full\n" + `validated-workspaces=["apps/web","packages/ui"]`},
+		{"affected", "1", affected, false, "validated=false\nscope=affected\n" + `validated-workspaces=["apps/web",` + weirdJSON + `]`},
+		{"none", "1", `{"validated":false,"scope":"none","validated_workspaces":[]}`, false, "validated=false\nscope=none\nvalidated-workspaces=[]"},
+		// The JSON must agree with the exit code, or it says nothing.
+		{"full claim on failure", "1", full, false, "validated=false\nscope=none\nvalidated-workspaces=[]"},
+		{"affected claim on pass", "0", affected, false, "validated=true\nscope=none\nvalidated-workspaces=[]"},
+		{"affected claim on error", "2", affected, false, "validated=false\nscope=none\nvalidated-workspaces=[]"},
+		// Malformed or foreign output is no claim.
+		{"text from an older release", "0", "validated abc1234 (run, 3 steps, chain-intact)", false, "validated=true\nscope=none\nvalidated-workspaces=[]"},
+		{"non-string workspace", "1", `{"validated":false,"scope":"affected","validated_workspaces":["a",1]}`, false, "validated=false\nscope=none\nvalidated-workspaces=[]"},
+		{"missing workspaces", "0", `{"validated":true,"scope":"full"}`, false, "validated=true\nscope=none\nvalidated-workspaces=[]"},
+		{"string validated", "0", `{"validated":"true","scope":"full","validated_workspaces":[]}`, false, "validated=true\nscope=none\nvalidated-workspaces=[]"},
+		{"no jq", "1", affected, true, "validated=false\nscope=none\nvalidated-workspaces=[]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "bin")
+			if err := os.Mkdir(bin, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			mock := "#!" + bash + "\nprintf '%s\\n' \"$VERIFY_REPORT\"\nexit \"$VERIFY_STATUS\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "warden"), []byte(mock), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.noJQ {
+				if err := os.Symlink(jq, filepath.Join(bin, "jq")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			output := filepath.Join(dir, "output")
+			cmd := exec.Command(bash, repoFile(t, ".github/actions/warden-verify/verify.sh"))
+			cmd.Dir = dir
+			// PATH holds only the mock and (maybe) jq: the script needs
+			// nothing else, so "no jq" is real.
+			cmd.Env = []string{
+				"PATH=" + bin,
+				"GITHUB_OUTPUT=" + output,
+				"WARDEN_COMMIT=tip",
+				"WARDEN_TRUSTED_KEYS=" + actionTestPin,
+				"VERIFY_STATUS=" + tc.status,
+				"VERIFY_REPORT=" + tc.report,
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("script: %v %s", err, out)
+			}
+			got, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want+"\n" {
+				t.Fatalf("outputs:\n%s\nwant:\n%s", got, tc.want)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "injected")); !os.IsNotExist(err) {
+				t.Fatal("a workspace path executed as shell code")
+			}
+			if tc.name == "affected" {
+				var paths []string
+				_, line, _ := strings.Cut(strings.Split(string(got), "\n")[2], "=")
+				if err := json.Unmarshal([]byte(line), &paths); err != nil || !reflect.DeepEqual(paths, []string{"apps/web", weird}) {
+					t.Fatalf("validated-workspaces does not round-trip: %q %v", paths, err)
+				}
+			}
+		})
+	}
+}
+
+// The action declares the scope outputs, taken from the check step.
+func TestVerifyActionDeclaresScopeOutputs(t *testing.T) {
+	data, err := os.ReadFile(repoFile(t, ".github/actions/warden-verify/action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Outputs map[string]struct {
+			Value string `yaml:"value"`
+		} `yaml:"outputs"`
+	}
+	if err := yaml.Unmarshal(data, &action); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"validated", "scope", "validated-workspaces"} {
+		if got, want := action.Outputs[name].Value, "${{ steps.check.outputs."+name+" }}"; got != want {
+			t.Errorf("output %s = %q, want %q", name, got, want)
 		}
 	}
 }
