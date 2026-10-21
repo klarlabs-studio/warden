@@ -184,6 +184,7 @@ type fleetCounts struct {
 	Commits        int  `json:"commits"`
 	Verified       int  `json:"verified"`
 	Covered        int  `json:"covered"`
+	Affected       int  `json:"affected"`
 	Bypassed       int  `json:"bypassed"`
 	Reattestable   int  `json:"reattestable"`
 	Unattributable int  `json:"unattributable"`
