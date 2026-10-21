@@ -75,6 +75,9 @@ type auditSummary struct {
 	// "warden was never in a position to say" apart from a real gap.
 	Covered int `json:"covered"`
 	Unknown int `json:"unknown"`
+	// Affected counts commits gated by an affected-scope run: a partial check
+	// that is neither verified nor a gap.
+	Affected int `json:"affected"`
 }
 
 type auditCommit struct {
@@ -91,6 +94,9 @@ type auditCommit struct {
 	// distinction: content that was gated under a pre-squash id is a binding gap
 	// a maintainer can close, not an unchecked change. Omitted when absent.
 	ReattestableFrom string `json:"reattestable_from,omitempty"`
+	// Scope labels a commit gated by an affected-scope run ("affected 3/12").
+	// Such a commit exports validated=false: verify refuses its note.
+	Scope string `json:"scope,omitempty"`
 }
 
 // printAuditJSON marshals the report into the export shape. generated_at is a
@@ -103,7 +109,7 @@ func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Summary: auditSummary{
 			Verified: t.Verified, Defective: t.Defective, Unverified: t.Unverified,
-			Covered: t.Covered, Unknown: t.Unknown,
+			Covered: t.Covered, Unknown: t.Unknown, Affected: t.Affected,
 		},
 		Commits: make([]auditCommit, 0, len(r.Commits)),
 	}
@@ -117,11 +123,14 @@ func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
 			// Validated means the note ATTESTS this commit, not merely that one
 			// exists. It was c.HasNote, so a commit whose note failed to attest it
 			// exported validated=true — in the compliance artifact, of all places.
-			Validated:        c.ChainIntact,
+			// An affected-scope note attests a partial check, which verify
+			// refuses by default: not validated.
+			Validated:        c.ChainIntact && !c.Affected,
 			ChainIntact:      c.ChainIntact,
 			RunID:            c.RunID,
 			Steps:            c.Steps,
 			ReattestableFrom: c.ReattestableFrom,
+			Scope:            c.Scope,
 		})
 	}
 	enc := json.NewEncoder(stdout)
@@ -144,12 +153,16 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 		c := &r.Commits[i]
 		switch {
 		case c.HasNote:
-			glyph, state := "✓", "chain-intact"
-			if !c.ChainIntact {
-				glyph, state = "⚠", noteDefectLabel(c.NoteDefect)
-			}
+			glyph, state := noteState(c)
 			_, _ = fmt.Fprintf(w, "  %s %s  %s  %s  (%s, %d steps, %s)\n",
 				glyph, short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
+		case c.Covered():
+			label := "covered by the gated push " + short(c.CoveredBy)
+			glyph := "✓"
+			if c.Affected {
+				glyph, label = "~", label+", "+c.Scope+": partial check"
+			}
+			_, _ = fmt.Fprintf(w, "  %s %s  %s  %s  (%s)\n", glyph, short(c.SHA), c.Date, truncate(c.Subject, 40), label)
 		case c.Reattestable():
 			_, _ = fmt.Fprintf(w, "  ✗ %s  %s  %s  UNVERIFIED (reattestable from %s)\n",
 				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.ReattestableFrom))
@@ -171,6 +184,8 @@ func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
 		c := &r.Commits[i]
 		status, run := "unverified", "—"
 		switch {
+		case c.HasNote && c.ChainIntact && c.Affected:
+			status, run = "gated, "+c.Scope+" (partial check, not verified)", c.RunID
 		case c.HasNote && c.ChainIntact:
 			status, run = "verified (chain-intact)", c.RunID
 		case c.HasNote:

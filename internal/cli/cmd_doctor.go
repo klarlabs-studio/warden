@@ -72,12 +72,12 @@ func printDoctor(w io.Writer, r domain.AuditReport) {
 			//
 			// The glyph must not contradict the label either: "✓ … TAMPERED" reads
 			// as a pass at a glance, and a glance is all most of these lines get.
-			glyph, state := "✓", "chain-intact"
-			if !c.ChainIntact {
-				glyph, state = "⚠", noteDefectLabel(c.NoteDefect)
-			}
+			glyph, state := noteState(c)
 			_, _ = fmt.Fprintf(w, "  %s %s  %s  %s  (%s, %d steps, %s)\n",
 				glyph, short(c.SHA), c.Date, truncate(c.Subject, 40), c.RunID, len(c.Steps), state)
+		case c.Covered() && c.Affected:
+			_, _ = fmt.Fprintf(w, "  ~ %s  %s  %s  (covered by the gated push %s, %s: partial check)\n",
+				short(c.SHA), c.Date, truncate(c.Subject, 40), short(c.CoveredBy), c.Scope)
 		case c.Covered():
 			// Published by a gated push, just not individually attested — warden
 			// validates one tree per run and vouches for the span. Reporting this
@@ -135,10 +135,27 @@ func summaryLine(prefix string, t domain.Tally) string {
 	if t.Covered > 0 {
 		s += fmt.Sprintf("; %d covered by a gated push span", t.Covered)
 	}
+	if t.Affected > 0 {
+		s += fmt.Sprintf("; %d gated by an affected-scope run (a partial check: not verified, not a bypass)", t.Affected)
+	}
 	if t.Unknown > 0 {
 		s += fmt.Sprintf("; %d unattributable (never pushed, or provenance predating push spans)", t.Unknown)
 	}
 	return s + "\n"
+}
+
+// noteState renders the glyph and state of a commit that carries a note. An
+// intact note of an affected-scope run gets its own glyph: "✓" would read as
+// verified, and `warden verify` refuses that note by default.
+func noteState(c *domain.CommitStatus) (glyph, state string) {
+	switch {
+	case !c.ChainIntact:
+		return "⚠", noteDefectLabel(c.NoteDefect)
+	case c.Affected:
+		return "~", "chain-intact, " + c.Scope + ": partial check, not verified"
+	default:
+		return "✓", "chain-intact"
+	}
 }
 
 // noteDefectLabel renders why a note failed to attest its commit.

@@ -228,6 +228,9 @@ func axiAuditReport(report func(string) (domain.AuditReport, error), args []stri
 		if c.ReattestableFrom != "" {
 			m["reattestable_from"] = c.ReattestableFrom
 		}
+		if c.Affected {
+			m["scope"] = c.Scope
+		}
 		commits = append(commits, m)
 	}
 	return emitTOON(stdout, stderr, map[string]any{
@@ -238,6 +241,7 @@ func axiAuditReport(report func(string) (domain.AuditReport, error), args []stri
 		"unverified":   t.Unverified,
 		"covered":      t.Covered,
 		"unknown":      t.Unknown,
+		"affected":     t.Affected,
 		"reattestable": len(rep.Reattestable()),
 		"commits":      commits,
 	})
