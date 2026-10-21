@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-21
+
+A minor release that widens monorepo mode. Discovery now reads Cargo
+workspaces (ecosystem `rust`) and follows Nx `implicitDependencies` between
+JavaScript workspaces, and it reads only the ecosystems
+`workspaces.discover` names, so a broken manifest of an ecosystem a repository
+does not use can no longer block its commits. A change to the root
+`Cargo.toml`, `Cargo.lock` or the Rust toolchain and Cargo configuration
+files checks every workspace. Releases before 0.41.0 reject `rust` in
+`workspaces.discover`: add it only once every machine and CI runner runs
+0.41.0.
+
 ### Added
 
 - **Preview: Cargo workspaces, and Nx `implicitDependencies`.** Workspace
