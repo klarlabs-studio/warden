@@ -132,6 +132,9 @@ func (s *Service) markCovered(report *domain.AuditReport) {
 		for _, sha := range covered {
 			if j, isGap := gaps[sha]; isGap {
 				report.Commits[j].CoveredBy = c.SHA
+				// A span inherits its tip's scope: the commits an affected
+				// run published were checked no more fully than its tip.
+				report.Commits[j].MarkAffected(rec)
 				delete(gaps, sha)
 			}
 		}

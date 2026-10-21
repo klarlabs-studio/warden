@@ -59,6 +59,33 @@ type CommitStatus struct {
 	// can bind that proof to this SHA. Empty when nothing content-identical is
 	// validated, which is the genuine "never gated" case.
 	ReattestableFrom string
+	// Affected marks a commit whose provenance is an affected-scope run
+	// (design 0006): its own intact note, or the note whose push span covers
+	// it, records that the per-workspace checks ran only for the workspaces
+	// the change affected. Such a commit was gated, so it is no bypass; it is
+	// not verified either, because `warden verify` refuses the note by
+	// default. Counts tallies it apart from both.
+	Affected bool `json:"affected,omitempty"`
+	// Scope labels an Affected commit's scope, e.g. "affected 3/12".
+	Scope string `json:"scope,omitempty"`
+}
+
+// MarkAffected records that rec, the commit's own note or the one whose span
+// covers it, attests an affected-scope run. A full-scope record changes
+// nothing.
+func (c *CommitStatus) MarkAffected(rec *RunRecord) {
+	if rec == nil || rec.FullScope() {
+		return
+	}
+	c.Affected = true
+	scope := rec.Scope
+	if scope == nil && rec.CarriedOriginal != nil {
+		scope = rec.CarriedOriginal.Scope
+	}
+	c.Scope = scope.Label()
+	if c.Scope == "" {
+		c.Scope = string(SelectionAffected)
+	}
 }
 
 // Reattestable reports whether this commit is an un-noted commit whose content
@@ -132,7 +159,9 @@ func NewCommitStatus(sha, author, date, subject string, note *RunRecord) CommitS
 	cs.ChainIntact = note.Attests(sha)
 	if !cs.ChainIntact {
 		cs.NoteDefect = note.AttestDefect(sha)
+		return cs
 	}
+	cs.MarkAffected(note)
 	return cs
 }
 
@@ -151,8 +180,8 @@ type AuditReport struct {
 // Tally is an audit's commit counts, one bucket per state the commit-state
 // partition distinguishes.
 //
-// Verified, Covered, Unverified and Unknown account for every commit exactly
-// once — Total is their sum. Defective is the one deliberate SUBSET: it names
+// Verified, Covered, Affected, Unverified and Unknown account for every commit
+// exactly once — Total is their sum. Defective is the one deliberate SUBSET: it names
 // why a commit is unverified, so it is counted inside Unverified rather than
 // beside it.
 type Tally struct {
@@ -169,6 +198,11 @@ type Tally struct {
 	// this commit and did not — a defective note, a squash-merge binding gap, or
 	// a genuine bypass. This is the number an exit code should gate on.
 	Unverified int
+	// Affected: gated by an affected-scope run, through its own note or a
+	// push span — per-workspace checks ran only for the workspaces the change
+	// affected. Neither verified (`warden verify` refuses such a note by
+	// default) nor a gap: it is counted in neither Verified nor Unverified.
+	Affected int
 	// Unknown: warden makes no claim, because it was never in a position to.
 	// A branch that was never pushed never reached the gate that writes notes;
 	// provenance older than push spans cannot say whether a gap was an
@@ -178,7 +212,7 @@ type Tally struct {
 }
 
 // Total is the number of commits tallied.
-func (t Tally) Total() int { return t.Verified + t.Covered + t.Unverified + t.Unknown }
+func (t Tally) Total() int { return t.Verified + t.Covered + t.Affected + t.Unverified + t.Unknown }
 
 // Counts tallies commits by whether their provenance actually stands up.
 //
@@ -199,11 +233,15 @@ func (r AuditReport) Counts() Tally {
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		switch {
+		case c.HasNote && c.ChainIntact && c.Affected:
+			t.Affected++
 		case c.HasNote && c.ChainIntact:
 			t.Verified++
 		case c.HasNote:
 			t.Defective++
 			t.Unverified++
+		case c.Covered() && c.Affected:
+			t.Affected++
 		case c.Covered():
 			t.Covered++
 		case c.Unpushed(), c.Unattributable():
