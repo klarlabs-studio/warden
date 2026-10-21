@@ -9,6 +9,15 @@ import (
 // SelectionVersion is the version of the affected-selection algorithm. It is
 // part of the selection digest: a record names the rules it was selected by, so
 // changing what Select returns for some input must bump it.
+//
+// One kind of change is exempt: adding a path to WorkspaceRootManifests,
+// RootLockfiles or DefaultGlobalPaths. It can only turn an affected selection
+// into a full one, never shrink one, so a record selected under the longer
+// lists checked a superset of what the same version required before, and a
+// verifier recomputing a selection under the longer lists asks for at least
+// as much as the record holds. Bumping for it would instead make every
+// released verifier refuse the new records outright (RunScope.IsFull accepts
+// versions up to its own). The Cargo files were added this way.
 const SelectionVersion = 1
 
 // WardenConfigFile is the repository configuration file. A change to it can
@@ -23,8 +32,11 @@ const WardenConfigFile = ".warden.yaml"
 // go.work, or a root package), its go.mod and package.json still force full
 // rather than selecting just the root workspace. That is the conservative
 // reading: a root go.mod's replace and toolchain directives, like a root
-// package.json's overrides and workspaces, can change every workspace.
-var WorkspaceRootManifests = []string{"package.json", "pnpm-workspace.yaml", "go.work", "go.mod"}
+// package.json's overrides and workspaces, can change every workspace. A root
+// Cargo.toml is the same: its [workspace] members, shared dependencies and
+// [patch] tables reach every crate, and with a root package it is also that
+// package's manifest.
+var WorkspaceRootManifests = []string{"package.json", "pnpm-workspace.yaml", "go.work", "go.mod", "Cargo.toml"}
 
 // RootLockfiles are the shared lockfiles at the repository root. One resolves
 // dependencies for every workspace and nothing attributes a change in it to
@@ -34,16 +46,19 @@ var WorkspaceRootManifests = []string{"package.json", "pnpm-workspace.yaml", "go
 // to that workspace like any other file there.
 var RootLockfiles = []string{
 	"package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock",
-	"bun.lock", "bun.lockb", "go.work.sum", "go.sum",
+	"bun.lock", "bun.lockb", "go.work.sum", "go.sum", "Cargo.lock",
 }
 
 // DefaultGlobalPaths are the globs that affect every workspace in the
 // ecosystems warden discovers: shared package-manager and build-tool
 // configuration. They apply in addition to SelectionRules.Global, which can
-// add to them but never remove one.
+// add to them but never remove one. For Cargo that is the toolchain pin and
+// the cargo configuration at the root, which can set flags, targets and
+// [patch] tables for every crate.
 var DefaultGlobalPaths = []string{
 	".npmrc", ".yarnrc.yml", ".yarn/**", ".pnpmfile.cjs",
 	"tsconfig.base.json", "turbo.json", "nx.json",
+	"rust-toolchain.toml", "rust-toolchain", ".cargo/config.toml", ".cargo/config",
 }
 
 // SelectionKind says whether every workspace was selected or only the

@@ -1,6 +1,6 @@
 // Package workspace discovers the workspaces of a monorepo — the packages of a
-// JS workspace, the modules of a go.work — and the dependency edges between
-// them, producing a domain.WorkspaceGraph.
+// JS workspace, the modules of a go.work, the members of a Cargo workspace —
+// and the dependency edges between them, producing a domain.WorkspaceGraph.
 //
 // Discovery reads manifests out of one git tree and nothing else. It never
 // reads the filesystem and never runs a package manager or the go command, so
@@ -10,14 +10,16 @@ package workspace
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
 	gitinfra "go.klarlabs.de/warden/internal/infrastructure/git"
 )
 
-// maxManifestBytes caps one manifest. Real package.json, go.mod and go.work
-// files are kilobytes; the cap refuses a hostile or accidental blob rather
+// maxManifestBytes caps one manifest. Real package.json, go.mod, go.work and
+// Cargo.toml files are kilobytes; the cap refuses a hostile or accidental blob rather
 // than parsing it.
 const maxManifestBytes = 1 << 20
 
@@ -106,6 +108,17 @@ func newFileSet(src Source) fileSet {
 	return s
 }
 
+// sortedKeys returns m's keys in order, so iteration over a manifest table is
+// deterministic.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // joinPath joins a workspace directory and a file name in repository path
 // space, where the root directory is ".".
 func joinPath(dir, name string) string {
@@ -115,9 +128,27 @@ func joinPath(dir, name string) string {
 	return dir + "/" + name
 }
 
-// Discover reads the workspace graph of the tree src describes: JS workspaces
-// (npm, yarn, pnpm) and go.work modules. A tree that declares neither yields
-// an empty graph.
+// discoverer reads the workspaces of one ecosystem from a tree.
+type discoverer struct {
+	ecosystem string
+	what      string
+	discover  func(Source, fileSet) ([]domain.Workspace, error)
+}
+
+// discoverers lists every ecosystem discovery knows, in the order the labels
+// appear in domain.WorkspaceEcosystems.
+var discoverers = []discoverer{
+	{EcosystemJS, "JS workspaces", discoverJS},
+	{EcosystemGo, "go.work modules", discoverGo},
+	{EcosystemRust, "Cargo workspace members", discoverCargo},
+}
+
+// Discover reads the workspace graph of the tree src describes for the named
+// ecosystems (domain.WorkspaceEcosystems; none named means every one): JS
+// workspaces (npm, yarn, pnpm), go.work modules and Cargo workspace members.
+// A tree that declares none of them yields an empty graph. An ecosystem that
+// is not named is not read at all, so a manifest of an ecosystem a repository
+// does not discover can neither fail nor change its graph.
 //
 // The graph is validated before it is returned. A manifest that produces an
 // invalid workspace (a name outside the allowed characters, two workspaces at
@@ -125,28 +156,37 @@ func joinPath(dir, name string) string {
 // drops a workspace to make the graph valid, because a workspace nobody knows
 // about is a workspace nobody checks. Dependency cycles are not invalid and
 // are returned as discovered.
-func Discover(src Source) (domain.WorkspaceGraph, error) {
+func Discover(src Source, ecosystems ...string) (domain.WorkspaceGraph, error) {
+	for _, e := range ecosystems {
+		if !slices.Contains(domain.WorkspaceEcosystems, e) {
+			return domain.WorkspaceGraph{}, fmt.Errorf("unknown ecosystem %q (known: %s)", e, strings.Join(domain.WorkspaceEcosystems, ", "))
+		}
+	}
 	files := newFileSet(src)
-	js, err := discoverJS(src, files)
-	if err != nil {
-		return domain.WorkspaceGraph{}, fmt.Errorf("discover JS workspaces: %w", err)
+	var all []domain.Workspace
+	for _, d := range discoverers {
+		if len(ecosystems) > 0 && !slices.Contains(ecosystems, d.ecosystem) {
+			continue
+		}
+		found, err := d.discover(src, files)
+		if err != nil {
+			return domain.WorkspaceGraph{}, fmt.Errorf("discover %s: %w", d.what, err)
+		}
+		all = append(all, found...)
 	}
-	gomods, err := discoverGo(src, files)
-	if err != nil {
-		return domain.WorkspaceGraph{}, fmt.Errorf("discover go.work modules: %w", err)
-	}
-	g := domain.WorkspaceGraph{Workspaces: append(js, gomods...)}
+	g := domain.WorkspaceGraph{Workspaces: all}
 	if err := g.Validate(); err != nil {
 		return domain.WorkspaceGraph{}, fmt.Errorf("discovered workspaces are invalid: %w", err)
 	}
 	return g.Canonical(), nil
 }
 
-// DiscoverAt reads the workspace graph of rev's tree in the repository at dir.
-func DiscoverAt(dir, rev string) (domain.WorkspaceGraph, error) {
+// DiscoverAt reads the workspace graph of rev's tree in the repository at dir
+// for the named ecosystems (none named means every one).
+func DiscoverAt(dir, rev string, ecosystems ...string) (domain.WorkspaceGraph, error) {
 	tree, err := OpenGitTree(dir, rev)
 	if err != nil {
 		return domain.WorkspaceGraph{}, err
 	}
-	return Discover(tree)
+	return Discover(tree, ecosystems...)
 }

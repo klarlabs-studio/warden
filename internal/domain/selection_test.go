@@ -249,6 +249,15 @@ func TestSelectRootWorkspaceStillForcesFull(t *testing.T) {
 		{"go.work.sum", FullRuleLockfile},
 		{"go.sum", FullRuleLockfile},
 		{"pnpm-lock.yaml", FullRuleLockfile},
+		// A Cargo workspace root: its manifest declares members, shared
+		// dependencies and patches; its lockfile resolves every member;
+		// toolchain and cargo configuration build every crate.
+		{"Cargo.toml", FullRuleRootManifest},
+		{"Cargo.lock", FullRuleLockfile},
+		{"rust-toolchain.toml", FullRuleGlobal},
+		{"rust-toolchain", FullRuleGlobal},
+		{".cargo/config.toml", FullRuleGlobal},
+		{".cargo/config", FullRuleGlobal},
 		{"turbo.json", FullRuleGlobal},
 		{"/abs", FullRuleInvalidPath},
 	}
@@ -264,8 +273,9 @@ func TestSelectRootWorkspaceStillForcesFull(t *testing.T) {
 			}
 		})
 	}
-	// Below the root, go.mod and go.sum are the owning workspace's files.
-	s := mustSelect(t, nestedInput("a/c/go.mod", "a/c/go.sum"))
+	// Below the root, go.mod and go.sum (and a crate's Cargo.toml, Cargo.lock
+	// and .cargo/config.toml) are the owning workspace's files.
+	s := mustSelect(t, nestedInput("a/c/go.mod", "a/c/go.sum", "a/c/Cargo.toml", "a/c/Cargo.lock", "a/c/.cargo/config.toml"))
 	if s.Kind != SelectionAffected || !reflect.DeepEqual(s.Paths(), []string{"a/c"}) {
 		t.Fatalf("nested go.mod: Kind = %s, selected %v", s.Kind, s.Paths())
 	}

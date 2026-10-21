@@ -24,6 +24,10 @@ func TestConfigValidate_Workspaces(t *testing.T) {
 		}},
 		// One file may set part of the block and leave discover to its base;
 		// ValidateEffective checks the merged result.
+		{name: "rust", cfg: Config{
+			Workspaces:   ws(WorkspacesConfig{Discover: []string{"rust", "js"}}),
+			PerWorkspace: map[string]PerWorkspaceStep{"test": {Each: "cargo test", Ecosystems: []string{"rust"}}},
+		}},
 		{name: "select alone", cfg: Config{Workspaces: ws(WorkspacesConfig{Select: "affected"})}},
 		{name: "each without placeholders runs in the workspace", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"lint": {Each: "make lint"}}}},
 		{name: "shell braces are not placeholders", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"lint": {Each: "awk '{print $1}' ${FILE} {a,b}"}}}},
@@ -47,7 +51,7 @@ func TestConfigValidate_Workspaces(t *testing.T) {
 		{name: "bad step name", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"a/b": {Each: "x"}}}, wantErr: "invalid step name"},
 		{name: "built-in agent step", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"review": {Each: "x"}}}, wantErr: "only shell checks"},
 		{name: "security-scan", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"security-scan": {Each: "nox scan ."}}}, wantErr: "only shell checks"},
-		{name: "bad step ecosystem", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"test": {Each: "x", Ecosystems: []string{"rust"}}}}, wantErr: "per_workspace.test.ecosystems"},
+		{name: "bad step ecosystem", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"test": {Each: "x", Ecosystems: []string{"python"}}}}, wantErr: "per_workspace.test.ecosystems"},
 		{name: "plural placeholder in each", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"test": {Each: "x {workspaces.filter}"}}}, wantErr: "belongs in a batch: command"},
 		{name: "singular placeholder in batch", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"test": {Batch: "x {workspace.path}"}}}, wantErr: "belongs in an each: command"},
 		{name: "unknown placeholder", cfg: Config{PerWorkspace: map[string]PerWorkspaceStep{"test": {Each: "x {workspace.dir}"}}}, wantErr: "unknown placeholder {workspace.dir}"},

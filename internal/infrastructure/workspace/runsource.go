@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"fmt"
+
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 	gitinfra "go.klarlabs.de/warden/internal/infrastructure/git"
@@ -20,8 +22,14 @@ func NewRunSource(repo *gitinfra.Repo) *RunSource { return &RunSource{repo: repo
 func (s *RunSource) TrackedTree(dir string) (string, error) { return gitinfra.TrackedTree(dir) }
 
 // Discover implements application.WorkspaceSource.
-func (s *RunSource) Discover(rev string) (domain.WorkspaceGraph, error) {
-	return DiscoverAt(s.repo.Dir, rev)
+func (s *RunSource) Discover(rev string, ecosystems []string) (domain.WorkspaceGraph, error) {
+	if len(ecosystems) == 0 {
+		// A run only discovers what workspaces.discover names, and config
+		// validation refuses an empty list; an empty one here is a caller
+		// bug, which must not widen into "every ecosystem".
+		return domain.WorkspaceGraph{}, fmt.Errorf("discover workspaces: no ecosystems named")
+	}
+	return DiscoverAt(s.repo.Dir, rev, ecosystems...)
 }
 
 // ChangedPaths implements application.WorkspaceSource.

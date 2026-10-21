@@ -18,6 +18,8 @@ type fakeWorkspaces struct {
 	digest    string
 	digestErr error
 	asked     []string
+	// ecosystems records what each Discover call asked for.
+	ecosystems []string
 }
 
 func (f *fakeWorkspaces) TrackedTree(dir string) (string, error) {
@@ -25,8 +27,9 @@ func (f *fakeWorkspaces) TrackedTree(dir string) (string, error) {
 	return f.tree, nil
 }
 
-func (f *fakeWorkspaces) Discover(rev string) (domain.WorkspaceGraph, error) {
+func (f *fakeWorkspaces) Discover(rev string, ecosystems []string) (domain.WorkspaceGraph, error) {
 	f.asked = append(f.asked, "discover:"+rev)
+	f.ecosystems = append(f.ecosystems, strings.Join(ecosystems, ","))
 	return f.graphs[rev], nil
 }
 
@@ -127,6 +130,11 @@ func TestRunner_PreCommitAffectedSelection(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(src.asked, " "), "changed:head1..tree1") {
 		t.Fatalf("the change must be measured from HEAD to the checked tree: %v", src.asked)
+	}
+	// Both graphs are discovered for workspaces.discover only, so a manifest
+	// of another ecosystem is never read.
+	if len(src.ecosystems) != 2 || src.ecosystems[0] != "js" || src.ecosystems[1] != "js" {
+		t.Fatalf("discovered ecosystems %q, want js for both graphs", src.ecosystems)
 	}
 
 	// A configuration that differs from HEAD's (or cannot be read there)

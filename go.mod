@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-isatty v0.0.24
+	github.com/pelletier/go-toml/v2 v2.4.3
 	go.klarlabs.de/axi v1.5.0
 	go.klarlabs.de/fortify v1.10.0
 	go.klarlabs.de/mcp v1.27.0
