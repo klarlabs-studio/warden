@@ -739,14 +739,16 @@ cache: { test: ["**/*.go", "go.mod", "go.sum"] }   # skip a step when its declar
 diagnostics: { lint: out/lint.sarif }   # optional — a SARIF 2.1.0 file the check writes; read only when the check FAILS,
                                         # for file:line findings. Requires warden >= 0.38.0 everywhere (see docs/background-feedback.md)
 # Monorepo mode — PREVIEW. A step defined under per_workspace: runs per workspace:
-# at pre-commit for the workspaces the staged change affects (select: affected) or
-# for all of them (select: all); at pre-push always for all of them. Notes carry
-# each workspace's result as evidence but no workspace scope yet. Older wardens
-# reject both keys, so add them only once warden >= 0.39.0 runs on every machine
-# and CI runner that reads this config (see docs/monorepo.md).
+# for all of them (select: all), or for the workspaces a change affects
+# (select: affected): at pre-commit the staged change, at pre-push the change since
+# the nearest ancestor with a trusted full-scope note. Under select: affected the
+# signed note records that scope, and verifiers refuse an affected-scope note by
+# default. Older wardens reject both keys, and a pinned verifier older than 0.39.0
+# refuses every scoped note, so add them only once warden >= 0.39.0 runs on every
+# machine and CI runner that reads this config (see docs/monorepo.md).
 workspaces:
   discover: [js, go]   # required with the block — ecosystems to read workspaces from (js = npm/yarn/pnpm, go = go.work)
-  select: all          # default — `affected` runs pre-commit per-workspace steps only for changed workspaces and their dependents
+  select: all          # default — `affected` runs per-workspace steps only for changed workspaces and their dependents, and records that scope in the note
   global: ["tools/build/**"]   # changes here select every workspace (added to the lockfile/tool-config defaults)
   ignore: ["docs/**", ".github/**"]   # changed paths no workspace owns that select nothing
   unowned: full        # default — any other unowned change selects every workspace; `ignore` selects none

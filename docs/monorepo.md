@@ -2,17 +2,18 @@
 
 > **Preview.** Monorepo mode is arriving in steps. This release discovers
 > workspaces (`warden workspaces`), computes affected selections, and runs
-> steps defined under `per_workspace:` once per workspace. At pre-commit
-> they run for the workspaces the staged change affects (with
-> `select: affected`); at pre-push they run for every workspace. Notes record
-> each workspace's result as evidence, but no workspace scope yet, so every
-> note still verifies as a full run (see
+> steps defined under `per_workspace:` once per workspace. With
+> `select: affected` they run for the workspaces a change affects: at
+> pre-commit, the staged change; at pre-push, the change since the nearest
+> ancestor carrying a trusted full-scope note, and the signed note records
+> which workspaces were checked. Verifiers refuse such an affected-scope note
+> by default (see
 > [how verifiers treat a partial record](#how-verifiers-treat-a-partial-record)).
 > Configuration keys and output formats may still change between releases.
 
 Monorepo mode teaches warden what a workspace is, so that it can run
-per-workspace checks for only the workspaces a change affects, and, in a later
-release, record in the signed note that it did. You can inspect discovery and
+per-workspace checks for only the workspaces a change affects, and record in
+the signed note that it did. You can inspect discovery and
 selection with `warden workspaces`, and see what a hook runs per workspace
 with `warden policy explain`.
 
@@ -98,7 +99,7 @@ steps:
   pre_push: [rebase, test, typecheck]
 workspaces:
   discover: [js, go]
-  select: affected        # pre-commit runs only affected workspaces
+  select: affected        # run only the affected workspaces
   ignore: ["docs/**"]
   concurrency: 4          # optional
 per_workspace:
@@ -118,7 +119,7 @@ A step is defined under `commands:` or under `per_workspace:`, never both. A
 | Hook | `select: all` (default) | `select: affected` |
 |---|---|---|
 | pre-commit | every workspace | the workspaces the staged change affects, and their dependents |
-| pre-push | every workspace | every workspace |
+| pre-push | every workspace | the workspaces changed since the nearest ancestor with a trusted full-scope note, and their dependents; every workspace when there is none (see [below](#at-pre-push-affected-scope)) |
 
 At pre-commit, the change is measured from `HEAD` to the tree the step runs
 against: the staged change, plus any fix that an earlier step whose writes are
@@ -134,10 +135,53 @@ writes. Its writes would land after the selection was made, so the selection
 would describe a different tree from the one committed. Put writers before
 per-workspace steps to keep affected selection.
 
-Pre-push always runs every workspace. Running only affected workspaces there
-needs a trusted full run to measure from and a scope recorded in the signed
-note, so that verifiers can tell a partial check from a full one. A later
-release adds both.
+### At pre-push: affected scope
+
+At pre-push with `select: affected`, the change is measured from an
+**anchor**: the nearest commit, following first parents below the commit being
+pushed (at most 500 of them), whose note
+
+- attests that commit, is signed, and its signature verifies;
+- was signed by a key in the committed `trusted_keys` roster, or, when the
+  repository has no roster, by this machine's own signing key;
+- records a **full** scope (an affected note never anchors, so a partial
+  check always rests on a full one, never on another partial one) whose
+  per-workspace checks ran on exactly that commit's tree;
+- ran under the same effective configuration, and ran every per-workspace
+  step this push runs, from the same command.
+
+Before searching, warden fetches the remote's notes, so a full-scope note
+written by CI can anchor a developer's push. The fetch only fast-forwards:
+it never overwrites a note this machine has not published yet.
+
+The per-workspace steps then run for the workspaces changed between the
+anchor's tree and the tree being pushed, and their dependents, under the
+[selection rules](#selecting-affected-workspaces). The run checks every
+workspace instead, and its note records a full scope naming the rule, when:
+
+| Rule | When |
+|---|---|
+| `no-anchor` | no ancestor qualifies as an anchor |
+| `no-signer` | no signing key is available. An unsigned affected note could not be told apart from a hand-edited one, so it would prove nothing |
+| `attest-only` | the run is `--attest-only`. CI is where anchors come from |
+| `writer-order` | a step whose writes are kept runs at or after the first per-workspace step |
+| any [selection rule](#selecting-affected-workspaces) | a lockfile, root manifest, `.warden.yaml`, global or unowned path changed since the anchor |
+
+These checks run before any step does. A full-scope note is itself an anchor
+for later pushes, so the first push after enabling `select: affected` is full.
+
+Two more checks run when the note is written, and refuse the push rather than
+write an affected note they cannot stand behind: the tree the per-workspace
+checks ran on must be the pushed commit's tree, and the note must be signed
+(whatever `signing.required` says). Nothing is pushed when either fails.
+
+The run says its scope: `warden run pre-push` ends with
+`scope affected: test[2/7 workspaces]`, the commit status published to the
+forge starts `warden gate passed, affected scope: 2 of 7 workspaces (partial
+check)`, and the PR comment lists the workspaces checked and the anchor.
+
+A note records a scope only under `select: affected`, and only when a
+per-workspace step ran. With `select: all`, notes stay exactly as before.
 
 Only the ecosystems named in `workspaces.discover` take part. A change in a
 directory that belongs to an ecosystem not listed is a path no workspace owns,
@@ -241,27 +285,27 @@ plus everything that depends on them.
 
 A selection is only as complete as the manifests. If one workspace reads
 files of another without declaring a dependency on it, a change to the second
-does not select the first. That is why a later release will record in the
-signed note which workspaces were checked, and why verifiers refuse such a
-partial record by default. Until a warden writes one, affected selection
-applies only at pre-commit, where nothing is signed.
+does not select the first. That is why the signed note records which
+workspaces were checked, and why verifiers refuse such a partial record by
+default.
 
 ## How verifiers treat a partial record
 
-No warden writes a partial record yet. Release 0.39.0 teaches every verifier
-to read one, so that the verifiers in your CI are ready before any warden
-that writes them ships. **Upgrade every verifier, then the developers'
-machines**: a pinned verifier older than 0.39.0 refuses every note that
-records a scope, full ones included (see below).
+This release writes partial records. Release 0.39.0 taught every verifier
+to read one, so that the verifiers in your CI could be ready before any warden
+that writes them shipped. **Upgrade every verifier to 0.39.0 or later before
+turning on `select: affected`**: a pinned verifier older than 0.39.0 refuses
+every note that records a scope, full ones included (see below).
 
-A repository that configures `workspaces:` will record a signed `scope` in
-each note: `full` when every workspace was checked, `affected` when the
-per-workspace steps ran only for the workspaces a change affected. The scope
+A repository with `select: affected` records a signed `scope` in each
+pre-push note whose run had a per-workspace step: `full` when every workspace
+was checked, `affected` when the per-workspace steps ran only for the
+workspaces a change affected. The scope
 names the selection algorithm version, the trusted full run an affected
 selection was measured from, the tree, the configuration and graph digests,
 the selection digest, every workspace, the workspaces each per-workspace step
 ran for, and why each was selected. A note without a scope is a full run, as
-every note written today is.
+every note from a repository without `select: affected` is.
 
 An affected record claims less than a full one: "these workspaces were
 checked on this tree; the others were checked by an earlier trusted full run,
@@ -276,6 +320,7 @@ and nothing they declare a dependency on has changed since". So, by default:
 | `warden attest --predicate vsa` | `FAILED`, with `WARDEN_SOURCE_AFFECTED_*` levels and never `WARDEN_SOURCE_GATED` |
 | `warden reattest` | carries the scope unchanged, so the relocated note stays affected and refused |
 | `warden why`, `warden axi verify`, the MCP `verify` tool | show the scope, and that verifiers refuse it |
+| `warden doctor`, `audit`, `evidence`, `fleet status` | count it, and the commits its push span covers, as gated by a partial check (`affected n/m`): neither verified nor a bypass, so doctor's exit code does not fail on it |
 
 No flag accepts an affected note in this release. Accepting one safely needs
 the verifier to recompute the selection itself, from rules read at a trusted
