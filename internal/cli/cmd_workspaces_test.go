@@ -280,7 +280,7 @@ func TestCmdWorkspaces_BadInvocations(t *testing.T) {
 }
 
 func TestCmdWorkspaces_OutsideARepository(t *testing.T) {
-	chdir(t, t.TempDir())
+	t.Chdir(t.TempDir())
 	if _, _, code := runWorkspaces(t); code != 1 {
 		t.Fatalf("exit %d outside a repository, want 1", code)
 	}

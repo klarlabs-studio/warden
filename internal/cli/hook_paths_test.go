@@ -8,7 +8,7 @@ import (
 
 func TestStatusReportsHiddenHooksInactive(t *testing.T) {
 	dir := gitRepo(t)
-	chdir(t, dir)
+	t.Chdir(dir)
 	if code, out, errOut := run("init"); code != 0 {
 		t.Fatalf("init: %d %s %s", code, out, errOut)
 	}

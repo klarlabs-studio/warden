@@ -30,7 +30,7 @@ func auditRepo(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 
 	var out, errb bytes.Buffer
 	if code := cmdInit([]string{"--hooks=pre-push"}, &out, &errb); code != 0 {

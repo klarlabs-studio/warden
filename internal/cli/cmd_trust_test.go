@@ -129,12 +129,12 @@ commands:
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	chdir(t, sub)
+	t.Chdir(sub)
 
 	if code, _, errb := run("trust", "add"); code != 0 {
 		t.Fatalf("trust add from a subdirectory: %d %q", code, errb)
 	}
-	chdir(t, dir)
+	t.Chdir(dir)
 	if code, _, errb := run("axi", "run-trigger", "--hook", "pre-commit"); code != 0 {
 		t.Errorf("a grant made in a subdirectory must apply at the repo root: code=%d err=%q", code, errb)
 	}

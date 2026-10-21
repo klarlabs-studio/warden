@@ -33,7 +33,7 @@ func gitRepo(t *testing.T) string {
 	git("config", "user.email", "t@t.co")
 	git("config", "user.name", "t")
 	git("commit", "--allow-empty", "-m", "init")
-	chdir(t, dir)
+	t.Chdir(dir)
 	return dir
 }
 

@@ -30,7 +30,7 @@ func TestCmdAttach_NoLiveRun(t *testing.T) {
 // "no live run": there is no gate to attach to because there is no repo, and
 // conflating the two would send the reader looking for a run.
 func TestCmdAttach_OutsideRepo(t *testing.T) {
-	chdir(t, t.TempDir())
+	t.Chdir(t.TempDir())
 
 	var out, errb bytes.Buffer
 	if code := cmdAttach(nil, &out, &errb); code == 0 {
