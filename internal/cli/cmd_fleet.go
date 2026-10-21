@@ -86,7 +86,10 @@ type fleetReport struct {
 	// verified in substance — and they must be TALLIED, not merely excluded from
 	// the bypass count: the buckets are summed, so a state the report does not
 	// enumerate silently loses every commit in it.
-	Covered      int `json:"covered"`
+	Covered int `json:"covered"`
+	// Affected counts commits gated by an affected-scope run (through its own
+	// note or a push span): a partial check, neither verified nor bypassed.
+	Affected     int `json:"affected"`
 	Bypassed     int `json:"bypassed"`
 	Reattestable int `json:"reattestable"`
 	// Unattributable counts commits whose status cannot be determined because the
@@ -133,6 +136,7 @@ type fleetRepo struct {
 	// that is supposed to trigger an intervention. Overstating the problem gets
 	// the metric dismissed as noisy, which costs more than not having it.
 	Covered        int `json:"covered"`
+	Affected       int `json:"affected"`
 	Bypassed       int `json:"bypassed"`
 	Reattestable   int `json:"reattestable"`
 	Unattributable int `json:"unattributable"`
@@ -219,6 +223,7 @@ func surveyFleet(paths []string, branch string) fleetReport {
 		rep.Commits += r.Commits
 		rep.Verified += r.Verified
 		rep.Covered += r.Covered
+		rep.Affected += r.Affected
 		rep.Bypassed += r.Bypassed
 		rep.Reattestable += r.Reattestable
 		rep.Unattributable += r.Unattributable
@@ -259,6 +264,7 @@ func surveyRepo(path, branch string) fleetRepo {
 	t := report.Counts()
 	r.Defective = t.Defective
 	r.Verified = t.Verified
+	r.Affected = t.Affected
 	r.Reattestable = len(report.Reattestable())
 	r.Bypassed = countBypassed(report)
 	// Every state the domain distinguishes must be counted here, or the buckets
@@ -266,7 +272,7 @@ func surveyRepo(path, branch string) fleetRepo {
 	// is what catches a state added to the domain and forgotten here.
 	for i := range report.Commits {
 		switch {
-		case report.Commits[i].Covered():
+		case report.Commits[i].Covered() && !report.Commits[i].Affected:
 			r.Covered++
 		case report.Commits[i].Unpushed():
 			r.Unpushed++
@@ -303,6 +309,9 @@ func printFleet(w io.Writer, rep fleetReport) {
 		_, _ = fmt.Fprintf(w, "%d commits since adoption: %d verified", rep.Commits, rep.Verified)
 		if rep.Covered > 0 {
 			_, _ = fmt.Fprintf(w, " (+%d covered by a gated push)", rep.Covered)
+		}
+		if rep.Affected > 0 {
+			_, _ = fmt.Fprintf(w, ", %d gated by an affected-scope (partial) check", rep.Affected)
 		}
 		_, _ = fmt.Fprintf(w, ", %d bypassed (%.1f%%), %d reattestable",
 			rep.Bypassed, rep.BypassRate, rep.Reattestable)

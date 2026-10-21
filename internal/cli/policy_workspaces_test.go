@@ -48,7 +48,7 @@ func TestPolicy_ExplainShowsWorkspacesAndWhatRunsWhere(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("axi policy-explain: code=%d err=%q", code, errb)
 	}
-	for _, want := range []string{"workspaces_select", "affected", "per_workspace_steps", "typecheck", "per_workspace_active", "true", "every discovered workspace at pre-push"} {
+	for _, want := range []string{"workspaces_select", "affected", "per_workspace_steps", "typecheck", "per_workspace_active", "true", "trusted full-scope note"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("axi policy-explain missing %q: %q", want, out)
 		}

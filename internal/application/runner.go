@@ -32,6 +32,14 @@ var ErrRewriteUnderAttestOnly = errors.New("tree rewritten during an attest-only
 // reports success for a job that did nothing.
 var ErrAttestationNotWritten = errors.New("attestation note could not be written")
 
+// ErrScopeNotAttestable is returned when a run selected an affected scope it
+// cannot attest: the tree the per-workspace checks ran on is not the commit's
+// tree, or the note could not be signed. An affected-scope note makes a weaker
+// claim than a full one, and an unsigned one, or one about a different tree,
+// is worth less than none, so the run refuses to write it, before anything is
+// pushed.
+var ErrScopeNotAttestable = errors.New("affected-scope provenance cannot be attested")
+
 // short12 abbreviates a SHA for a message without pulling in a delivery helper.
 func short12(sha string) string {
 	if len(sha) > 12 {
@@ -220,7 +228,7 @@ func (r *Runner) CheckWorkingTree(ctx context.Context, base, tree string) (RunRe
 	defer func() { _ = wt.Remove() }()
 	sc := r.withStream(StepContext{Hook: domain.PreCommit, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, Remote: r.Settings.Remote})
 	run := r.newRun(domain.PreCommit, resolved, branch)
-	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
+	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt, nil); err != nil {
 		return RunResult{}, err
 	}
 	if run.IsTerminal() {
@@ -390,7 +398,7 @@ func (r *Runner) runPreCommit(ctx context.Context, resolved domain.ResolvedPolic
 	sc := r.withStream(StepContext{Hook: domain.PreCommit, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote})
 	run := r.newRun(domain.PreCommit, resolved, branch)
 
-	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt); err != nil {
+	if _, err := r.runValidation(ctx, run, resolved, sc, nil, wt, nil); err != nil {
 		return RunResult{}, err
 	}
 	if run.IsTerminal() {
@@ -643,7 +651,13 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		return domain.StepResult{Step: domain.StepPush, Status: domain.StepPass}, nil
 	}
 
-	kernel, err := r.runValidation(ctx, run, resolved, sc, push, wt)
+	// sels carries the workspace selections of the run's per-workspace steps,
+	// and what its signed scope is built from. An anchor for an affected
+	// selection must be signed by the committed roster, or without one by
+	// this machine's own signer.
+	sels := newWorkspaceSelections()
+	sels.trustedKeys = cfg.TrustedKeys
+	kernel, err := r.runValidation(ctx, run, resolved, sc, push, wt, sels)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -691,6 +705,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		if spanBase != "" && spanBase != finalSHA {
 			record.CoversFrom = spanBase
 		}
+		// Record which workspaces the per-workspace steps checked, inside the
+		// signature (design 0006 §4). A run with no scope to record leaves the
+		// note byte-identical to one written before scopes existed.
+		if err := r.attachScope(record, sels, resolved, finalSHA); err != nil {
+			return r.result(run, ""), err
+		}
 	}
 	// Notarize BEFORE signing, so the trace digest is inside the payload the
 	// signature covers. Bound alongside it instead, the digest would be as
@@ -708,6 +728,15 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	// notes stopped being signed discovers it only when a CI --require-signed
 	// starts failing, by which point the commits are already in history.
 	if reason := r.sign(record); reason != "" {
+		// An affected scope was only selected because a signer was available
+		// (see selectAtPrePush). If signing failed after all, the partial
+		// claim cannot be told from a hand-edited one: refuse it whatever
+		// signing.required says.
+		if !record.FullScope() {
+			return r.result(run, ""), fmt.Errorf(
+				"%w: the note could not be signed (%s), and an unsigned affected-scope note proves nothing; push again, and the run will check every workspace if no signer is available",
+				ErrScopeNotAttestable, reason)
+		}
 		if cfg.Signing.Required {
 			// signing.required is the repo saying an unsigned note is not an
 			// acceptable outcome. Abort rather than write one — the push has not
@@ -787,6 +816,9 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		}
 	}
 	msg := pushedMessage(finalSHA, r.Settings.Remote, branch, gitCompletes, r.Settings.AttestOnly)
+	if sum := record.Scope.Summary(); sum != "" {
+		msg += "; scope " + sum
+	}
 	if provenance != "published" {
 		if gitCompletes {
 			msg = "checks passed; provenance incomplete; git push stopped before publication"
@@ -831,7 +863,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 				"gate passed but its commit status was NOT published: the commit could not be made reachable on "+
 					r.Settings.Remote+" ("+err.Error()+"). This commit will read as ungated to branch protection until it is.")
 		} else if err := r.Forge.PublishStatus(ctx, finalSHA, "success",
-			cfg.Status.StatusContext(), statusDescription(run)); err != nil {
+			cfg.Status.StatusContext(), statusDescription(run, record)); err != nil {
 			res.Warnings = append(res.Warnings,
 				"gate passed but its commit status was NOT published: "+err.Error()+
 					". This commit will read as ungated to branch protection until it is.")
@@ -858,12 +890,56 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 // statusDescription is the one line GitHub shows beside the check. It names
 // the steps, because "passed" without them invites the reader to assume a gate
 // ran checks it was never configured to run.
-func statusDescription(run *domain.Run) string {
+//
+// A recorded scope comes first, ahead of the step list: the forge clips a long
+// description from the end, and "affected" is the one qualifier that must not
+// be what gets clipped.
+func statusDescription(run *domain.Run, rec *domain.RunRecord) string {
+	head := "warden gate passed"
+	if rec != nil && rec.Scope != nil {
+		if rec.FullScope() {
+			head += ", full scope"
+		} else {
+			n, m := rec.Scope.Proportion()
+			head += fmt.Sprintf(", affected scope: %d of %d workspaces (partial check)", n, m)
+		}
+	}
 	steps := run.Policy().Steps
 	if len(steps) == 0 {
-		return "warden gate passed"
+		return head
 	}
-	return "warden gate passed (" + domain.DescribeSteps(steps, run.StepNotes()) + ")"
+	return head + " (" + domain.DescribeSteps(steps, run.StepNotes()) + ")"
+}
+
+// attachScope records the run's workspace scope on record, when it has one to
+// record: a pre-push run under `workspaces.select: affected` whose
+// per-workspace steps ran. Every other run records none.
+//
+// An affected scope is attached only when the tree the selection was computed
+// on, which the per-workspace checks ran on, is the attested commit's tree. The
+// ordering rule makes them equal by construction (no step that keeps its
+// writes runs at or after a per-workspace step); this checks it against git
+// rather than trusting it, and refuses when it does not hold.
+func (r *Runner) attachScope(record *domain.RunRecord, sels *workspaceSelections, resolved domain.ResolvedPolicy, sha string) error {
+	scope, err := buildScope(sels, resolved)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrScopeNotAttestable, err)
+	}
+	if scope == nil {
+		return nil
+	}
+	if !scope.IsFull() {
+		tree, err := r.Git.CommitTree(sha)
+		if err != nil {
+			return fmt.Errorf("%w: the tree of %s could not be read: %v", ErrScopeNotAttestable, short12(sha), err)
+		}
+		if tree != scope.HeadTree {
+			return fmt.Errorf("%w: the per-workspace checks ran on tree %s, but %s holds tree %s",
+				ErrScopeNotAttestable, short12(scope.HeadTree), short12(sha), short12(tree))
+		}
+	}
+	record.Scope = scope
+	return nil
 }
 
 // runValidation builds the run's kernel and folds each resolved step's outcome
@@ -871,14 +947,16 @@ func statusDescription(run *domain.Run) string {
 // state. Independent (read-only) steps run concurrently in batches; steps that
 // write the worktree stay sequential barriers (see scheduleBatches). It returns
 // the kernel so the caller can resolve the push gate.
-func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved domain.ResolvedPolicy, sc StepContext, push PushFunc, wt Worktree) (Kernel, error) {
+func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved domain.ResolvedPolicy, sc StepContext, push PushFunc, wt Worktree, sels *workspaceSelections) (Kernel, error) {
 	// Per-step worktree isolation: steps in a parallel batch each run in their own
 	// ephemeral worktree cloned from the canonical one, so a step's writes can't
 	// race a sibling. The registry maps a step to its worktree during a batch; an
 	// unregistered step (a sequential barrier) falls back to the canonical wt.
 	reg := newWorktreeRegistry()
 	sc.WorktreeFor = reg.dirFor
-	sels := newWorkspaceSelections()
+	if sels == nil {
+		sels = newWorkspaceSelections()
+	}
 	sc.Selection = sels.get
 
 	var priors []domain.Finding

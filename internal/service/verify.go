@@ -188,24 +188,10 @@ func (s *Service) VerifyWithPolicy(commitish string, policy ExternalPolicy, trus
 }
 
 // keyTrusted reports whether the record's signer matches any pinned key, given
-// either as a full base64 public key or as a fingerprint.
+// either as a full base64 public key or as a fingerprint (see
+// domain.RunRecord.SignedByAny, which the writer's anchor search shares).
 func keyTrusted(rec *domain.RunRecord, trustedKeys []string) bool {
-	for _, k := range trustedKeys {
-		if k == "" {
-			continue
-		}
-		// A roster entry may be the key itself or its fingerprint, in either
-		// scheme's encoding. Matching all the forms means an operator can paste
-		// whichever one they have — an ed25519 fingerprint from `warden key
-		// show`, or an SSH key or SHA256 fingerprint straight off a forge —
-		// without knowing which scheme the note happens to use.
-		if k == rec.PublicKey || k == rec.SignerFingerprint() ||
-			domain.KeyFingerprint(k) == rec.SignerFingerprint() ||
-			domain.SSHKeyFingerprint(k) == rec.SignerFingerprint() {
-			return true
-		}
-	}
-	return false
+	return rec.SignedByAny(trustedKeys)
 }
 
 // carriedOriginalHolds decides whether a re-attestation is trustworthy on the

@@ -12,10 +12,18 @@ const (
 	// FullRuleSelectAll: the configuration says `workspaces.select: all`
 	// (the default).
 	FullRuleSelectAll FullRule = "select-all"
-	// FullRulePrePush: pre-push runs per-workspace steps for every
-	// workspace. Affected selection there needs a full-scope anchor and a
-	// scope recorded in the note, neither of which this release writes.
-	FullRulePrePush FullRule = "pre-push"
+	// FullRuleAttestOnly: an --attest-only run is always full. CI is where
+	// full-scope anchors come from, so it never rests on one.
+	FullRuleAttestOnly FullRule = "attest-only"
+	// FullRuleNoSigner: no signer is available. An affected-scope note is
+	// worthless unsigned (nothing could later tell it from a hand-edited
+	// one), so the run checks every workspace instead.
+	FullRuleNoSigner FullRule = "no-signer"
+	// FullRuleNoAnchor: no first-parent ancestor within the search bound
+	// carries a trusted full-scope note of the same configuration that ran
+	// every per-workspace step of this run. With nothing to measure the change
+	// from, the run checks every workspace, and its note becomes an anchor.
+	FullRuleNoAnchor FullRule = "no-anchor"
 	// FullRuleWriterOrder: a step whose writes are kept (rebase, auto_fix,
 	// writes:) runs at or after a per-workspace step, so the tree the
 	// selection was computed on is not the tree that gets committed.
@@ -160,11 +168,13 @@ func (r StepResult) FailedWorkspaces() []string {
 
 // WorkspaceExecutionNotice says what per-workspace steps do in hook under
 // select mode, for every surface that shows the resolved configuration. It
-// states what runs where, and that no workspace scope is recorded anywhere.
+// states what runs where, and what the note records about it.
 func WorkspaceExecutionNotice(hook Hook, mode WorkspaceSelectMode) string {
 	switch {
+	case hook == PrePush && mode == WorkspaceSelectAffected:
+		return "per-workspace steps run at pre-push for the workspaces changed since the nearest ancestor with a trusted full-scope note, and their dependents; the signed note records that affected scope, and verifiers refuse an affected-scope note by default. A run is full, and its note becomes such an anchor, when no anchor is found, no signer is available, under --attest-only, when a selection rule forces full, or when a step that keeps its writes runs at or after a per-workspace step"
 	case hook == PrePush:
-		return "per-workspace steps run for every discovered workspace at pre-push (select: affected applies to pre-commit only in this release); each workspace's result is evidence in the note, but the note records no workspace scope yet"
+		return "per-workspace steps run for every discovered workspace at pre-push (select: all); each workspace's result is evidence in the note, which records no workspace scope"
 	case mode == WorkspaceSelectAffected:
 		return "per-workspace steps run for the workspaces the staged change affects (changed ones and their dependents), and for every workspace when a selection rule forces full or a step that keeps its writes runs at or after one; nothing is signed at pre-commit"
 	default:

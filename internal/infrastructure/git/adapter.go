@@ -77,7 +77,24 @@ func (a *Adapter) WriteNote(sha string, rec domain.RunRecord) error {
 	return a.repo.WriteNote(sha, rec)
 }
 func (a *Adapter) AnchorAttested(sha string) error { return a.repo.AnchorAttested(sha) }
-func (a *Adapter) PushNotes(remote string) error   { return a.repo.PushNotes(remote) }
+
+// CommitTree implements application.Git.
+func (a *Adapter) CommitTree(rev string) (string, error) { return a.repo.TreeSHA(rev) }
+
+// FullScopeAnchor implements application.Git: a best-effort notes fetch, then
+// the first-parent walk. The fetch refspec is not forced, so git refuses it
+// unless it fast-forwards the local ref: a local note not yet published makes
+// it fail and leaves the ref untouched, never discarded.
+func (a *Adapter) FullScopeAnchor(remote, rev string, limit int, accept func(application.AnchorCandidate) bool) (application.AnchorCandidate, bool, error) {
+	if remote != "" {
+		_ = a.repo.FetchNotes(remote)
+	}
+	c, found, err := a.repo.FirstNotedAncestor(rev, limit, func(c NotedCandidate) bool {
+		return accept(application.AnchorCandidate(c))
+	})
+	return application.AnchorCandidate(c), found, err
+}
+func (a *Adapter) PushNotes(remote string) error { return a.repo.PushNotes(remote) }
 func (a *Adapter) PushAnchor(remote, sha string) error {
 	return a.repo.PushAnchor(remote, sha)
 }
