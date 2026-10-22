@@ -21,6 +21,9 @@ const ExecutionContractVersion = 1
 // release fails safe: verification is refused and CI runs its checks.
 const ExecutionRequirementsV2 = 2
 
+// ExecutionRequirementsV3 adds initial workload observations to consumer policy.
+const ExecutionRequirementsV3 = 3
+
 // ExecutionContract contains observations from one fresh command execution.
 // Inputs are tracked manifest contents, not installed-package attestations.
 // Digests avoid publishing command text and contextual environment values.
@@ -35,7 +38,7 @@ type ExecutionContract struct {
 }
 
 // ExecutionRequirements comes from protected consumer policy, never the note
-// being evaluated. Every field in a required step is an exact expectation.
+// being evaluated. Identity fields are exact expectations; observed_limits are upper bounds.
 type ExecutionRequirements struct {
 	Version int                           `json:"version"`
 	Profile *ProfileRequirement           `json:"profile,omitempty"`
@@ -61,6 +64,9 @@ func (r ExecutionRequirements) MinProfile() (ComplianceProfile, bool) {
 }
 
 type StepRequirements struct {
+	// ObservedLimits requires a fresh initial probe, bounded resources and no
+	// IPv4 or non-loopback IPv6 routes. An empty object checks routes only.
+	ObservedLimits      *ExecutionLimits  `json:"observed_limits,omitempty"`
 	Command             string            `json:"command"`
 	ConfigurationDigest string            `json:"configuration_digest"`
 	ContextDigest       string            `json:"context_digest"`
@@ -98,9 +104,9 @@ func (r ExecutionRequirements) Validate() error {
 		if r.Profile != nil {
 			return fmt.Errorf("requirements version 1 cannot name a profile; use version 2")
 		}
-	case ExecutionRequirementsV2:
+	case ExecutionRequirementsV2, ExecutionRequirementsV3:
 		if r.Profile == nil && len(r.Steps) == 0 {
-			return fmt.Errorf("requirements version 2 must name a profile, at least one step, or both")
+			return fmt.Errorf("requirements version %d must name a profile, at least one step, or both", r.Version)
 		}
 		if r.Profile != nil {
 			if _, err := ParseComplianceProfile(r.Profile.Min); err != nil {
@@ -108,9 +114,18 @@ func (r ExecutionRequirements) Validate() error {
 			}
 		}
 	default:
-		return fmt.Errorf("requirements must use version 1 or 2")
+		return fmt.Errorf("requirements must use version 1, 2 or 3")
 	}
-	for name, step := range r.Steps {
+	for name := range r.Steps {
+		step := r.Steps[name]
+		if step.ObservedLimits != nil {
+			if r.Version != ExecutionRequirementsV3 {
+				return fmt.Errorf("observed_limits requires requirements version 3")
+			}
+			if err := step.ObservedLimits.Validate(); err != nil {
+				return fmt.Errorf("requirements for %s: %w", name, err)
+			}
+		}
 		if !name.Valid() || strings.TrimSpace(step.Command) == "" {
 			return fmt.Errorf("requirements contain an invalid step or empty command")
 		}

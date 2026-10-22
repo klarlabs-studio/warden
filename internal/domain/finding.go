@@ -176,8 +176,8 @@ type StepResult struct {
 	Workspaces []WorkspaceOutcome
 	// Observed is what a container check's workload read of its own bounds
 	// (cgroup v2 limits, routes) before its command ran; nil on the host or
-	// when the probe left no record. Like Outcome it is read only by delivery
-	// surfaces and is not part of the evidence chain or the signed record.
+	// when the probe left no record. Fresh probes enter the evidence chain and
+	// the signed record; cached and per-workspace aggregates do not.
 	Observed *ContainerObservation
 }
 

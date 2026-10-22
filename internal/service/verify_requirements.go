@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
@@ -57,6 +58,20 @@ func (s *Service) VerifyRequirementsWithProfiles(commit string, policy ExternalP
 			reason = "execution contract does not match recorded step execution"
 		} else if ok {
 			reason = requirements.Steps[step].Mismatch(contract, tree)
+		}
+		if reason == "" && requirements.Steps[step].ObservedLimits != nil {
+			observed, present := result.Record.Observations[step]
+			// Unprofiled runs omit StepOutcomes. Their fresh contract and probe
+			// still bind the execution; an explicit reuse outcome contradicts them.
+			outcome, recorded := result.Record.StepOutcomes[step]
+			switch {
+			case !present:
+				reason = "missing initial container observation"
+			case recorded && outcome.Outcome != domain.StepExecuted:
+				reason = "initial observation requires a fresh executed step"
+			default:
+				reason = strings.Join(observed.Shortfalls(*requirements.Steps[step].ObservedLimits, "none"), "; ")
+			}
 		}
 		if reason != "" {
 			result.RequirementFailures = append(result.RequirementFailures, fmt.Sprintf("%s: %s", step, reason))

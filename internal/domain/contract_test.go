@@ -67,7 +67,8 @@ func TestExecutionRequirementsVersion2(t *testing.T) {
 		{"v2 unknown profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "paranoid"}}, false},
 		{"v2 unknown profile version", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict@2"}}, false},
 		{"v2 empty profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{}}, false},
-		{"v3", ExecutionRequirements{Version: 3, Profile: &ProfileRequirement{Min: "strict"}}, false},
+		{"v3", ExecutionRequirements{Version: 3, Profile: &ProfileRequirement{Min: "strict"}}, true},
+		{"unknown version", ExecutionRequirements{Version: 4, Profile: &ProfileRequirement{Min: "strict"}}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.req.Validate(); (err == nil) != tt.ok {
@@ -85,5 +86,20 @@ func TestExecutionRequirementsVersion2(t *testing.T) {
 	}
 	if _, ok := (ExecutionRequirements{Version: 1, Steps: steps}).MinProfile(); ok {
 		t.Fatal("a version 1 file demands no profile")
+	}
+}
+
+func TestObservedLimitsRequireVersion3(t *testing.T) {
+	digest := DigestBytes([]byte("input"))
+	step := StepRequirements{Command: "true", ConfigurationDigest: digest, ContextDigest: digest, Inputs: map[string]string{}, ImageID: digest, ImageIDKind: "config", Platform: "linux/arm64", Network: "none", ObservedLimits: &ExecutionLimits{Memory: "512MiB"}}
+	for _, version := range []int{1, 2, 3} {
+		req := ExecutionRequirements{Version: version, Steps: map[StepName]StepRequirements{StepTest: step}}
+		if (req.Validate() == nil) != (version == 3) {
+			t.Fatalf("version %d did not enforce format boundary", version)
+		}
+	}
+	step.ObservedLimits.Memory = "invalid"
+	if (ExecutionRequirements{Version: 3, Steps: map[StepName]StepRequirements{StepTest: step}}).Validate() == nil {
+		t.Fatal("invalid limits accepted")
 	}
 }

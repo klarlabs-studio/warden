@@ -1240,6 +1240,7 @@ execution:
   image: local/warden-checks:dev # prebuilt or pulled outside the hook
   platform: linux/arm64          # optional; linux/amd64 also accepted
   network: none                 # bridge explicitly permits network access
+  attest_observations: false     # opt in after upgrading CI verifiers
   limits:                       # optional; each field may be left out
     memory: 4GiB                # whole MiB/GiB/TiB; swap capped at the same size
     cpus: "1.5"                 # decimal CPUs
@@ -1248,7 +1249,10 @@ execution:
 
 Configure `execution.image` to run shell checks in ephemeral Linux containers.
 `execution.limits` bounds each container check's memory, CPUs and processes;
-it is passed to the engine as a request and not yet recorded in the note (see
+it is passed to the engine as a request. `execution.attest_observations: true`
+adds initial cgroup and route measurements to the signed note, enabling protected
+CI requirements version 3 to enforce them. This defaults off: upgrade CI verifiers
+before opting in, since older verifiers reject notes with the new field (see
 [resource limits](docs/container-execution.md#resource-limits)).
 On Apple-silicon macOS, Warden discovers Apple `container` first; Docker,
 Podman, and nerdctl are also supported. `execution.runtime`
