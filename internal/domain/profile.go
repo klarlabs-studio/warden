@@ -224,6 +224,15 @@ func (p ComplianceProfile) RequiresTraceForDeclaredAgents() bool {
 	return p.def.TraceForDeclaredAgents
 }
 
+// AcceptsReuse reports whether a required step may be satisfied by an earlier
+// pass reused rather than executed in this run: a host input-cache hit or a
+// staged prediction. Strict and above require each required step executed.
+// Conformance (verify --min-profile) and the run itself both read it, so a run
+// cannot write a note its own profile's verifier refuses.
+func (p ComplianceProfile) AcceptsReuse() bool {
+	return p.def.Level < ProfileStrict
+}
+
 // RequiredSteps returns the steps the profile requires for a hook.
 func (p ComplianceProfile) RequiredSteps(h Hook) []StepName {
 	return slices.Clone(p.def.RequiredSteps[h.ConfigKey()])

@@ -6,6 +6,19 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A strict pre-push executes its required steps even on a cache hit.** A
+  repository under `profile: strict` that declared `cache:` inputs for a
+  required step run natively (`credentials`, `security-scan`, `review`)
+  could pass its pre-push on a host cache hit; the note then recorded that
+  step `cached`, and `verify --min-profile strict` refused the note in CI.
+  The gate now executes each step the run's profile requires executed, so it
+  never writes a note its own profile refuses. Required shell steps already
+  ran in a container under strict, where the cache is off; other steps, and
+  `standard`, keep their cache. Pre-commit is unchanged. `strict@1` itself
+  is unchanged: this is gate behavior, not part of the definition.
+
 ## [0.43.0] - 2026-10-22
 
 A minor release with one breaking change for agent workflows: the MCP

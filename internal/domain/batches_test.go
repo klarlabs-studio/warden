@@ -173,3 +173,45 @@ func TestResolvedPolicy_Cacheable(t *testing.T) {
 		t.Errorf("CachePaths(test) = %v", got)
 	}
 }
+
+// A step the run's profile requires executed is never cache-skipped at
+// pre-push, so the run cannot write a note recording it cached that verify
+// under the same profile refuses. Standard accepts reuse, pre-commit writes no
+// note, and a step the profile does not require keeps its cache.
+func TestResolvedPolicy_CacheableRespectsTheProfile(t *testing.T) {
+	cases := []struct {
+		name    string
+		profile string
+		hook    Hook
+		step    StepName
+		want    bool
+	}{
+		{"no profile", "", PrePush, StepTest, true},
+		{"standard accepts reuse", "standard@1", PrePush, StepTest, true},
+		{"strict required step", "strict@1", PrePush, StepTest, false},
+		{"strict required scanner", "strict@1", PrePush, StepSecurityScan, false},
+		{"strict step it does not require", "strict@1", PrePush, "docs", true},
+		{"strict at pre-commit", "strict@1", PreCommit, StepTest, true},
+		{"unreadable profile fails closed", "strict@9", PrePush, StepTest, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := ResolvedPolicy{Hook: c.hook, Cache: map[StepName][]string{c.step: {"**/*.go"}}}
+			if c.profile != "" {
+				p.Profile = &ResolvedProfile{Name: c.profile}
+			}
+			if got := p.Cacheable(c.step); got != c.want {
+				t.Errorf("Cacheable(%s) under %q at %s = %v, want %v", c.step, c.profile, c.hook, got, c.want)
+			}
+		})
+	}
+}
+
+// The verifier and the run read one predicate: strict and above refuse reuse.
+func TestComplianceProfile_AcceptsReuse(t *testing.T) {
+	for name, want := range map[string]bool{"permissive": true, "standard": true, "strict": false} {
+		if got := mustProfile(t, name).AcceptsReuse(); got != want {
+			t.Errorf("%s: AcceptsReuse() = %v, want %v", name, got, want)
+		}
+	}
+}
