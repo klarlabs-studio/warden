@@ -83,6 +83,7 @@ type RunRecord struct {
 	StepsRun   []StepName          `json:"steps_run"`
 	// Environments is signed and present only for observed container checks.
 	Environments      map[StepName]ExecutionEnvironment `json:"environments,omitempty"`
+	Observations      map[StepName]ContainerObservation `json:"observations,omitempty"`
 	Contracts         map[StepName]ExecutionContract    `json:"contracts,omitempty"`
 	MatchedRules      []string                          `json:"matched_rules"`
 	EvidenceChainRoot string                            `json:"evidence_chain_root"`

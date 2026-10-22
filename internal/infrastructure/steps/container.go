@@ -173,9 +173,9 @@ func containerProbeContext(ctx context.Context, bin string, args ...string) ([]b
 // this exact directory, including with remote engine contexts. Host secrets,
 // dependency caches, git metadata directories and engine sockets are not mounted.
 //
-// Before the command, the workload records what it observes of its own bounds
-// (see observationProbe); the returned observation is that record, read after
-// the container exits, and is nil when the probe left none.
+// Before the command, the image shell reports its initial bounds on the engine
+// output stream. Only the first framed report is accepted; subsequent command
+// output cannot replace it. This trusts the local engine and inspected image.
 func runContainer(ctx context.Context, sc application.StepContext, dir, command string) (out []byte, observed *domain.ContainerObservation, runErr error) {
 	selected := sc.Container
 	token := make([]byte, 16)
@@ -203,15 +203,29 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, nil, err
 	}
 	env := selected.Environment
-	observedFile := ".warden-observed-" + nonce
+	begin, end := "warden-observation-begin-"+nonce, "warden-observation-end-"+nonce
 	defer func() {
-		if raw, err := readContainerObservation(dir, observedFile); err == nil {
-			o := domain.ParseContainerObservation(string(raw))
-			observed = &o
-		}
-		_ = os.Remove(filepath.Join(dir, observedFile))
+		out, observed = extractObservation(out, begin, end)
 	}()
-	checked := "test \"$(cat /workspace/" + marker + ")\" = " + shellQuote(nonce) + " || { echo 'warden: worktree mount verification failed' >&2; exit 125; };\n" + observationProbe("/workspace/"+observedFile) + command
+	if onOutput := sc.OnOutput; onOutput != nil {
+		inside, finished := false, false
+		sc.OnOutput = func(line string) {
+			if !finished && line == begin {
+				inside = true
+				return
+			}
+			if inside {
+				if line == end {
+					inside, finished = false, true
+				}
+				return
+			}
+			onOutput(line)
+		}
+	}
+	checked := "test \"$(cat /workspace/" + marker + ")\" = " + shellQuote(nonce) + " || { echo 'warden: worktree mount verification failed' >&2; exit 125; };\n" +
+		"printf '%s\\n' " + shellQuote(begin) + ";\n" + observationProbe("") +
+		"printf '%s\\n' " + shellQuote(end) + ";\n" + command
 	if env.Runtime == "apple" {
 		out, runErr = runAppleContainer(ctx, sc, abs, name, checked)
 		return out, nil, runErr

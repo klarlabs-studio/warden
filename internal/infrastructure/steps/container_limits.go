@@ -85,15 +85,18 @@ func formatMilliCPUs(milli int64) string {
 // was not observed.
 //
 // It reads cgroup v2 only, from the workload's own cgroup root, and counts
-// IPv4 and non-loopback IPv6 routes for the network. A check command runs
-// after it in the same writable workspace and could overwrite the file;
-// ADR 0008 lists that residual.
+// IPv4 and non-loopback IPv6 routes for the network. Production directs this
+// report to the engine output stream before starting the configured command.
 func observationProbe(path string) string {
+	redirect := ""
+	if path != "" {
+		redirect = " > " + shellQuote(path)
+	}
 	return `{ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then echo cgroup=v2;` +
 		` for f in memory.max memory.swap.max cpu.max pids.max; do v=;` +
 		` if read -r v < "/sys/fs/cgroup/$f" || [ -n "$v" ]; then echo "$f=$v"; fi; done; fi 2>/dev/null;` +
 		routeObservationProbe("/proc/net/route", "/proc/net/ipv6_route") +
-		` } > ` + shellQuote(path) + " 2>/dev/null || true\n"
+		` }` + redirect + " 2>/dev/null || true\n"
 }
 
 // IPv6 tables include loopback and unreachable loopback routes even with

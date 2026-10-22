@@ -43,10 +43,11 @@ image) last=""; for arg in "$@"; do last="$arg"; done
 run) printf '%s\000' "$@" > "$WARDEN_TEST_CONTAINER_ARGS"
  if [ -n "${WARDEN_TEST_OBSERVED:-}" ]; then
   for a in "$@"; do
-   case "$a" in *src=*,dst=/workspace*) src=${a#*src=}; src=${src%%,dst=*} ;; esac
-   case "$a" in *.warden-observed-*) f=${a#*.warden-observed-}; f=.warden-observed-${f%%\'*} ;; esac
+   case "$a" in *warden-observation-begin-*) nonce=${a#*warden-observation-begin-}; nonce=${nonce%%\'*} ;; esac
   done
-  printf '%b' "$WARDEN_TEST_OBSERVED" > "$src/$f"
+  printf '%s\n' "warden-observation-begin-$nonce"
+  printf '%b' "$WARDEN_TEST_OBSERVED"
+  printf '%s\n' "warden-observation-end-$nonce"
  fi
  if [ "${WARDEN_TEST_CONTAINER_WAIT:-}" = yes ]; then exec sleep 30; fi
  echo container-output

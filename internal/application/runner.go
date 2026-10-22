@@ -1287,6 +1287,7 @@ func (r *Runner) buildRecord(kernel Kernel, run *domain.Run, approval domain.App
 		StepsRun:          run.Policy().Steps,
 		Environments:      run.ExecutionEnvironments(),
 		Contracts:         run.ExecutionContracts(),
+		Observations:      run.ExecutionObservations(),
 		MatchedRules:      run.Policy().MatchedRules,
 		EvidenceChainRoot: root,
 		Evidence:          entries,

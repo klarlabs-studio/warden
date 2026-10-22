@@ -99,6 +99,9 @@ func evidenceFor(res domain.StepResult) []axidomain.EvidenceRecord {
 	if res.Environment != nil && res.Reuse == nil {
 		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.environment", res.Step), Source: string(res.Step), Value: *res.Environment})
 	}
+	if res.Observed != nil && res.Environment != nil && res.Reuse == nil && res.ObservedOutcome() == domain.StepExecuted && len(res.Workspaces) == 0 {
+		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.observation", res.Step), Source: string(res.Step), Value: res.Observed.Clone()})
+	}
 	if res.Reuse != nil {
 		records = append(records, axidomain.EvidenceRecord{Kind: fmt.Sprintf("%s.reuse", res.Step), Source: string(res.Step), Value: *res.Reuse})
 	}

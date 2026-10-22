@@ -647,3 +647,25 @@ func TestLoadExecutionRequirementsVersion2(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadExecutionRequirementsObservedLimits(t *testing.T) {
+	digest := domain.DigestBytes([]byte("fixture"))
+	step := domain.StepRequirements{Command: "true", ConfigurationDigest: digest, ContextDigest: digest, Inputs: map[string]string{}, ImageID: digest, ImageIDKind: "config", Platform: "linux/arm64", Network: "none", ObservedLimits: &domain.ExecutionLimits{Memory: "512MiB", CPUs: "1", Pids: 128}}
+	for _, version := range []int{1, 2, 3} {
+		data, err := json.Marshal(domain.ExecutionRequirements{Version: version, Steps: map[domain.StepName]domain.StepRequirements{domain.StepTest: step}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := filepath.Join(t.TempDir(), "requirements.json")
+		if err := os.WriteFile(file, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		req, err := loadExecutionRequirements(file)
+		if (err == nil) != (version == 3) {
+			t.Fatalf("version %d: %v", version, err)
+		}
+		if version == 3 && (req.Steps[domain.StepTest].ObservedLimits == nil || *req.Steps[domain.StepTest].ObservedLimits != *step.ObservedLimits) {
+			t.Fatal("bounds lost while loading requirements")
+		}
+	}
+}

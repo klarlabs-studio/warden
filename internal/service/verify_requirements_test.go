@@ -52,6 +52,54 @@ func TestVerifyRequirementsTrustedContract(t *testing.T) {
 	}
 	publish()
 	verify(true)
+	// Upgrade protected policy independently: a legacy record cannot satisfy
+	// the new clause, even though its command contract remains trusted.
+	requirements.Version = domain.ExecutionRequirementsV3
+	req.ObservedLimits = &domain.ExecutionLimits{Memory: "512MiB", CPUs: "1", Pids: 128}
+	requirements.Steps[domain.StepTest] = req
+	verify(false)
+	good := domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=100000 100000\npids.max=128\nroutes=0\nroutes6=0\n")
+	for _, tc := range []struct {
+		name   string
+		mutate func(*domain.ContainerObservation)
+		pass   bool
+	}{
+		{"held", func(*domain.ContainerObservation) {}, true},
+		{"unbounded", func(o *domain.ContainerObservation) { v := int64(-1); o.MemoryBytes = &v }, false},
+		{"looser", func(o *domain.ContainerObservation) { v := int64(256); o.Pids = &v }, false},
+		{"unknown hierarchy", func(o *domain.ContainerObservation) { o.Cgroup = "" }, false},
+		{"missing ipv6", func(o *domain.ContainerObservation) { o.RoutesIPv6 = nil }, false},
+		{"ipv6 route", func(o *domain.ContainerObservation) { v := int64(1); o.RoutesIPv6 = &v }, false},
+		{"negative routes", func(o *domain.ContainerObservation) { v := int64(-1); o.Routes = &v }, false},
+		{"invalid cpu period", func(o *domain.ContainerObservation) { v := int64(0); o.CPUPeriod = &v }, false},
+		{"overflowing quota", func(o *domain.ContainerObservation) { v := int64(1<<63 - 1); o.CPUQuota = &v }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := good.Clone()
+			tc.mutate(&o)
+			record.Observations = map[domain.StepName]domain.ContainerObservation{domain.StepTest: o}
+			publish()
+			verify(tc.pass)
+		})
+	}
+	record.Observations = map[domain.StepName]domain.ContainerObservation{domain.StepTest: good}
+	record.StepOutcomes = map[domain.StepName]domain.StepObservation{domain.StepTest: {Outcome: domain.StepCached}}
+	publish()
+	verify(false)
+	record.StepOutcomes = nil
+	publish()
+	verify(true)
+	changed := record.Observations[domain.StepTest]
+	*changed.Pids = 64
+	if err := svc.Repo().WriteNote(head, record); err != nil {
+		t.Fatal(err)
+	}
+	verify(false) // the actual note artifact was modified without re-signing
+	record.Observations = nil
+	req.ObservedLimits = nil
+	requirements.Version = 1
+	requirements.Steps[domain.StepTest] = req
+	publish()
 	req.Command = "false"
 	requirements.Steps[domain.StepTest] = req
 	verify(false)

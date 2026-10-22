@@ -161,3 +161,26 @@ func TestRunner_ProfiledApprovalRecordsTheChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestRunner_WritesSignedInitialContainerObservation(t *testing.T) {
+	git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+	observation := domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nroutes=0\nroutes6=0\n")
+	kernel := &fakeKernel{results: map[domain.StepName]domain.StepResult{
+		domain.StepTest: {Step: domain.StepTest, Status: domain.StepPass, Environment: &domain.ExecutionEnvironment{Runtime: "docker"}, Observed: &observation},
+	}}
+	cfg := prePushCfg()
+	cfg.Steps = map[string][]domain.StepName{"pre_push": {domain.StepTest}}
+	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+	r.Signer = newFakeSigner(t)
+	if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+		t.Fatal(err)
+	}
+	rec := git.note // assert the note artifact, rather than just a passing run
+	if len(rec.Observations) != 1 || rec.Observations[domain.StepTest].MemoryBytes == nil || !rec.VerifySignature() {
+		t.Fatalf("note lacks signed probe: %+v", rec)
+	}
+	delete(rec.Observations, domain.StepTest)
+	if rec.VerifySignature() {
+		t.Fatal("removed probe retained a valid signature")
+	}
+}

@@ -74,3 +74,54 @@ func TestAppleEvidenceRequiresLinuxManifestIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestContainerObservationsSignedAndDetached(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	observation := ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=100000 100000\npids.max=128\nroutes=0\nroutes6=0\n")
+	run := newTestRun()
+	if err := run.RecordStep(StepResult{Step: StepTest, Status: StepPass, Environment: &ExecutionEnvironment{Runtime: "docker"}, Observed: &observation}); err != nil {
+		t.Fatal(err)
+	}
+	rec := RunRecord{CommitSHA: "tip", PublicKey: base64.StdEncoding.EncodeToString(pub), Observations: run.ExecutionObservations()}
+	payload, err := rec.SigningPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+	*observation.MemoryBytes = 1
+	if !rec.VerifySignature() {
+		t.Fatal("record aliases source observation")
+	}
+	changed := rec.Observations[StepTest]
+	*changed.MemoryBytes = 2
+	if rec.VerifySignature() {
+		t.Fatal("tampered observation accepted")
+	}
+	rec.Observations = nil
+	if rec.VerifySignature() {
+		t.Fatal("stripped observation accepted")
+	}
+	legacy, _ := (RunRecord{}).SigningPayload()
+	if strings.Contains(string(legacy), "observations") {
+		t.Fatal("legacy payload changed")
+	}
+	for _, outcome := range []StepOutcome{StepCached, StepSkipped, StepPredicted} {
+		r := newTestRun()
+		if err := r.RecordStep(StepResult{Step: StepTest, Status: StepPass, Outcome: outcome, Environment: &ExecutionEnvironment{}, Observed: &observation}); err != nil {
+			t.Fatal(err)
+		}
+		if len(r.ExecutionObservations()) != 0 {
+			t.Fatalf("%s was presented as fresh", outcome)
+		}
+	}
+}
+
+func TestObservationCannotAccompanyReuse(t *testing.T) {
+	run := newTestRun()
+	if err := run.RecordStep(StepResult{Step: StepTest, Status: StepPass, Outcome: StepExecuted, Environment: &ExecutionEnvironment{}, Observed: &ContainerObservation{}, Reuse: &ExecutionReuse{Source: "cache"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.ExecutionObservations()) != 0 {
+		t.Fatal("reuse recorded as fresh despite contradictory outcome")
+	}
+}

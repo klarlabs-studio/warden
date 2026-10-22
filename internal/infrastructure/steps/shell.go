@@ -408,8 +408,8 @@ func loadCaveat(load proc.Load) string {
 
 // reportShortfalls says, in the step's summary and live output, where what the
 // container observed falls short of the limits and network it was given. It
-// changes no verdict and writes nothing into the note: the request alone is not
-// evidence, and recording the observation is a later release's job (ADR 0008).
+// changes no local verdict. The observation, rather than this diagnostic or
+// the requested limits, is recorded in signed provenance.
 func (s ShellStep) reportShortfalls(sc application.StepContext, res *domain.StepResult, observed *domain.ContainerObservation) {
 	var o domain.ContainerObservation
 	if observed != nil {

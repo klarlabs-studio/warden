@@ -311,3 +311,20 @@ func (r *Run) StepNotes() map[StepName]OutcomeNote {
 	}
 	return out
 }
+
+// ExecutionObservations reports fresh container probes only. Values are copied
+// so pointer fields cannot mutate the record after capture.
+func (r *Run) ExecutionObservations() map[StepName]ContainerObservation {
+	var out map[StepName]ContainerObservation
+	for i := range r.results {
+		res := &r.results[i]
+		if res.Observed == nil || res.Environment == nil || res.Reuse != nil || res.ObservedOutcome() != StepExecuted || len(res.Workspaces) != 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[StepName]ContainerObservation)
+		}
+		out[res.Step] = res.Observed.Clone()
+	}
+	return out
+}

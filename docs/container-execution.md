@@ -81,14 +81,30 @@ say so, for example:
 warden: test container bounds not observed as requested: memory: observed unbounded; pids: observed unbounded
 ```
 
-A shortfall does not change the verdict, and this release records neither
-the limits nor the observation in the provenance note, so a note says
-nothing about them either way. Recording the observation is planned for a
-later release, which will build a `strict@2` profile on it. The probe uses
-only shell builtins and writes one file, `.warden-observed-<nonce>`, to the
-workspace for the length of the check. Warden accepts only a regular file,
-rejects symlinks and special files, and limits the observation to 4 KiB.
-Missing evidence for either route family is reported as unobserved.
+A shortfall does not change the local verdict. Fresh container checks record
+initial observations in the signed provenance note and evidence chain. Missing
+values stay absent; requested flags never substitute for a measurement. The
+image shell emits a bounded report on the engine output stream before running
+the configured command. Later command output cannot replace that first report.
+The host engine and inspected image remain trusted. This describes initial
+cgroup and route state, not continuous monitoring or a complete network policy.
+No workspace probe file is used.
+
+Protected CI requirements can enforce these observations with `"version": 3`.
+Add `"observed_limits": {"memory": "512MiB", "cpus": "1", "pids": 128}`
+to an existing step requirement. Each specified resource is an upper bound;
+memory also requires zero swap beyond that bound. Both route families must be
+observed with no non-loopback routes. An empty `"observed_limits": {}` requires
+only that route evidence. Missing, unbounded, looser, cached or malformed evidence
+refuses verification; CI must run its checks. All existing command, image,
+configuration, tree and trusted-key requirements still apply. GitHub and GitLab
+integrations accept the same requirements file without extra scripting.
+
+Upgrade CI verifiers **before developer machines**: older pinned verifiers drop
+the new signed `observations` field and reject the signature. Notes without that
+field retain their prior signing payload, but cannot satisfy `observed_limits`.
+Older verifiers reject version 3 requirements too. The `strict@1` definition is
+unchanged; `strict@2` remains a separate rollout.
 
 Every machine and CI runner that reads the configuration needs this warden
 release or later before a repository adds `execution.limits`: an older warden
