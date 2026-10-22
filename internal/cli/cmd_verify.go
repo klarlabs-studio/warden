@@ -617,32 +617,39 @@ func externalPolicy(allow, require bool) (service.ExternalPolicy, error) {
 // loadExecutionRequirements bounds policy input and rejects unknown fields and trailing JSON.
 func loadExecutionRequirements(path string) (domain.ExecutionRequirements, error) {
 	var result domain.ExecutionRequirements
+	if err := loadProtectedJSON(path, &result); err != nil {
+		return result, err
+	}
+	return result, result.Validate()
+}
+
+func loadProtectedJSON(path string, result any) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return result, err
+		return err
 	}
 	defer func() { _ = f.Close() }()
 	const limit = 1 << 20
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
-		return result, err
+		return err
 	}
 	if len(data) > limit {
-		return result, fmt.Errorf("file exceeds 1 MiB")
+		return fmt.Errorf("file exceeds 1 MiB")
 	}
 	if err := rejectDuplicateJSONKeys(json.NewDecoder(strings.NewReader(string(data)))); err != nil {
-		return result, err
+		return err
 	}
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&result); err != nil {
-		return result, err
+	if err := dec.Decode(result); err != nil {
+		return err
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
-		return result, fmt.Errorf("expected a single JSON object")
+		return fmt.Errorf("expected a single JSON object")
 	}
-	return result, result.Validate()
+	return nil
 }
 
 // Reject ambiguous policy objects rather than accepting the last duplicate key.

@@ -100,6 +100,7 @@ Usage:
                                               (preview) list the monorepo's workspaces at HEAD, or
                                               the ones a change from --base affects, with reasons
   warden doctor [--branch b] [--ci]           audit provenance since adoption (--ci: exit 3 on drift)
+  warden ci plan --policy f --key k [--json] plan CI job reuse from protected contracts
   warden ci [--branch b] [--wait]             report CI status for the branch's PR
   warden verify [--commit c] [--key fp] [--quiet|--json]  exit 0 if the commit is warden-validated (CI skip)
   warden verify --range base..head [--require-signed] [--key fp] [--json]  gate every commit in a range

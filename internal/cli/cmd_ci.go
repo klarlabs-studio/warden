@@ -15,6 +15,9 @@ import (
 // state or the timeout elapses — the on-demand counterpart to the async CI
 // polling the pipeline does not perform itself.
 func cmdCI(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "plan" {
+		return cmdCIPlan(args[1:], stdout, stderr)
+	}
 	fs := flag.NewFlagSet("ci", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	branch := fs.String("branch", "", "branch to check (default: current)")

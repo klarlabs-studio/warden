@@ -8,6 +8,14 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **Protected CI job plans.** `warden ci plan --policy jobs.json --key fingerprint`
+  maps named jobs to existing execution requirements, producing independent
+  run/skip decisions, reasons, a resolved commit and verification timings. JSON
+  includes deterministic run/reusable job lists. Explicit trusted keys are
+  required; missing or mismatching evidence keeps jobs running. Planning checks
+  one verified provenance snapshot and publishes no attestation. Contracts with
+  explicit cached or skipped outcomes are refused by requirements verification.
+
 - **`strict@2`: observed initial container bounds.** Requires explicit memory, CPU
   and process limits and signed observations. Local shell checks fail on missing,
   unbounded or looser initial bounds, swap, or unknown/non-loopback routes.
