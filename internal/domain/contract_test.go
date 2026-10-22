@@ -65,7 +65,7 @@ func TestExecutionRequirementsVersion2(t *testing.T) {
 		{"v2 steps only", ExecutionRequirements{Version: 2, Steps: steps}, true},
 		{"v2 empty", ExecutionRequirements{Version: 2}, false},
 		{"v2 unknown profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "paranoid"}}, false},
-		{"v2 unknown profile version", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict@2"}}, false},
+		{"v2 unknown profile version", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{Min: "strict@3"}}, false},
 		{"v2 empty profile", ExecutionRequirements{Version: 2, Profile: &ProfileRequirement{}}, false},
 		{"v3", ExecutionRequirements{Version: 3, Profile: &ProfileRequirement{Min: "strict"}}, true},
 		{"unknown version", ExecutionRequirements{Version: 4, Profile: &ProfileRequirement{Min: "strict"}}, false},

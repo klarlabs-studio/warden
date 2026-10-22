@@ -8,6 +8,14 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **`strict@2`: observed initial container bounds.** Requires explicit memory, CPU
+  and process limits and signed observations. Local shell checks fail on missing,
+  unbounded or looser initial bounds, swap, or unknown/non-loopback routes.
+  Protected profile verification checks fresh signed finite bounds and route
+  evidence; version 3 requirements enforce specific numeric ceilings. Workspace
+  aggregates are refused until they retain individual measurements. Bare `strict`
+  and all version 1 digests stay unchanged. Upgrade readers before adoption.
+
 - **Signed initial container observations and requirements version 3.** Fresh
   probes enter the evidence chain; `execution.attest_observations: true` opts
   into the structured signed-note field after readers upgrade. It defaults off

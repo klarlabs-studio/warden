@@ -133,6 +133,8 @@ type ContainerExecution struct {
 	// value requests none. Selection refuses a runtime that cannot apply
 	// them, so a request is never dropped silently.
 	Limits domain.ExecutionLimits
+	// RequireObservedBounds fails a check whose initial limits were not observed.
+	RequireObservedBounds bool
 }
 
 // PredictionCache holds recent signed local successes for exact staged inputs.

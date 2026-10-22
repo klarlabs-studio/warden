@@ -90,6 +90,9 @@ func Conformance(minimum domain.ComplianceProfile, res VerifyResult) Conformance
 	if minimum.RequiresContainer() || minimum.RequiresNetworkNone() {
 		checkEnvironments(&rep, minimum, rec)
 	}
+	if minimum.RequiresObservedBounds() {
+		checkObservedContainerBounds(&rep, minimum, rec)
+	}
 	checkAgentBoundaries(&rep, minimum, rec)
 	if minimum.RequiresTraceForDeclaredAgents() {
 		checkAgentTrace(&rep, rec)
@@ -303,6 +306,21 @@ func applyConformance(res *VerifyResult, mins []domain.ComplianceProfile) {
 		for _, f := range rep.Failures {
 			res.RequirementFailures = append(res.RequirementFailures, "profile "+rep.Min+": "+f)
 			res.Validated = false
+		}
+	}
+}
+
+func checkObservedContainerBounds(rep *ConformanceReport, minimum domain.ComplianceProfile, rec *domain.RunRecord) {
+	const clause = "required shell steps observed initial finite resource bounds, zero swap and no non-loopback routes"
+	rep.Checked = append(rep.Checked, clause)
+	for _, step := range minimum.RequiredShellSteps(domain.PrePush) {
+		observed, ok := rec.Observations[step]
+		if !ok {
+			rep.fail(clause, fmt.Sprintf("%s has no initial observation", step))
+			continue
+		}
+		for _, shortfall := range observed.BoundedShortfalls() {
+			rep.fail(clause, string(step)+": "+shortfall)
 		}
 	}
 }

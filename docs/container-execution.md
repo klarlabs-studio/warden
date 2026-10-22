@@ -117,11 +117,53 @@ off, enable the opt-in, then require version 3 evidence in protected CI. Until
 then, CI must execute checks for notes without measurements. Older binaries
 reject the opt-in configuration key, so upgrade all config readers before adding it.
 Older verifiers reject version 3 requirements too. The `strict@1` definition is
-unchanged; `strict@2` remains a separate rollout.
+unchanged. `strict@2` opts into the measurements as described below.
 
 Every machine and CI runner that reads the configuration needs this warden
 release or later before a repository adds `execution.limits`: an older warden
 rejects the key and blocks the commit.
+
+## Strict version 2
+
+Select `profile: strict@2` explicitly after upgrading CI verifiers and all
+configuration readers. Bare `strict` continues to mean `strict@1`; its definition
+and digest do not change. Version 2 retains every version 1 floor and adds:
+
+```yaml
+profile: strict@2
+execution:
+  image: local/warden-checks:dev
+  limits:
+    memory: 4GiB
+    cpus: "2"
+    pids: 1024
+```
+
+These limits are examples; choose positive limits appropriate to the checks.
+The profile enables `execution.attest_observations` and refuses an explicit
+opt-out or a missing memory, CPU or process limit. Every container shell check
+fails locally if its initial observation is missing, unbounded, or looser than
+requested, if swap is enabled, or if either route family is unknown or has
+non-loopback routes. The check's configured command still runs; its successful
+exit cannot override an inadequate observation. Cached passes do not qualify.
+Workspace aggregates (`per_workspace`) are refused because they do not retain
+individual observations yet. Native and agent steps retain their existing
+boundaries; this adds no host agent resource confinement.
+
+In protected CI, `verify --min-profile strict@2` checks fresh signed observations
+for every required shell step: positive finite cgroup v2 memory, CPU quota/period
+and process maxima, zero additional swap, and both route families without
+non-loopback routes. This establishes initial bounded state under the trusted
+engine and inspected image. It does not establish continuous enforcement or
+reconstruct the repository's requested numeric ceilings. Set `observed_limits`
+in protected version 3 requirements to enforce specific numeric ceilings.
+Missing observations fail verification; no clause is deferred.
+
+Apple `container` currently cannot apply a process limit, so it cannot satisfy
+this profile. Auto discovery tries the next compatible engine; an explicit Apple
+selection fails. Cgroup v1 or engines unable to expose the required measurements
+fail too. Upgrade CI readers first, adopt the profile locally, then raise the CI
+minimum only after compliant notes exist.
 
 ## Apple container
 

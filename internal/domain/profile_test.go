@@ -36,12 +36,13 @@ func TestComplianceProfile_DigestsArePinned(t *testing.T) {
 		"permissive@1": goldenPermissive1,
 		"standard@1":   goldenStandard1,
 		"strict@1":     goldenStrict1,
+		"strict@2":     "sha256:9ed9e755f8c271f4ddf455069ea9f8cb75b99e806df0e9bd22c8eb2b3774f618",
 	} {
 		if got := mustProfile(t, name).Digest(); got != want {
 			t.Errorf("%s digest = %s, want %s: a published definition changed", name, got, want)
 		}
 	}
-	if len(builtinProfiles) != 3 {
+	if len(builtinProfiles) != 4 {
 		t.Errorf("a new profile version needs its own pinned digest here; have %d definitions", len(builtinProfiles))
 	}
 }
@@ -66,12 +67,12 @@ func TestParseComplianceProfile(t *testing.T) {
 	if mustProfile(t, "strict").Digest() != mustProfile(t, "strict@1").Digest() {
 		t.Error("bare strict must mean strict@1")
 	}
-	for _, bad := range []string{"", "Strict", "paranoid", "strict@2", "strict@0", "strict@", "strict@01", "strict@x", "@1", "strict@1@1"} {
+	for _, bad := range []string{"", "Strict", "paranoid", "strict@3", "strict@0", "strict@", "strict@01", "strict@x", "@1", "strict@1@1"} {
 		if _, err := ParseComplianceProfile(bad); err == nil {
 			t.Errorf("%q must be rejected", bad)
 		}
 	}
-	_, err := ParseComplianceProfile("strict@2")
+	_, err := ParseComplianceProfile("strict@3")
 	if err == nil || !strings.Contains(err.Error(), "newer warden") {
 		t.Errorf("an unknown version must say it needs a newer warden: %v", err)
 	}
@@ -379,7 +380,7 @@ func TestConfigValidate_Profile(t *testing.T) {
 			t.Errorf("profile %q must validate: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"paranoid", "strict@2"} {
+	for _, bad := range []string{"paranoid", "strict@3"} {
 		if err := (Config{Profile: bad}).Validate(); err == nil {
 			t.Errorf("profile %q must be a load error", bad)
 		}
@@ -444,9 +445,34 @@ func TestComplianceProfileVerifierAccessors(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		version int
-	}{{"strict", 2}, {"paranoid", 1}, {"", 1}, {"strict", 0}} {
+	}{{"strict", 3}, {"paranoid", 1}, {"", 1}, {"strict", 0}} {
 		if _, ok := LookupComplianceProfile(c.name, c.version); ok {
 			t.Errorf("lookup of %s@%d must fail", c.name, c.version)
 		}
+	}
+}
+
+func TestStrictV2Floors(t *testing.T) {
+	p := mustProfile(t, "strict@2")
+	cfg := p.Apply(compliant())
+	if !p.RequiresObservedBounds() || !mustProfile(t, "strict").Lowers(p) {
+		t.Fatal("version ordering or bounds missing")
+	}
+	if got := p.Check(cfg); len(got) != 3 {
+		t.Fatalf("missing limits: %v", got)
+	}
+	cfg.Execution.Limits = &ExecutionLimits{Memory: "512MiB", CPUs: "1.5", Pids: 128}
+	if got := p.Check(cfg); len(got) != 0 {
+		t.Fatalf("valid config: %v", got)
+	}
+	cfg.PerWorkspace = map[string]PerWorkspaceStep{"test": {}}
+	if got := p.Check(cfg); len(got) != 1 || got[0].Field != "per_workspace" {
+		t.Fatalf("workspace aggregate accepted: %v", got)
+	}
+	cfg.PerWorkspace = nil
+	disabled := false
+	cfg.Execution.AttestObservations = &disabled
+	if got := p.Check(cfg); len(got) != 1 || got[0].Field != "execution.attest_observations" {
+		t.Fatalf("opt-out accepted: %v", got)
 	}
 }

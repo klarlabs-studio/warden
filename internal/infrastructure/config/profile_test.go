@@ -190,7 +190,7 @@ func TestLoad_FloorErrorListsEveryViolation(t *testing.T) {
 }
 
 func TestLoad_UnknownProfileIsALoadError(t *testing.T) {
-	for _, v := range []string{"paranoid", "strict@2", "Strict"} {
+	for _, v := range []string{"paranoid", "strict@3", "Strict"} {
 		dir := writeChain(t, map[string]string{FileName: "profile: " + v + "\n"})
 		if _, err := NewRepository(dir).Load(); err == nil {
 			t.Errorf("profile %q must fail the load", v)
@@ -287,5 +287,35 @@ func TestParse_UnknownFieldHintsAtANewerRelease(t *testing.T) {
 	// A type error that is not an unknown key gets no such hint.
 	if _, err := Parse([]byte("notify: [1]\n")); err == nil || strings.Contains(err.Error(), "newer warden") {
 		t.Errorf("only an unknown key earns the hint: %v", err)
+	}
+}
+
+func TestLoadStrictV2AndInheritedOptOut(t *testing.T) {
+	base := strings.Replace(strictBase, "profile: strict", "profile: strict@2", 1)
+	base = strings.Replace(base, `image: "golang:1.26"`, `image: "golang:1.26", limits: {memory: 512MiB, cpus: "1.5", pids: 128}`, 1)
+	for _, optOut := range []bool{false, true} {
+		child := "extends: base.yaml\n"
+		if optOut {
+			child += "execution: {attest_observations: false}\n"
+		}
+		dir := writeChain(t, map[string]string{"base.yaml": base, FileName: child})
+		a, ae, b, be := loadBoth(t, dir)
+		for _, result := range []struct {
+			cfg domain.Config
+			err error
+		}{{a, ae}, {b, be}} {
+			if optOut {
+				if result.err == nil || !strings.Contains(result.err.Error(), "execution.attest_observations") {
+					t.Fatalf("opt-out accepted: %v", result.err)
+				}
+				continue
+			}
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			if result.cfg.Profile != "strict@2" || result.cfg.Execution.AttestObservations == nil || !*result.cfg.Execution.AttestObservations {
+				t.Fatalf("lost strict@2: %+v", result.cfg)
+			}
+		}
 	}
 }

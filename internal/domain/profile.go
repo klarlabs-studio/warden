@@ -105,6 +105,8 @@ type profileDefinition struct {
 	// Trace was notarized into the record. The absence of a declaration
 	// relaxes nothing.
 	TraceForDeclaredAgents bool `json:"trace_for_declared_agents,omitempty"`
+	// ObservedBounds requires initial container measurements and bounded resources.
+	ObservedBounds bool `json:"observed_bounds,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -147,6 +149,28 @@ var builtinProfiles = map[string]profileDefinition{
 		BundledAgentsOnly:      true,
 		TraceForDeclaredAgents: true,
 	},
+	"strict@2": {
+		Name: "strict", Version: 2, Level: ProfileStrict,
+		ObservedBounds: true,
+		RequiredSteps: map[string][]StepName{
+			PrePush.ConfigKey():   {StepCredentials, StepLint, StepTest, StepSecurityScan, StepReview},
+			PreCommit.ConfigKey(): {StepCredentials, StepLint},
+		},
+		NoSkipRequired:         true,
+		RequireCommands:        true,
+		ContainerExecution:     true,
+		NetworkNone:            true,
+		NoAgentWrites:          true,
+		AgentTimeout:           DefaultAgentTimeout,
+		AgentTimeoutRequired:   true,
+		SigningRequired:        true,
+		NoAgentSurfaceApproval: true,
+		RequireAgentExecution:  true,
+		IsolateAgents:          true,
+		AgentEnvAllowlist:      true,
+		BundledAgentsOnly:      true,
+		TraceForDeclaredAgents: true,
+	},
 }
 
 // ProfileNames lists the profile levels in order, for messages and docs.
@@ -170,7 +194,7 @@ func ParseComplianceProfile(s string) (ComplianceProfile, error) {
 		if !slices.Contains(ProfileNames(), name) {
 			return ComplianceProfile{}, fmt.Errorf("unknown profile %q: known profiles are %s", s, strings.Join(ProfileNames(), ", "))
 		}
-		return ComplianceProfile{}, fmt.Errorf("unknown profile version %q: this warden knows %s@1; a later version needs a newer warden", s, name)
+		return ComplianceProfile{}, fmt.Errorf("unknown profile version %q: a later version needs a newer warden", s)
 	}
 	return ComplianceProfile{def: def}, nil
 }
@@ -249,6 +273,10 @@ func (p ComplianceProfile) RequiredSteps(h Hook) []StepName {
 // profile refuses a config that lacks them rather than inserting them.
 func (p ComplianceProfile) Base() Config {
 	var c Config
+	if p.def.ObservedBounds {
+		enabled := true
+		c.Execution.AttestObservations = &enabled
+	}
 	c.Profile = p.String()
 	if p.def.SigningRequired {
 		c.Signing.Required = true
@@ -325,12 +353,16 @@ const (
 	FloorAgentTimeout    = "agent-timeout"
 	FloorSigningRequired = "signing-required"
 	FloorBundledAgents   = "bundled-agents"
+	FloorObservedBounds  = "observed-container-bounds"
 )
 
 // Floors lists the floors this profile checks at load, in a fixed order.
 func (p ComplianceProfile) Floors() []ProfileFloor {
 	var out []ProfileFloor
 	d := p.def
+	if d.ObservedBounds {
+		out = append(out, ProfileFloor{FloorObservedBounds, "signed initial observations enabled and explicit memory, CPU and process limits set"})
+	}
 	if len(d.RequiredSteps) > 0 {
 		out = append(out, ProfileFloor{FloorRequiredSteps, "required steps are listed: pre_push " +
 			JoinSteps(d.RequiredSteps[PrePush.ConfigKey()]) + "; pre_commit " + JoinSteps(d.RequiredSteps[PreCommit.ConfigKey()])})
@@ -389,6 +421,8 @@ func (p ComplianceProfile) FloorStatus(cfg Config) []ProfileFloorStatus {
 
 func (p ComplianceProfile) checkFloor(id string, cfg Config) []FloorViolation {
 	switch id {
+	case FloorObservedBounds:
+		return checkObservedBounds(cfg)
 	case FloorRequiredSteps:
 		return p.checkRequiredSteps(cfg)
 	case FloorNoSkipRequired:
@@ -725,3 +759,34 @@ func (p ComplianceProfile) RequiresContainer() bool { return p.def.ContainerExec
 // RequiresNetworkNone reports whether the profile requires shell checks to run
 // with network none.
 func (p ComplianceProfile) RequiresNetworkNone() bool { return p.def.NetworkNone }
+
+// RequiresObservedBounds reports whether initial bounded-resource and route
+// evidence is required, in addition to the recorded execution environment.
+func (p ComplianceProfile) RequiresObservedBounds() bool { return p.def.ObservedBounds }
+
+func checkObservedBounds(cfg Config) []FloorViolation {
+	var out []FloorViolation
+	if len(cfg.PerWorkspace) > 0 {
+		out = append(out, FloorViolation{Floor: FloorObservedBounds, Field: "per_workspace", Message: "initial observations are not available for workspace aggregates; use full-repository commands"})
+	}
+	if cfg.Execution.AttestObservations == nil || !*cfg.Execution.AttestObservations {
+		out = append(out, FloorViolation{Floor: FloorObservedBounds, Field: "execution.attest_observations", Message: "must be true"})
+	}
+	var limits ExecutionLimits
+	if cfg.Execution.Limits != nil {
+		limits = *cfg.Execution.Limits
+	}
+	memory, memoryErr := limits.MemoryMiB()
+	cpus, cpuErr := limits.MilliCPUs()
+	for _, v := range []struct {
+		field   string
+		missing bool
+	}{
+		{"memory", memoryErr != nil || memory <= 0}, {"cpus", cpuErr != nil || cpus <= 0}, {"pids", limits.Pids <= 0},
+	} {
+		if v.missing {
+			out = append(out, FloorViolation{Floor: FloorObservedBounds, Field: "execution.limits." + v.field, Message: "must specify a valid positive limit"})
+		}
+	}
+	return out
+}

@@ -108,6 +108,7 @@ func TestContainerLimitsReachTheCgroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	selected.RequireObservedBounds = true
 	dir := t.TempDir()
 	sc := application.StepContext{WorktreeDir: dir, Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": `cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/pids.max > observed-limits`}}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -126,7 +127,7 @@ func TestContainerLimitsReachTheCgroup(t *testing.T) {
 	}
 	// warden's own probe saw the same bounds, and the network none it ran in.
 	res, err := NewShellStep(domain.StepTest, "test").Run(ctx, application.StepContext{WorktreeDir: t.TempDir(), Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": "true"}})
-	if err != nil || res.Observed == nil {
+	if err != nil || res.Status != domain.StepPass || res.Observed == nil {
 		t.Fatalf("no observation from a real engine: %+v %v", res, err)
 	}
 	if short := res.Observed.Shortfalls(selected.Limits, "none"); len(short) != 0 {
@@ -176,6 +177,39 @@ func TestShellContainerReportsObservedShortfalls(t *testing.T) {
 			}
 			if entries, _ := os.ReadDir(worktree); len(entries) != 0 {
 				t.Errorf("probe files left in the worktree: %v", entries)
+			}
+		})
+	}
+}
+
+func TestShellStrictObservedBoundsRejectsMissingAndLooserEvidence(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	fakeContainerEngine(t, dir, "docker", "0", testImageJSON)
+	selected, err := ResolveContainer(domain.ExecutionConfig{Runtime: "docker", Image: "checks:dev", Limits: &domain.ExecutionLimits{Memory: "512MiB", CPUs: "1.5", Pids: 128}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected.RequireObservedBounds = true
+	valid := `cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=150000 100000\npids.max=128\nroutes=0\nroutes6=0\n`
+	for _, tc := range []struct {
+		name, raw string
+		want      domain.StepStatus
+	}{
+		{"held", valid, domain.StepPass}, {"missing", "", domain.StepFail},
+		{"looser", strings.Replace(valid, "536870912", "1073741824", 1), domain.StepFail},
+		{"unbounded", strings.Replace(valid, "128", "max", 1), domain.StepFail},
+		{"routed", strings.Replace(valid, "routes6=0", "routes6=1", 1), domain.StepFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WARDEN_TEST_OBSERVED", tc.raw)
+			sc := application.StepContext{WorktreeDir: t.TempDir(), Hook: domain.PrePush, Container: selected, Commands: map[string]string{"test": "true"}}
+			res, err := NewShellStep(domain.StepTest, "test").Run(context.Background(), sc)
+			if err != nil || res.Status != tc.want {
+				t.Fatalf("result=%+v err=%v", res, err)
+			}
+			if tc.want == domain.StepFail && res.Contract != nil {
+				t.Fatal("failed observation created reusable success contract")
 			}
 		})
 	}

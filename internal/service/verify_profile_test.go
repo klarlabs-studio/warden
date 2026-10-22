@@ -282,9 +282,9 @@ func TestConformanceAgainstSignedRecords(t *testing.T) {
 		{
 			name: "unknown version fails closed", min: "permissive",
 			mutate: func(r *domain.RunRecord) {
-				r.Profile = &domain.ProfileRef{Name: "strict", Version: 2, Digest: r.Profile.Digest}
+				r.Profile = &domain.ProfileRef{Name: "strict", Version: 3, Digest: r.Profile.Digest}
 			},
-			wantFail: "strict@2 is not a profile this warden knows",
+			wantFail: "strict@3 is not a profile this warden knows",
 		},
 		{
 			name: "below the minimum rank fails", min: "strict",
@@ -408,5 +408,73 @@ func TestConformanceChecksEveryStrictClause(t *testing.T) {
 	external := Conformance(mustProfile(t, "permissive"), VerifyResult{Validated: true, Trusted: true, External: true, Record: &rec})
 	if external.OK() {
 		t.Fatal("an external attestation must not conform")
+	}
+}
+
+func TestStrictV2AgainstSignedNotes(t *testing.T) {
+	svc, err := New(initRepo(t), "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	p := mustProfile(t, "strict@2")
+	for _, scenario := range []string{"valid", "missing", "unbounded", "routes", "cached", "old profile", "tampered", "wrong commit", "untrusted"} {
+		t.Run(scenario, func(t *testing.T) {
+			rec := strictConformingRecord(t, head)
+			ref := domain.NewProfileRef(p)
+			rec.Profile = &ref
+			rec.PublicKey = base64.StdEncoding.EncodeToString(pub)
+			rec.Observations = map[domain.StepName]domain.ContainerObservation{}
+			for _, s := range p.RequiredShellSteps(domain.PrePush) {
+				rec.Observations[s] = domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=150000 100000\npids.max=128\nroutes=0\nroutes6=0\n")
+			}
+			switch scenario {
+			case "missing":
+				delete(rec.Observations, domain.StepTest)
+			case "unbounded":
+				v := int64(-1)
+				o := rec.Observations[domain.StepTest]
+				o.Pids = &v
+				rec.Observations[domain.StepTest] = o
+			case "routes":
+				v := int64(1)
+				o := rec.Observations[domain.StepTest]
+				o.RoutesIPv6 = &v
+				rec.Observations[domain.StepTest] = o
+			case "cached":
+				rec.StepOutcomes[domain.StepTest] = domain.StepObservation{Outcome: domain.StepCached}
+			case "old profile":
+				old := domain.NewProfileRef(mustProfile(t, "strict"))
+				rec.Profile = &old
+			case "wrong commit":
+				rec.CommitSHA = "another-commit"
+			}
+			payload, err := rec.SigningPayload()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+			if scenario == "tampered" {
+				delete(rec.Observations, domain.StepTest)
+			}
+			if err := svc.Repo().WriteNote(head, rec); err != nil {
+				t.Fatal(err)
+			}
+			key := rec.SignerFingerprint()
+			if scenario == "untrusted" {
+				key = "untrusted-key"
+			}
+			res, err := svc.VerifyMinProfile(head, ExternalReject, []domain.ComplianceProfile{p}, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Validated != (scenario == "valid") {
+				t.Fatalf("validated=%v failures=%v", res.Validated, res.RequirementFailures)
+			}
+		})
 	}
 }

@@ -43,9 +43,15 @@ There are three levels, in order: `permissive < standard < strict`.
 | `strict` | Agents commit autonomously, or the repository is regulated: checks must run in a network-less container and agents may not keep writes. |
 
 A bare name means version 1 forever: `strict` is `strict@1`, and you may write
-either. A later, tighter definition will ship as `strict@2`, and you adopt it by
-changing the line. An unknown name or version (`strict@2` on this release, or a
-typo) is a load error, never a fallback to something weaker.
+either. `strict@2` adds observed initial container bounds; adopt it explicitly
+only after upgrading CI readers and all developer binaries to a release that
+supports it. It requires explicit memory, CPU and process limits and signed
+initial measurements, and refuses workspace aggregates. CI checks finite bounds;
+protected version 3 requirements enforce numeric ceilings. See
+[strict version 2](container-execution.md#strict-version-2) for the rollout,
+engine compatibility, and exact claim. The tables below describe version 1.
+An unknown name or version (such as `strict@3`) is a load error, never a fallback
+to something weaker.
 
 ## What each level does in this release
 
