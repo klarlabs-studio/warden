@@ -1532,3 +1532,6 @@ is in the [CHANGELOG](CHANGELOG.md).
 MIT © Felix Geelhaar
 
 For strict CI reuse, see [execution contracts](docs/execution-contracts.md): require trusted, commit-bound container observations matching protected consumer policy.
+For named job decisions, the [CI job planner](docs/ci-job-contracts.md) includes a
+GitHub `warden-plan` action and opt-in GitLab planning with protected policy and
+per-job consumers. Invalid or unavailable plans authorize no reuse.

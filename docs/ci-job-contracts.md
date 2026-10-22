@@ -127,5 +127,99 @@ Supply the full candidate commit SHA, and keep the ordinary CI command under
 protected control too. A job absent from policy remains a CI obligation.
 The same plan can drive a matrix, provided a protected inventory supplies the
 complete job set and every unrecognized or missing decision defaults to run.
-The existing GitHub verification action and GitLab component remain compatible;
-this increment supplies a CLI planner, not new automatic forge wiring.
+The existing verification action and default GitLab verification mode remain
+compatible.
+
+## GitHub Actions
+
+The composite action `.github/actions/warden-plan` installs a released binary
+with the shared checksum-verifying installer. Pin the action to a reviewed full
+commit SHA and select a Warden release containing `ci plan` (after v0.43.0).
+Older binaries or invalid output disable reuse. The action needs Bash, Git, jq
+and realpath on the runner. Installation failures fail the planner job.
+
+Keep the workflow, action reference, trusted key and policy source protected.
+Do not execute workflow code from an untrusted pull request or use
+`pull_request_target` to run candidate commands with secrets. Provision the
+policy outside the candidate checkout, for example through reviewed runner
+configuration at `/protected/ci-jobs.json`.
+
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      valid: ${{ steps.warden.outputs.plan-valid }}
+      reusable: ${{ steps.warden.outputs.reusable-jobs }}
+      commit: ${{ steps.warden.outputs.commit }}
+    steps:
+      - uses: actions/checkout@<reviewed-full-commit-sha>
+      - id: warden
+        uses: klarlabs-studio/warden/.github/actions/warden-plan@<reviewed-full-commit-sha>
+        with:
+          policy: /protected/ci-jobs.json
+          key: ${{ vars.WARDEN_TRUSTED_KEYS }}
+          commit: ${{ github.sha }}
+          warden-version: <release-containing-ci-plan>
+  unit-tests:
+    needs: plan
+    if: >-
+      ${{ always() && (needs.plan.result != 'success' ||
+          needs.plan.outputs.valid != 'true' ||
+          needs.plan.outputs.commit != github.sha ||
+          !contains(fromJSON(needs.plan.outputs.reusable || '[]'), 'unit-tests')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<reviewed-full-commit-sha>
+      - run: go test ./...
+```
+
+Every job needs its own explicit membership test. Keep always-run jobs
+unconditional. Do not build the entire required job inventory from `run-jobs`:
+that list is unknown when planning fails. Required status checks may need an
+always-running aggregate job when conditional jobs are used.
+
+Outputs are `plan-valid`, `reusable-jobs`, `run-jobs`, `commit` and
+`verification-ms`. The summary reports measured verification overhead and
+eligibility counts; it does not measure actual skipped jobs or saved CI time.
+
+## GitLab CI
+
+The existing component opts into planning with `job-policy`. It requires
+`on-unverified: run-checks` and cannot combine planning with the global
+requirements/profile inputs. The default verification mode is unchanged.
+Select a reviewed component revision and a Warden release containing `ci plan`;
+the existing v0.43.0 default cannot produce plans and safely enables no reuse.
+
+Provide policy through a protected File-type CI/CD variable outside the
+candidate checkout. Ensure untrusted pipelines cannot replace policy, keys,
+component revision or downstream job scripts. The runtime needs jq and realpath
+in addition to the component's existing dependencies.
+
+```yaml
+include:
+  - component: <trusted-component-location>@<reviewed-revision>
+    inputs:
+      key: '$WARDEN_TRUSTED_KEYS'
+      job-policy: '$WARDEN_JOB_POLICY'
+      warden-version: <release-containing-ci-plan>
+      on-unverified: run-checks
+
+unit-tests:
+  needs:
+    - job: warden-verify
+      artifacts: true
+  script:
+    - !reference [.warden-planned-job, before_script]
+    - if warden_job_reusable unit-tests; then exit 0; fi
+    - go test ./...
+```
+
+The producer writes `warden-plan.json` only after validating a complete plan.
+Planning never sets global `WARDEN_VALIDATED=true`. The predicate requires an
+explicit literal job name, a matching checkout SHA and an untracked regular
+artifact file. Missing, malformed, stale or unsupported plans keep checks
+running. Download the artifact only from the trusted producer through `needs`;
+a candidate-supplied artifact is not a trusted plan. The helper exits the job
+script early; GitLab still schedules that job, so this avoids its checks rather
+than claiming to eliminate runner startup or billed minutes.
