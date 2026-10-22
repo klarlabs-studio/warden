@@ -71,7 +71,7 @@ spec:
       description: >-
         warden release to install (0.29.0 or newer: it must publish a cosign
         bundle for checksums.txt). An exact version; "latest" is not accepted.
-      default: '0.42.0'
+      default: '0.43.0'
       regex: '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
     on-unverified:
       description: >-
