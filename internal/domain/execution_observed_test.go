@@ -76,3 +76,43 @@ func TestContainerObservationRequiresBothRouteFamilies(t *testing.T) {
 		t.Fatalf("isolated: %q", got)
 	}
 }
+
+func TestBoundedObservationsFailClosed(t *testing.T) {
+	valid := ParseContainerObservation(observedLimited)
+	if short := valid.BoundedShortfalls(); len(short) != 0 {
+		t.Fatal(short)
+	}
+	for _, field := range []string{"memory", "pids", "quota", "period", "swap", "routes", "routes6"} {
+		for _, value := range []*int64{nil, int64Pointer(-1), int64Pointer(0), int64Pointer(1)} {
+			o := valid.Clone()
+			var slot **int64
+			switch field {
+			case "memory":
+				slot = &o.MemoryBytes
+			case "pids":
+				slot = &o.Pids
+			case "quota":
+				slot = &o.CPUQuota
+			case "period":
+				slot = &o.CPUPeriod
+			case "swap":
+				slot = &o.SwapBytes
+			case "routes":
+				slot = &o.Routes
+			case "routes6":
+				slot = &o.RoutesIPv6
+			}
+			*slot = value
+			good := value != nil && ((field == "swap" || field == "routes" || field == "routes6") && *value == 0 || (field != "swap" && field != "routes" && field != "routes6") && *value > 0)
+			if got := len(o.BoundedShortfalls()) == 0; got != good {
+				t.Fatalf("field %s value %v accepted=%v", field, value, got)
+			}
+		}
+	}
+	valid.Cgroup = "v1"
+	if len(valid.BoundedShortfalls()) == 0 {
+		t.Fatal("accepted unobserved hierarchy")
+	}
+}
+
+func int64Pointer(v int64) *int64 { return &v }

@@ -54,6 +54,18 @@ func Build(reg application.Registry, policy domain.ResolvedPolicy, sc applicatio
 	if err != nil {
 		return nil, err
 	}
+	if policy.Profile != nil {
+		p, err := domain.ParseComplianceProfile(policy.Profile.Name)
+		if err != nil {
+			return nil, err
+		}
+		if p.RequiresObservedBounds() {
+			if container == nil {
+				return nil, fmt.Errorf("%s requires container execution", p)
+			}
+			container.RequireObservedBounds = true
+		}
+	}
 	// Remove what killed runs left on the engine this run uses.
 	steps.SweepSelectedInBackground(container)
 	sc.Container = container

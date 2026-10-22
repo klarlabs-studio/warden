@@ -408,16 +408,22 @@ func loadCaveat(load proc.Load) string {
 
 // reportShortfalls says, in the step's summary and live output, where what the
 // container observed falls short of the limits and network it was given. It
-// changes no local verdict. The observation, rather than this diagnostic or
-// the requested limits, is recorded in signed provenance.
+// changes the verdict only under a profile requiring observed bounds. The
+// observation can enter signed provenance; requested limits never replace it.
 func (s ShellStep) reportShortfalls(sc application.StepContext, res *domain.StepResult, observed *domain.ContainerObservation) {
 	var o domain.ContainerObservation
 	if observed != nil {
 		o = *observed
 	}
 	shortfalls := o.Shortfalls(sc.Container.Limits, sc.Container.Environment.Network)
+	if sc.Container.RequireObservedBounds {
+		shortfalls = append(shortfalls, o.BoundedShortfalls()...)
+	}
 	if len(shortfalls) == 0 {
 		return
+	}
+	if sc.Container.RequireObservedBounds {
+		res.Status = domain.StepFail
 	}
 	line := "not observed as requested: " + strings.Join(shortfalls, "; ")
 	res.Summary += "; " + line

@@ -170,3 +170,27 @@ func (o ContainerObservation) Clone() ContainerObservation {
 	o.Routes, o.RoutesIPv6 = cp(o.Routes), cp(o.RoutesIPv6)
 	return o
 }
+
+// BoundedShortfalls checks the initial-state claim made by strict@2: finite,
+// positive cgroup v2 maxima, no additional swap, and no non-loopback routes.
+// Specific numeric ceilings belong in protected version 3 requirements.
+func (o ContainerObservation) BoundedShortfalls() []string {
+	out := o.Shortfalls(ExecutionLimits{}, "none")
+	if o.Cgroup != "v2" {
+		return append(out, "resources: cgroup v2 not observed")
+	}
+	for _, v := range []struct {
+		name  string
+		value *int64
+	}{
+		{"memory", o.MemoryBytes}, {"pids", o.Pids}, {"cpu quota", o.CPUQuota}, {"cpu period", o.CPUPeriod},
+	} {
+		if v.value == nil || *v.value <= 0 {
+			out = append(out, v.name+": positive finite bound not observed")
+		}
+	}
+	if o.SwapBytes == nil || *o.SwapBytes != 0 {
+		out = append(out, "swap: zero additional swap not observed")
+	}
+	return out
+}
