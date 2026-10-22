@@ -898,6 +898,7 @@ The exit status stays the only verdict.
 | `warden watch --staged [--once]` | warm opted-in staged container checks for local pre-commit reuse |
 | `warden feedback status [--format json\|sarif\|problems]` | what the watcher last observed for this worktree, with freshness computed now; `problems` feeds editor problem matchers, `sarif` exports SARIF 2.1.0 ([background feedback](docs/background-feedback.md)) |
 | `warden attach` | watch a running gate live from another terminal (Unix socket) |
+| `warden ci plan --policy jobs.json --key fingerprint [--json]` | plan named CI jobs against protected execution contracts, with run/skip reasons and verification timing ([job contracts](docs/ci-job-contracts.md)) |
 | `warden ci [--branch b] [--wait]` | report (or poll) CI status for the branch's PR |
 | `warden axi <verb>` | flags-only agent surface, TOON output (`verify`, `verify-range`, `doctor`, `audit`, `status`, `feedback`, `policy-explain`, `steps`, `run-trigger`) |
 | `warden mcp serve` | MCP server over stdio |

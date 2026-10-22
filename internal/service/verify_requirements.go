@@ -29,6 +29,15 @@ func (s *Service) VerifyRequirementsWithProfiles(commit string, policy ExternalP
 	if err != nil {
 		return result, err
 	}
+	return s.verifyRequirementsResult(result, requirements, mins)
+}
+
+// verifyRequirementsResult narrows one already verified snapshot. Keeping the
+// snapshot fixed lets a CI plan evaluate jobs without refetching notes or
+// mixing evidence from different runs. Requirements must be validated first.
+func (s *Service) verifyRequirementsResult(result VerifyResult, requirements domain.ExecutionRequirements, mins []domain.ComplianceProfile) (VerifyResult, error) {
+	result.RequirementFailures = slices.Clone(result.RequirementFailures)
+	result.Conformance = slices.Clone(result.Conformance)
 	// Version 1 requirements describe a full run. A record of an affected one
 	// is refused here in its own right, whatever the verification policy: its
 	// steps ran for some workspaces only, and its commands came from
@@ -56,6 +65,8 @@ func (s *Service) VerifyRequirementsWithProfiles(commit string, policy ExternalP
 		reason := "missing execution contract (legacy, host, cached, skipped, or incomplete capture)"
 		if ok && (!slices.Contains(result.Record.StepsRun, step) || result.Record.Environments[step] != contract.Environment) {
 			reason = "execution contract does not match recorded step execution"
+		} else if outcome, recorded := result.Record.StepOutcomes[step]; ok && recorded && outcome.Outcome != domain.StepExecuted {
+			reason = "execution contract requires a fresh executed step"
 		} else if ok {
 			reason = requirements.Steps[step].Mismatch(contract, tree)
 		}

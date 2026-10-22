@@ -3,7 +3,8 @@
 `warden verify --requirements /protected/requirements.json --key <trusted-fingerprint>`
 returns success only when trusted, commit-bound local provenance contains fresh
 container observations matching every required step. A mismatch means CI should
-run its checks. Ordinary `verify` and `--container-steps` remain available, but
+run its checks. For independent decisions across named jobs, see
+[protected CI job plans](ci-job-contracts.md). Ordinary `verify` and `--container-steps` remain available, but
 neither establishes that the command and configuration match your CI policy.
 
 Version 1 records the command digest, effective Warden configuration digest,
