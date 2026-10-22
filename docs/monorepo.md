@@ -323,7 +323,7 @@ default.
 
 ## How verifiers treat a partial record
 
-This release writes partial records. Release 0.39.0 taught every verifier
+Since 0.40.0, warden writes partial records. Release 0.39.0 taught every verifier
 to read one, so that the verifiers in your CI could be ready before any warden
 that writes them shipped. **Upgrade every verifier to 0.39.0 or later before
 turning on `select: affected`**: a pinned verifier older than 0.39.0 refuses

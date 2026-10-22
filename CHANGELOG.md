@@ -6,6 +6,23 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent surfaces say when they approved a gate themselves, and that
+  this is ending.** Without a profile, or under `permissive`, the MCP
+  `run_trigger` tool and `warden axi run-trigger` answer the approval gate
+  as `warden-auto`, so a rule's `require_approval` (or a high-severity
+  finding) is met by the agent that asked for the run. Such a run now
+  carries a warning saying no person approved it. **Announcement:** a later
+  minor release will stop these surfaces approving in every repository, as
+  `standard` and `strict` already do; a run that needs approval will end
+  `needs_approval`, with nothing pushed and no note written, until a person
+  approves from an interactive terminal. Repositories with no
+  `require_approval` rule and no high-severity findings are unaffected. To
+  prepare, drop `require_approval` where no human approval was intended. See
+  [#295](https://github.com/klarlabs-studio/warden/issues/295) and
+  [agent profiles](docs/agent-profiles.md#approval-on-the-agent-surfaces-runtime).
+
 ## [0.41.0] - 2026-10-21
 
 A minor release that widens monorepo mode. Discovery now reads Cargo
