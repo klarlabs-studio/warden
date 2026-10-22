@@ -840,7 +840,9 @@ matched file is byte-identical to the step's last passing run — so an unchange
 never committed); the key also covers the step's command, so changing what the
 step runs busts it. Only non-mutating steps are cacheable, and correctness rests
 on declaring *all* of a step's inputs (same contract as bazel/turbo). A step's
-first cache line appears as `test (cached — inputs unchanged)`.
+first cache line appears as `test (cached — inputs unchanged)`. Under the
+`strict` profile a pre-push always executes the profile's required steps, since
+its verifier does not count a cached one.
 
 ### Predictive staged cache
 

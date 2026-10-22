@@ -84,9 +84,25 @@ func (p ResolvedPolicy) CachePaths(s StepName) []string {
 
 // Cacheable reports whether a step may be cache-skipped: it must declare input
 // paths and must not mutate the worktree (caching a mutating step would skip its
-// writes), so it reuses the Concurrent predicate.
+// writes), so it reuses the Concurrent predicate. A step the run's profile
+// requires executed at pre-push is never cache-skipped: the note would record
+// it cached, and verify under that profile refuses a cached required step.
 func (p ResolvedPolicy) Cacheable(s StepName) bool {
-	return len(p.CachePaths(s)) > 0 && p.Concurrent(s)
+	return len(p.CachePaths(s)) > 0 && p.Concurrent(s) && !p.mustExecute(s)
+}
+
+// mustExecute reports whether the run's profile requires s to execute in this
+// run rather than reuse an earlier pass. Only pre-push is checked: its note is
+// what conformance reads. A profile this warden cannot parse fails closed.
+func (p ResolvedPolicy) mustExecute(s StepName) bool {
+	if p.Profile == nil || p.Hook != PrePush {
+		return false
+	}
+	cp, err := ParseComplianceProfile(p.Profile.Name)
+	if err != nil {
+		return true
+	}
+	return !cp.AcceptsReuse() && slices.Contains(cp.RequiredSteps(PrePush), s)
 }
 
 // TimeoutFor returns the configured timeout for a step, or 0 (no limit).

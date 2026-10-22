@@ -341,7 +341,10 @@ and strict does not.
 
 A cached or predicted result reuses a pass recorded for identical inputs on an
 earlier run, so standard counts it. Strict does not: the note does not
-describe that earlier run.
+describe that earlier run. So that a strict run never writes a note its own
+profile refuses, a pre-push under strict executes each required step even
+when its `cache:` inputs are unchanged; other steps keep their cache.
+Predictions are looked up only at pre-commit, which writes no note.
 
 An agent step is one the note says an agent ran, a built-in agent step, or a
 step the policy handed to an agent. A missing boundary observation fails the
@@ -412,15 +415,6 @@ The `warden-gate` action forwards its `min-profile` input to
 refuses that combination, or the flag, so the gate fails rather than passing a
 range it did not check. Pin a `warden-version` with range checking when you set
 the input.
-
-## Not yet enforced
-
-A profile does **not** yet refuse host cache hits or predictions for required
-steps while the gate runs. `verify --min-profile strict` refuses them
-afterwards (see [Checking a profile in CI](#checking-a-profile-in-ci)), and
-under strict the required shell steps run in a container, where the cache is
-off. Refusing them at run time is gate behaviour, not part of a definition,
-so adding it later leaves `strict@1` unchanged.
 
 ## What strict does not prove
 

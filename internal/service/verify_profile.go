@@ -133,7 +133,7 @@ func recordedProfile(rep *ConformanceReport, ref *domain.ProfileRef) (domain.Com
 // Below strict those reuse a pass recorded for identical inputs and count too.
 // A skipped step never counts: nothing performed it.
 func acceptedOutcomes(minimum domain.ComplianceProfile) []domain.StepOutcome {
-	if minimum.Level() >= domain.ProfileStrict {
+	if !minimum.AcceptsReuse() {
 		return []domain.StepOutcome{domain.StepExecuted}
 	}
 	return []domain.StepOutcome{domain.StepExecuted, domain.StepCached, domain.StepPredicted}

@@ -169,3 +169,38 @@ func TestContainerRunCannotReuseHostStepCache(t *testing.T) {
 		t.Fatal("container run reused or populated host cache")
 	}
 }
+
+// Under strict a required pre-push step executes even on a cache hit, so the
+// note records it executed; under standard the same hit is reused.
+func TestStrictRequiredStepIgnoresHostCacheHit(t *testing.T) {
+	for _, c := range []struct {
+		profile   string
+		wantRan   bool
+		wantCache domain.StepOutcome
+	}{
+		{"strict@1", true, domain.StepExecuted},
+		{"standard@1", false, domain.StepCached},
+	} {
+		t.Run(c.profile, func(t *testing.T) {
+			inner := &fakeStep{name: domain.StepTest, status: domain.StepPass}
+			cache := &fakeCache{fp: "same-inputs", seen: true}
+			policy := policyFor(domain.StepTest)
+			policy.Profile = &domain.ResolvedProfile{Name: c.profile}
+			policy.Cache = map[domain.StepName][]string{domain.StepTest: {"**"}}
+			kernel, err := newFactory(inner).WithCache(cache).New(policy, application.StepContext{}, new([]domain.Finding), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := kernel.Execute(context.Background(), domain.StepTest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inner.ran != c.wantRan {
+				t.Errorf("inner ran = %v, want %v", inner.ran, c.wantRan)
+			}
+			if got := out.Result.ExecutionOutcome(); got != c.wantCache {
+				t.Errorf("outcome = %s, want %s", got, c.wantCache)
+			}
+		})
+	}
+}

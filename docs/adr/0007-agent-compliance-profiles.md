@@ -210,7 +210,9 @@ requirement. It cannot buy a weaker gate.
   configurable.
 - **Role-tagged signing keys for agents** are deferred.
 - **Strict refuses host cache hits and predictions for required steps**:
-  conformance requires `executed`.
+  conformance requires `executed`, and a strict pre-push also
+  executes required steps rather than reuse the host cache. This is gate
+  behaviour, not part of the definition, so `strict@1` is unchanged.
 
 ## Sequencing
 
