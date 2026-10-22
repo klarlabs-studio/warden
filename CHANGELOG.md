@@ -6,6 +6,20 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-22
+
+A minor release with one breaking change for agent workflows: the MCP
+`run_trigger` tool and `warden axi run-trigger` never approve a gate, in any
+repository. A run they start that needs approval (a rule's
+`require_approval`, or a high-severity finding) now ends `needs_approval`,
+with nothing pushed and no note written, where it used to pass on the
+agent's own `warden-auto` approval in a repository with no profile or under
+`permissive`. A person approves it by running `git push` from an interactive
+terminal. Clean runs and the interactive and hook paths are unchanged.
+0.42.0 announced this and warned on each affected run. Where no human
+approval was intended, drop `require_approval` from the rule before
+upgrading ([#295](https://github.com/klarlabs-studio/warden/issues/295)).
+
 ### Changed
 
 - **The agent surfaces never approve a gate, in any repository.** The MCP
