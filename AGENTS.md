@@ -11,7 +11,7 @@ Review mode: critique hard on correctness (esp. provenance/security invariants),
 Project: warden (klarlabs OSS) — a local provenance git-gate.
 Module: `go.klarlabs.de/warden` (vanity). Repo: klarlabs-studio/warden.
 What it does: runs a validation pipeline in disposable per-step worktrees, records commit-bound provenance RunRecords, gates pushes on attestation. Cosign-keyless signed releases (goreleaser + SBOM + npm + GHCR, triggered by a `v*` tag).
-Phase: active — v0.42.0 released 2026-10-22 (agent surfaces warn when they self-approve a gate; announces #295). v0.41.0 added Cargo `rust` + Nx implicitDependencies discovery. Next: #295 step 2 (agent surfaces never approve, every repo) in the following minor. Design 0006 done except PR 7 (--accept-affected) and PR 8 (sparse), deferred until real use.
+Phase: active — v0.43.0 released 2026-10-22 (agent surfaces never approve a gate in any repo; #295 closed). v0.42.0 announced it; v0.41.0 added Cargo `rust` + Nx implicitDependencies discovery. Design 0006 done except PR 7 (--accept-affected) and PR 8 (sparse), deferred until real use.
 Stack: Go 1.26.3 (toolchain go1.26.7). Key subsystems: `internal/infrastructure/git` (worktrees, notes, dep exposure), `internal/domain` (policy, runrecord, audit states), `internal/infrastructure/kernel` (build/executor), `internal/application` (runner, ports), `internal/service` (verify, doctor, reattest, attest-external).
 
 ## Constraints
