@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -169,6 +170,8 @@ func TestRunner_WritesSignedInitialContainerObservation(t *testing.T) {
 		domain.StepTest: {Step: domain.StepTest, Status: domain.StepPass, Environment: &domain.ExecutionEnvironment{Runtime: "docker"}, Observed: &observation},
 	}}
 	cfg := prePushCfg()
+	enabled := true
+	cfg.Execution.AttestObservations = &enabled
 	cfg.Steps = map[string][]domain.StepName{"pre_push": {domain.StepTest}}
 	r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
 	r.Signer = newFakeSigner(t)
@@ -182,5 +185,38 @@ func TestRunner_WritesSignedInitialContainerObservation(t *testing.T) {
 	delete(rec.Observations, domain.StepTest)
 	if rec.VerifySignature() {
 		t.Fatal("removed probe retained a valid signature")
+	}
+}
+
+func TestRunner_ObservationSigningDefaultsOff(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
+			git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+			observation := domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nroutes=0\nroutes6=0\n")
+			kernel := &fakeKernel{results: map[domain.StepName]domain.StepResult{
+				domain.StepTest: {Step: domain.StepTest, Status: domain.StepPass, Environment: &domain.ExecutionEnvironment{Runtime: "docker"}, Observed: &observation},
+			}}
+			cfg := prePushCfg()
+			cfg.Steps = map[string][]domain.StepName{"pre_push": {domain.StepTest}}
+			if explicit {
+				disabled := false
+				cfg.Execution.AttestObservations = &disabled
+			}
+			r := newRunner(t, git, kernel, fakeApprover{approve: true}, cfg)
+			r.Signer = newFakeSigner(t)
+			if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+				t.Fatal(err)
+			}
+			if git.note.RunID == "" || len(git.note.Observations) != 0 || !git.note.VerifySignature() {
+				t.Fatalf("unexpected note: %+v", git.note)
+			}
+			payload, err := git.note.SigningPayload()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(payload), `"observations"`) {
+				t.Fatal("default writer emitted incompatible field")
+			}
+		})
 	}
 }

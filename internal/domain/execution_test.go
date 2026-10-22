@@ -125,3 +125,26 @@ func TestObservationCannotAccompanyReuse(t *testing.T) {
 		t.Fatal("reuse recorded as fresh despite contradictory outcome")
 	}
 }
+
+func TestObservationAttestationOverlay(t *testing.T) {
+	enabled, disabled := true, false
+	parent := ExecutionConfig{AttestObservations: &enabled}
+	inherited := (ExecutionConfig{}).OverlayOnto(parent)
+	if inherited.AttestObservations == nil || !*inherited.AttestObservations {
+		t.Fatal("lost parent opt-in")
+	}
+	overridden := (ExecutionConfig{AttestObservations: &disabled}).OverlayOnto(parent)
+	if overridden.AttestObservations == nil || *overridden.AttestObservations {
+		t.Fatal("false failed to override parent")
+	}
+	if !*parent.AttestObservations {
+		t.Fatal("overlay mutated parent")
+	}
+	disabled = true
+	if *overridden.AttestObservations {
+		t.Fatal("overlay aliases child")
+	}
+	if (ExecutionConfig{}).OverlayOnto(ExecutionConfig{}).AttestObservations != nil {
+		t.Fatal("default unexpectedly enabled")
+	}
+}

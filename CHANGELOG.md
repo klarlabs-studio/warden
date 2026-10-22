@@ -9,7 +9,10 @@ All notable changes to warden are documented here. The format follows
 ### Added
 
 - **Signed initial container observations and requirements version 3.** Fresh
-  probes enter the evidence chain and signed note. Protected CI step requirements
+  probes enter the evidence chain; `execution.attest_observations: true` opts
+  into the structured signed-note field after readers upgrade. It defaults off
+  so upgrading a writer does not immediately invalidate notes for older readers.
+  Protected CI step requirements
   can set `observed_limits` to refuse missing or insufficient cgroup bounds and
   route evidence. The probe streams before the command starts, replacing the
   workload-writable probe file. This observes initial state under the trusted
@@ -30,10 +33,10 @@ All notable changes to warden are documented here. The format follows
   (cgroup v2 limits, and its routes for `network: none`) and the step's
   summary says where they fall short of the request: an engine that ignored
   a limit, a cgroup v1 host, routes under `network: none`. A shortfall does
-  not change the verdict. Fresh initial observations enter signed provenance;
+  not change the verdict. Fresh initial observations can enter signed provenance through the opt-in;
   protected
   requirements version 3 can enforce resource bounds and route evidence.
-  Upgrade CI verifiers before developer machines, since older pinned verifiers
+  Upgrade CI verifiers before enabling the opt-in, since older pinned verifiers
   reject notes with the new signed field. `strict@1` remains unchanged.
   An older warden rejects the key, so every machine and CI runner needs this
   release before a repository adds it. See

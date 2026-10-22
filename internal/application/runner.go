@@ -1287,10 +1287,12 @@ func (r *Runner) buildRecord(kernel Kernel, run *domain.Run, approval domain.App
 		StepsRun:          run.Policy().Steps,
 		Environments:      run.ExecutionEnvironments(),
 		Contracts:         run.ExecutionContracts(),
-		Observations:      run.ExecutionObservations(),
 		MatchedRules:      run.Policy().MatchedRules,
 		EvidenceChainRoot: root,
 		Evidence:          entries,
+	}
+	if enabled := run.Policy().Execution.AttestObservations; enabled != nil && *enabled {
+		rec.Observations = run.ExecutionObservations()
 	}
 	if err := attachProfileObservations(rec, run, approval); err != nil {
 		return nil, err

@@ -19,6 +19,9 @@ type ExecutionConfig struct {
 	// limits were asked for. They are a request to the engine; what reached
 	// the workload is a separate observation (ADR 0008).
 	Limits *ExecutionLimits `yaml:"limits" json:"limits,omitempty"`
+	// AttestObservations opts into the signed initial-probe field after readers
+	// have upgraded. Nil inherits the parent setting; the default is off.
+	AttestObservations *bool `yaml:"attest_observations" json:"attest_observations,omitempty"`
 }
 
 // ExecutionLimits is `execution.limits`. Each field is optional; an empty one
@@ -170,6 +173,10 @@ func (c ExecutionConfig) OverlayOnto(base ExecutionConfig) ExecutionConfig {
 	}
 	if c.Network != "" {
 		base.Network = c.Network
+	}
+	if c.AttestObservations != nil {
+		value := *c.AttestObservations
+		base.AttestObservations = &value
 	}
 	if c.Limits != nil {
 		var from ExecutionLimits

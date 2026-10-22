@@ -82,7 +82,15 @@ warden: test container bounds not observed as requested: memory: observed unboun
 ```
 
 A shortfall does not change the local verdict. Fresh container checks record
-initial observations in the signed provenance note and evidence chain. Missing
+initial observations in the evidence chain. To include the structured measurements
+in the signed note, opt in after upgrading CI readers:
+
+```yaml
+execution:
+  attest_observations: true
+```
+
+This defaults to off; an explicit `false` overrides an inherited opt-in. Missing
 values stay absent; requested flags never substitute for a measurement. The
 image shell emits a bounded report on the engine stdout stream before running
 the configured command. Later command output cannot replace that first report; stderr never supplies
@@ -101,9 +109,13 @@ refuses verification; CI must run its checks. All existing command, image,
 configuration, tree and trusted-key requirements still apply. GitHub and GitLab
 integrations accept the same requirements file without extra scripting.
 
-Upgrade CI verifiers **before developer machines**: older pinned verifiers drop
+Upgrade CI verifiers **before enabling `execution.attest_observations`**: older pinned verifiers drop
 the new signed `observations` field and reject the signature. Notes without that
 field retain their prior signing payload, but cannot satisfy `observed_limits`.
+The rollout is: upgrade CI readers, upgrade developers while leaving the opt-in
+off, enable the opt-in, then require version 3 evidence in protected CI. Until
+then, CI must execute checks for notes without measurements. Older binaries
+reject the opt-in configuration key, so upgrade all config readers before adding it.
 Older verifiers reject version 3 requirements too. The `strict@1` definition is
 unchanged; `strict@2` remains a separate rollout.
 

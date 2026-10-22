@@ -31,3 +31,18 @@ func TestParse_ExecutionLimits(t *testing.T) {
 		t.Fatalf("an invalid memory limit must fail validation naming the key, got %v", err)
 	}
 }
+
+func TestParse_ObservationAttestation(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		cfg, err := Parse([]byte("execution:\n  attest_observations: " + value + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Execution.AttestObservations == nil || *cfg.Execution.AttestObservations != (value == "true") {
+			t.Fatalf("lost explicit %s", value)
+		}
+	}
+	if _, err := Parse([]byte("execution:\n  attest_observations: definitely\n")); err == nil {
+		t.Fatal("accepted invalid opt-in")
+	}
+}
