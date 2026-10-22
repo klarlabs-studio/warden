@@ -15,23 +15,22 @@ func profileRef(name string) *domain.ResolvedProfile {
 	return &domain.ResolvedProfile{Name: name}
 }
 
-// The agent surface keeps auto-approving where it always has (no profile,
-// permissive) and stops deciding under standard and strict, or under a profile
-// this warden cannot read.
+// The agent surface never satisfies the approval gate: not without a
+// profile, not under permissive, and not under a profile this warden cannot
+// read (#295).
 func TestAgentSurfaceApprover(t *testing.T) {
 	cases := []struct {
-		name       string
-		profile    *domain.ResolvedProfile
-		hook       domain.Hook
-		wantApprov bool
-		wantHint   string
+		name     string
+		profile  *domain.ResolvedProfile
+		hook     domain.Hook
+		wantHint string
 	}{
-		{"no profile", nil, domain.PrePush, true, ""},
-		{"permissive", profileRef("permissive@1"), domain.PrePush, true, ""},
-		{"standard", profileRef("standard@1"), domain.PrePush, false, "run `git push` from an interactive terminal"},
-		{"strict", profileRef("strict@1"), domain.PrePush, false, "run `git push` from an interactive terminal"},
-		{"strict pre-commit", profileRef("strict@1"), domain.PreCommit, false, "run `git commit` from an interactive terminal"},
-		{"unreadable profile fails closed", profileRef("strict@9"), domain.PrePush, false, "strict@9"},
+		{"no profile", nil, domain.PrePush, "run `git push` from an interactive terminal"},
+		{"permissive", profileRef("permissive@1"), domain.PrePush, "run `git push` from an interactive terminal"},
+		{"standard", profileRef("standard@1"), domain.PrePush, "run `git push` from an interactive terminal"},
+		{"strict", profileRef("strict@1"), domain.PrePush, "run `git push` from an interactive terminal"},
+		{"no profile pre-commit", nil, domain.PreCommit, "run `git commit` from an interactive terminal"},
+		{"unreadable profile", profileRef("strict@9"), domain.PrePush, "run `git push` from an interactive terminal"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,25 +40,13 @@ func TestAgentSurfaceApprover(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.wantApprov {
-				if !d.Approved || d.NeedsHuman || d.Principal != "warden-auto" {
-					t.Fatalf("want today's auto-approval, got %+v", d)
-				}
-				if d.Notice != agentSelfApprovalNotice {
-					t.Errorf("a self-approval must announce the coming change (#295), notice = %q", d.Notice)
-				}
-				return
-			}
-			if d.Notice != "" {
-				t.Errorf("a gate the surface did not approve needs no self-approval notice, got %q", d.Notice)
-			}
 			if d.Approved || !d.NeedsHuman {
-				t.Fatalf("the agent surface must not satisfy the gate under %s: %+v", c.profile.Name, d)
+				t.Fatalf("the agent surface must not satisfy the gate: %+v", d)
 			}
 			if d.Principal != agentSurfacePrincipal {
 				t.Errorf("principal = %q, want %q", d.Principal, agentSurfacePrincipal)
 			}
-			for _, want := range []string{"needs human approval", c.profile.Name, "nothing was pushed", "no note was written", "interactive terminal", c.wantHint} {
+			for _, want := range []string{"needs human approval", "cannot approve its own run", "nothing was pushed", "no note was written", c.wantHint} {
 				if !strings.Contains(d.Rationale, want) {
 					t.Errorf("rationale missing %q: %s", want, d.Rationale)
 				}
@@ -68,25 +55,18 @@ func TestAgentSurfaceApprover(t *testing.T) {
 	}
 }
 
-// On a non-interactive stream the terminal approver declines; it must not send
-// a profiled repo's operator to the agent surface, which can no longer approve.
-func TestTerminalApprover_NonInteractiveHintFollowsTheProfile(t *testing.T) {
-	for _, c := range []struct {
-		profile *domain.ResolvedProfile
-		axi     bool
-	}{
-		{nil, true},
-		{profileRef("permissive@1"), true},
-		{profileRef("standard@1"), false},
-	} {
+// On a non-interactive stream the terminal approver declines, and never sends
+// the operator to the agent surface, which cannot approve.
+func TestTerminalApprover_NonInteractiveHintNamesOnlyTheTerminal(t *testing.T) {
+	for _, profile := range []*domain.ResolvedProfile{nil, profileRef("permissive@1"), profileRef("standard@1")} {
 		var out bytes.Buffer
 		a := terminalApprover{in: strings.NewReader(""), out: &out}
-		d, err := a.Approve(context.Background(), application.ApprovalRequest{Hook: domain.PrePush, Profile: c.profile})
+		d, err := a.Approve(context.Background(), application.ApprovalRequest{Hook: domain.PrePush, Profile: profile})
 		if err != nil || d.Approved {
 			t.Fatalf("a non-interactive stream must decline: %+v %v", d, err)
 		}
-		if got := strings.Contains(out.String(), "warden axi"); got != c.axi {
-			t.Errorf("profile %+v: mentions axi = %v, want %v: %s", c.profile, got, c.axi, out.String())
+		if strings.Contains(out.String(), "axi") || !strings.Contains(out.String(), "interactive terminal") {
+			t.Errorf("profile %+v: the hint must name only the terminal: %s", profile, out.String())
 		}
 	}
 }
@@ -102,37 +82,26 @@ rules:
     then: { require_approval: true }
 `
 
-// Through the real axi verb: under standard the run ends needs_approval and
-// says how a person approves; the same rule without a profile still passes.
-func TestAxi_RunTriggerCannotSelfApproveUnderAProfile(t *testing.T) {
+// Through the real axi verb: a run that reaches the approval gate ends
+// needs_approval and says how a person approves, with a profile and without
+// one (#295).
+func TestAxi_RunTriggerCannotSelfApprove(t *testing.T) {
 	t.Setenv("WARDEN_CONFIG_DIR", t.TempDir())
 	dir := gitRepo(t)
 	// The rule matches main; git's default branch name varies by machine.
 	if out, err := exec.Command("git", "-C", dir, "branch", "-M", "main").CombinedOutput(); err != nil {
 		t.Fatalf("branch -M main: %v %s", err, out)
 	}
-	writeConfig(t, dir, standardApprovalConfig)
-
-	code, out, errb := run("axi", "run-trigger", "--trust")
-	if code != 0 {
-		t.Fatalf("axi run-trigger: code=%d out=%q err=%q", code, out, errb)
-	}
-	for _, want := range []string{"outcome: needs_approval", "push_performed: false", "needs human approval", "standard@1"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q: %s", want, out)
+	for _, cfg := range []string{standardApprovalConfig, strings.TrimPrefix(standardApprovalConfig, "profile: standard\n")} {
+		writeConfig(t, dir, cfg)
+		code, out, errb := run("axi", "run-trigger", "--trust")
+		if code != 0 {
+			t.Fatalf("axi run-trigger: code=%d out=%q err=%q", code, out, errb)
 		}
-	}
-
-	writeConfig(t, dir, strings.TrimPrefix(standardApprovalConfig, "profile: standard\n"))
-	code, out, errb = run("axi", "run-trigger", "--trust")
-	if code != 0 || !strings.Contains(out, "outcome: passed") {
-		t.Fatalf("without a profile the agent surface must still auto-approve: code=%d out=%q err=%q", code, out, errb)
-	}
-	// ...and says, on the run it approved, that no person did and that this
-	// is going away (#295).
-	for _, want := range []string{"warnings[", "answered by this agent surface", "not by a person", "will end needs_approval"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("an unprofiled self-approval must carry the notice; missing %q: %s", want, out)
+		for _, want := range []string{"outcome: needs_approval", "push_performed: false", "needs human approval", "cannot approve its own run"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q: %s", want, out)
+			}
 		}
 	}
 }

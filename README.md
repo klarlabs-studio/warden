@@ -970,8 +970,10 @@ invocation should block until it has an answer.
 
 ### `run_trigger` trust
 
-The `axi` and `mcp` surfaces are non-interactive: they auto-approve gate
-findings because there is no human at a prompt. That is fine for the read-only
+The `axi` and `mcp` surfaces are non-interactive: there is no human at a
+prompt, so they never approve a gate. A run that needs approval ends
+`needs_approval` and a person approves it with `git push` from a terminal (see
+[agent profiles](docs/agent-profiles.md#approval-on-the-agent-surfaces-runtime)). That is fine for the read-only
 operations above, but
 `run_trigger` (and `warden axi run-trigger`) **executes the repository's
 `.warden.yaml` `commands` as shell**. Pointing an MCP-enabled agent at an

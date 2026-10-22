@@ -665,16 +665,12 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 		return r.result(run, ""), nil
 	}
 
-	approval, gateNotice, err := r.resolvePushGate(ctx, run, kernel)
+	approval, err := r.resolvePushGate(ctx, run, kernel)
 	if err != nil {
 		return RunResult{}, err
 	}
 	if run.IsTerminal() { // rejected or aborted at the gate
-		res := r.result(run, "")
-		if gateNotice != "" {
-			res.Warnings = append(res.Warnings, gateNotice)
-		}
-		return res, nil
+		return r.result(run, ""), nil
 	}
 
 	// Provenance: verify the run-level evidence chain and write the note.
@@ -838,9 +834,6 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	res.GitCompletesPush = gitCompletes
 	res.AttestOnly = r.Settings.AttestOnly
 	res.Provenance = provenance
-	if gateNotice != "" {
-		res.Warnings = append(res.Warnings, gateNotice)
-	}
 	if discardWarning != "" {
 		res.Warnings = append(res.Warnings, discardWarning)
 	}
@@ -1145,23 +1138,22 @@ func (r *Runner) withStream(sc StepContext) StepContext {
 //
 // The returned ApprovalRef records how the gate was answered, for the signed
 // record of a profiled run. It is meaningful only when the error is nil and
-// the run is not terminal. The returned notice is the approver's Notice once a
-// push was attempted on its approval, and empty otherwise.
-func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Kernel) (domain.ApprovalRef, string, error) {
+// the run is not terminal.
+func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Kernel) (domain.ApprovalRef, error) {
 	// No decision was required unless an approver is consulted below.
 	approval := domain.ApprovalRef{Channel: domain.ApprovalNone}
 	// A run cancelled before the gate (Ctrl-C / SIGTERM) must never fall through
 	// to the auto-approval path and push. Abort cleanly instead of pushing.
 	if err := ctx.Err(); err != nil {
-		return approval, "", run.Abort("run cancelled before push")
+		return approval, run.Abort("run cancelled before push")
 	}
 
 	gate, err := kernel.Execute(ctx, domain.StepPush)
 	if err != nil {
-		return approval, "", err
+		return approval, err
 	}
 	if !gate.NeedsApproval {
-		return approval, "", nil
+		return approval, nil
 	}
 
 	decision := autoApproval()
@@ -1171,17 +1163,17 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 			Profile: run.Policy().Profile,
 		})
 		if err != nil {
-			return approval, "", err
+			return approval, err
 		}
 		approval = decision.approvalRef()
 	}
 	if decision.NeedsHuman {
 		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)
-		return approval, "", run.AwaitHuman(decision.Rationale)
+		return approval, run.AwaitHuman(decision.Rationale)
 	}
 	if !decision.Approved {
 		_, _ = kernel.Reject(ctx, gate.SessionID, decision.Principal, decision.Rationale)
-		return approval, "", run.Reject("approval declined")
+		return approval, run.Reject("approval declined")
 	}
 
 	// Re-check cancellation right before the irreversible push: on the
@@ -1190,7 +1182,7 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 	// otherwise still push. Reject the pending gate and abort.
 	if err := ctx.Err(); err != nil {
 		_, _ = kernel.Reject(ctx, gate.SessionID, "warden-cancelled", "run cancelled before push")
-		return approval, "", run.Abort("run cancelled before push")
+		return approval, run.Abort("run cancelled before push")
 	}
 
 	if _, err := kernel.Approve(ctx, gate.SessionID, decision.Principal, decision.Rationale); err != nil {
@@ -1198,11 +1190,11 @@ func (r *Runner) resolvePushGate(ctx context.Context, run *domain.Run, kernel Ke
 		// branch-moved is matched by substring as well as errors.Is. Either way
 		// a failed push aborts — never a successful gate.
 		if errors.Is(err, ErrBranchMoved) || strings.Contains(err.Error(), ErrBranchMoved.Error()) {
-			return approval, decision.Notice, run.Abort("branch changed mid-run; re-push")
+			return approval, run.Abort("branch changed mid-run; re-push")
 		}
-		return approval, decision.Notice, run.Abort("push failed: " + err.Error())
+		return approval, run.Abort("push failed: " + err.Error())
 	}
-	return approval, decision.Notice, nil
+	return approval, nil
 }
 
 // notarizeAgentTrace binds a digest of the repo's Agent Trace record into the
