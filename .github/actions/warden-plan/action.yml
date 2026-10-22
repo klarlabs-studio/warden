@@ -1,0 +1,55 @@
+name: Warden CI Plan
+description: Plan named CI job reuse against protected execution contracts; any planner failure disables reuse.
+inputs:
+  policy:
+    description: Protected CI job policy JSON outside the candidate checkout, including symlink resolution.
+    required: true
+  key:
+    description: Explicit protected trusted signer keys or fingerprints, comma-separated.
+    required: true
+  commit:
+    description: Candidate commit to evaluate; consumers must check out this same commit.
+    default: ${{ github.sha }}
+  remote:
+    description: Remote publishing provenance notes.
+    default: origin
+  warden-version:
+    description: Released warden version supporting ci plan; older releases disable reuse.
+    default: latest
+outputs:
+  plan-valid:
+    description: True only for a complete validated plan; this does not mean all jobs are reusable.
+    value: ${{ steps.plan.outputs.plan-valid }}
+  reusable-jobs:
+    description: JSON array of jobs eligible for reuse; empty on failure. Skip only explicit members.
+    value: ${{ steps.plan.outputs.reusable-jobs }}
+  run-jobs:
+    description: JSON array of jobs requiring CI when plan-valid is true; otherwise unknown. Never use absence to skip.
+    value: ${{ steps.plan.outputs.run-jobs }}
+  commit:
+    description: Resolved evaluated SHA; empty on failure.
+    value: ${{ steps.plan.outputs.commit }}
+  verification-ms:
+    description: Measured planner verification time, not saved CI time; empty on failure.
+    value: ${{ steps.plan.outputs.verification-ms }}
+runs:
+  using: composite
+  steps:
+    - name: Install warden
+      shell: bash
+      env:
+        WARDEN_VERSION: ${{ inputs.warden-version }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: bash "$GITHUB_ACTION_PATH/../install-warden.sh"
+    - name: Fetch provenance notes
+      shell: bash
+      env:
+        WARDEN_REMOTE: ${{ inputs.remote }}
+      run: git fetch -- "$WARDEN_REMOTE" 'refs/notes/warden:refs/notes/warden' || true
+    - id: plan
+      shell: bash
+      env:
+        WARDEN_JOB_POLICY: ${{ inputs.policy }}
+        WARDEN_TRUSTED_KEYS: ${{ inputs.key }}
+        WARDEN_COMMIT: ${{ inputs.commit }}
+      run: bash "$GITHUB_ACTION_PATH/plan.sh"

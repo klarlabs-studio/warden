@@ -50,6 +50,13 @@ spec:
         resolves inside the checkout under test.
       default: ''
       regex: '^([A-Za-z0-9._/ -]*|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)$'
+    job-policy:
+      description: >-
+        Optional protected CI job policy outside the checkout. Requires ci plan
+        support and jq/realpath. Use on-unverified run-checks and no other
+        verification clauses. Produces warden-plan.json for per-job reuse.
+      default: ''
+      regex: '^([A-Za-z0-9._/ -]*|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)$'
     container-steps:
       description: Optional comma-separated checks that must carry trusted container execution evidence.
       default: ''
@@ -186,6 +193,47 @@ warden-verify:
       WARDEN_SCRIPT
       bash "$WARDEN_BIN_DIR/install.sh"
     - |
+      # warden: plan-helper
+      cat > "$WARDEN_BIN_DIR/plan.sh" <<'WARDEN_SCRIPT'
+      #!/usr/bin/env bash
+      # Shared planner boundary; GitLab embeds this exact script in its component.
+      set -euo pipefail
+      refuse() { echo "warden-plan: $*" >&2; exit 1; }
+      [[ -n "${WARDEN_TRUSTED_KEYS//[[:space:],]/}" ]] || refuse 'explicit trusted keys required'
+      command -v jq >/dev/null || refuse 'jq required'
+      command -v realpath >/dev/null || refuse 'realpath required'
+      [[ -f "$WARDEN_JOB_POLICY" ]] || refuse 'protected job policy not found'
+      root=$(realpath -- "$(git rev-parse --show-toplevel)")
+      policy=$(realpath -- "$WARDEN_JOB_POLICY")
+      case "$policy" in "$root"/*) refuse 'job policy resolves inside the candidate checkout' ;; esac
+      sha=$(git rev-parse --verify --end-of-options "${WARDEN_COMMIT}^{commit}")
+      [[ "$sha" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || refuse 'invalid resolved commit'
+      tmp=$(mktemp -d)
+      trap 'rm -rf "$tmp"' EXIT
+      warden ci plan --commit "$sha" --policy "$policy" --key "$WARDEN_TRUSTED_KEYS" --json > "$tmp/report.json"
+      # A complete, consistent partition of the protected inventory is mandatory.
+      # An unknown release, partial output or contradictory lists authorize no reuse.
+      jq -e -s --arg sha "$sha" --slurpfile policy "$policy" '
+        def duration: type == "number" and . >= 0 and floor == .;
+        length == 1 and ($policy | length) == 1 and (.[0] |
+        $policy[0] as $p |
+        $p.version == 1 and ($p.jobs | type) == "object" and ($p.jobs | length) > 0 and
+        .version == 1 and .sha == $sha and (.verification_ms | duration) and
+        (.jobs | type) == "array" and
+        all(.jobs[];
+          (.name | type) == "string" and (.name | test("^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")) and
+          (.action == "run" or .action == "skip") and
+          (.reasons | type) == "array" and (.reasons | length) > 0 and
+          all(.reasons[]; type == "string") and (.verification_ms | duration) and
+          (.name as $n | $p.jobs | has($n)) and
+          (.action != "skip" or (.name as $n | $p.jobs[$n] != null))) and
+        ([.jobs[].name] | sort) == ($p.jobs | keys) and
+        .run_jobs == ([.jobs[] | select(.action == "run") | .name] | sort) and
+        .reusable_jobs == ([.jobs[] | select(.action == "skip") | .name] | sort))
+      ' "$tmp/report.json" >/dev/null || refuse 'invalid or inconsistent planner output'
+      jq -c . "$tmp/report.json"
+      WARDEN_SCRIPT
+    - |
       # warden: verify
       cat > "$WARDEN_BIN_DIR/verify.sh" <<'WARDEN_SCRIPT'
       set -euo pipefail
@@ -193,6 +241,7 @@ warden-verify:
       in_remote='$[[ inputs.remote ]]'
       in_key='$[[ inputs.key ]]'
       in_requirements='$[[ inputs.requirements ]]'
+      in_job_policy='$[[ inputs.job-policy ]]'
       in_container_steps='$[[ inputs.container-steps ]]'
       in_container_image_id='$[[ inputs.container-image-id ]]'
       in_min_profile='$[[ inputs.min-profile ]]'
@@ -232,6 +281,8 @@ warden-verify:
         exit 1
       }
       record false not-run
+      # Delete stale or candidate-provided planner artifacts before any exit.
+      rm -f -- "$project_dir/warden-plan.json"
 
       # $NAME / ${NAME} is a run-time variable reference; anything else is the
       # literal value interpolated at pipeline creation.
@@ -247,6 +298,11 @@ warden-verify:
       commit=$(expand "$in_commit")
       keys=$(expand "$in_key")
       requirements=$(expand "$in_requirements")
+      job_policy=$(expand "$in_job_policy")
+      if [ -n "$job_policy" ]; then
+        [ "$mode" = run-checks ] || config_error "job-policy requires on-unverified run-checks"
+        [ -z "$requirements$in_container_steps$in_container_image_id$in_min_profile" ] || config_error "job-policy cannot combine with other verification clauses"
+      fi
       remote="$in_remote"
 
       case "$mode" in fail | run-checks) ;; *) config_error "on-unverified must be fail or run-checks" ;; esac
@@ -307,6 +363,21 @@ warden-verify:
       git fetch --quiet --no-tags -- "$remote" '+refs/notes/warden:refs/notes/warden' ||
         conclude false notes-unreachable "could not fetch refs/notes/warden from '$remote'"
 
+      if [ -n "$job_policy" ]; then
+        export PATH="$WARDEN_BIN_DIR:$PATH"
+        export WARDEN_COMMIT="$sha" WARDEN_JOB_POLICY="$job_policy" WARDEN_TRUSTED_KEYS="$keys"
+        plan_tmp=$(mktemp)
+        if bash "$WARDEN_BIN_DIR/plan.sh" > "$plan_tmp"; then
+          cp -- "$plan_tmp" "$project_dir/warden-plan.json"
+          rm -f -- "$plan_tmp"
+          record false planned
+          echo "warden: per-job plan published; no global validation or savings claim."
+          exit 0
+        fi
+        rm -f -- "$plan_tmp"
+        conclude false plan-unavailable "planning unavailable; downstream jobs must run their checks"
+      fi
+
       args=(verify --commit "$sha" --key "$keys")
       if [ -n "$requirements" ]; then args+=(--requirements "$requirements"); fi
       if [ -n "$in_container_steps" ]; then args+=(--container-steps "$in_container_steps"); fi
@@ -329,6 +400,7 @@ warden-verify:
     expire_in: 1 week
     paths:
       - warden-verify.env
+      - warden-plan.json
     reports:
       dotenv: warden-verify.env
 
@@ -359,3 +431,22 @@ warden-verify:
         exit 0
       fi
       echo "warden: no trusted warden verdict for this checkout; running the checks."
+
+# Define the predicate, then call it with a protected literal job name:
+#   - !reference [.warden-planned-job, before_script]
+#   - if warden_job_reusable unit-tests; then exit 0; fi
+# Never take that name from overridable pipeline variables.
+.warden-planned-job:
+  before_script:
+    - |
+      # warden: planned-job
+      warden_job_reusable() {
+        [ "$#" -eq 1 ] && command -v jq >/dev/null 2>&1 &&
+          [ -f warden-plan.json ] && [ ! -L warden-plan.json ] &&
+          ! git ls-files --error-unmatch -- warden-plan.json >/dev/null 2>&1 || return 1
+        warden_head=$(git rev-parse --verify HEAD 2>/dev/null) || return 1
+        jq -e -s --arg sha "$warden_head" --arg job "$1" '
+          length == 1 and (.[0] | .version == 1 and .sha == $sha and
+          ([.jobs[] | select(.name == $job)] | length == 1 and .[0].action == "skip"))
+        ' warden-plan.json >/dev/null 2>&1
+      }

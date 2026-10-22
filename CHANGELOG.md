@@ -8,6 +8,13 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **Forge consumers for protected CI job plans.** The GitHub `warden-plan`
+  composite action publishes explicit per-job reuse lists and measured verifier
+  overhead. The GitLab component accepts opt-in `job-policy` with a fresh plan
+  artifact and per-job predicate. Both require protected policy outside the
+  candidate checkout; invalid or unavailable plans authorize no reuse. Planning
+  does not globally validate a commit or claim saved CI minutes.
+
 - **Protected CI job plans.** `warden ci plan --policy jobs.json --key fingerprint`
   maps named jobs to existing execution requirements, producing independent
   run/skip decisions, reasons, a resolved commit and verification timings. JSON

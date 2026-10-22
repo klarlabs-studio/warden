@@ -184,7 +184,7 @@ func TestGitLabTemplate_DefaultVersionIsReleased(t *testing.T) {
 func TestGitLabTemplate_VerdictIsPublishedAsDotenvArtifact(t *testing.T) {
 	job := interpolateGitLab(t, nil)["warden-verify"]
 	if job.Artifacts.Reports.Dotenv != "warden-verify.env" || job.Artifacts.When != "always" ||
-		!reflect.DeepEqual(job.Artifacts.Paths, []string{"warden-verify.env"}) {
+		!reflect.DeepEqual(job.Artifacts.Paths, []string{"warden-verify.env", "warden-plan.json"}) {
 		t.Fatalf("verdict must be a dotenv report AND a plain artifact file, kept on failure: %+v", job.Artifacts)
 	}
 }

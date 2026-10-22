@@ -102,6 +102,17 @@ expanded when the job runs. That is how you take the key or the requirements
 file from a CI/CD variable. It also means the variable's precedence applies; see
 [trust boundaries](#trust-boundaries).
 
+## Per-job planning (opt-in)
+
+Set `job-policy` to a protected policy file outside the checkout and
+`on-unverified: run-checks` to produce a per-job `warden-plan.json` artifact.
+This requires a release containing `ci plan` (after v0.43.0), jq and realpath.
+Planning cannot combine with the global verification clauses and never sets
+`WARDEN_VALIDATED=true`. Consume only explicit job decisions using
+`.warden-planned-job`; see [CI job contracts](ci-job-contracts.md#gitlab-ci)
+for the protected producer and downstream job pattern. The default verification
+mode below is unchanged.
+
 ## The verdict
 
 The job's exit status:
