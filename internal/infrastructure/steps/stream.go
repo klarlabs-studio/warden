@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os/exec"
+	"sync"
 
 	"go.klarlabs.de/warden/internal/application"
 )
@@ -45,15 +46,47 @@ func (w *lineWriter) Close() {
 // When sc.OnOutput is set it also streams each line live; otherwise it takes the
 // plain buffered path, so the non-interactive pipeline pays nothing.
 func runCaptured(cmd *exec.Cmd, sc application.StepContext) ([]byte, error) {
-	if sc.OnOutput == nil {
+	return runCapturedStdout(cmd, sc, nil, nil)
+}
+
+// runCapturedStdout additionally preserves stdout independently of stderr.
+// Probe evidence must use this stream: exec may read stderr before earlier
+// stdout bytes when separate engine pipes are ready concurrently.
+func runCapturedStdout(cmd *exec.Cmd, sc application.StepContext, stdout io.Writer, stdoutLine func(string)) ([]byte, error) {
+	if sc.OnOutput == nil && stdout == nil {
 		return cmd.CombinedOutput()
 	}
 	var buf bytes.Buffer
-	lw := newLineWriter(sc.OnOutput)
-	w := io.MultiWriter(&buf, lw)
-	cmd.Stdout = w
-	cmd.Stderr = w
+	var stdoutWriter, stderrWriter io.Writer = &buf, &buf
+	var stdoutLines, stderrLines *lineWriter
+	if sc.OnOutput != nil {
+		if stdoutLine == nil {
+			stdoutLine = sc.OnOutput
+		}
+		stdoutLines, stderrLines = newLineWriter(stdoutLine), newLineWriter(sc.OnOutput)
+		stdoutWriter, stderrWriter = io.MultiWriter(&buf, stdoutLines), io.MultiWriter(&buf, stderrLines)
+	}
+	var mu sync.Mutex
+	cmd.Stdout = &lockedWriter{mu: &mu, writer: stdoutWriter}
+	cmd.Stderr = &lockedWriter{mu: &mu, writer: stderrWriter}
+	if stdout != nil {
+		cmd.Stdout = io.MultiWriter(cmd.Stdout, stdout)
+	}
 	err := cmd.Run()
-	lw.Close()
+	if stdoutLines != nil {
+		stdoutLines.Close()
+		stderrLines.Close()
+	}
 	return buf.Bytes(), err
+}
+
+type lockedWriter struct {
+	mu     *sync.Mutex
+	writer io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
 }

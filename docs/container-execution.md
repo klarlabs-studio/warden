@@ -84,8 +84,9 @@ warden: test container bounds not observed as requested: memory: observed unboun
 A shortfall does not change the local verdict. Fresh container checks record
 initial observations in the signed provenance note and evidence chain. Missing
 values stay absent; requested flags never substitute for a measurement. The
-image shell emits a bounded report on the engine output stream before running
-the configured command. Later command output cannot replace that first report.
+image shell emits a bounded report on the engine stdout stream before running
+the configured command. Later command output cannot replace that first report; stderr never supplies
+measurement evidence.
 The host engine and inspected image remain trusted. This describes initial
 cgroup and route state, not continuous monitoring or a complete network policy.
 No workspace probe file is used.

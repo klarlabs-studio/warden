@@ -203,13 +203,16 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		return nil, nil, err
 	}
 	env := selected.Environment
+	var probeStdout probeCapture
 	begin, end := "warden-observation-begin-"+nonce, "warden-observation-end-"+nonce
 	defer func() {
-		out, observed = extractObservation(out, begin, end)
+		_, observed = extractObservation(probeStdout.Bytes(), begin, end)
+		out = stripObservationFrame(out, probeStdout.Bytes(), begin, end)
 	}()
+	var stdoutLine func(string)
 	if onOutput := sc.OnOutput; onOutput != nil {
 		inside, finished := false, false
-		sc.OnOutput = func(line string) {
+		stdoutLine = func(line string) {
 			if !finished && line == begin {
 				inside = true
 				return
@@ -227,7 +230,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		"printf '%s\\n' " + shellQuote(begin) + ";\n" + observationProbe("") +
 		"printf '%s\\n' " + shellQuote(end) + ";\n" + command
 	if env.Runtime == "apple" {
-		out, runErr = runAppleContainer(ctx, sc, abs, name, checked)
+		out, runErr = runAppleContainer(ctx, sc, abs, name, checked, &probeStdout, stdoutLine)
 		return out, nil, runErr
 	}
 	if selected.Reference == "" {
@@ -256,7 +259,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 	cmd := exec.CommandContext(ctx, selected.Binary, args...)
 	cmd.Env = scrubbedEnv()
 	proc.Isolate(cmd)
-	out, runErr = runCaptured(cmd, sc)
+	out, runErr = runCapturedStdout(cmd, sc, &probeStdout, stdoutLine)
 	if ctx.Err() != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

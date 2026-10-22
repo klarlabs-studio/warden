@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -89,7 +90,7 @@ func inspectAppleImage(probe probeFunc, bin string, cfg domain.ExecutionConfig) 
 // verify the actual image index/platform, then start attached. A moved tag can
 // never authorize executing a different image. The CLI may fetch VM bootstrap
 // assets; documentation distinguishes that from Docker's no-pull contract.
-func runAppleContainer(ctx context.Context, sc application.StepContext, dir, name, command string) (out []byte, runErr error) {
+func runAppleContainer(ctx context.Context, sc application.StepContext, dir, name, command string, stdout io.Writer, stdoutLine func(string)) (out []byte, runErr error) {
 	if strings.ContainsAny(dir, ",=\r\n") {
 		return nil, fmt.Errorf("apple mount parser cannot represent this worktree path")
 	}
@@ -148,11 +149,15 @@ func runAppleContainer(ctx context.Context, sc application.StepContext, dir, nam
 	if err := verifyAppleCreated(data, name, env); err != nil {
 		return append(out, []byte("\nwarden: "+err.Error())...), err
 	}
-	started, err := appleCommand(ctx, sc, "start", "--attach", name)
+	started, err := appleCommandStdout(ctx, sc, stdout, stdoutLine, "start", "--attach", name)
 	return append(out, started...), err
 }
 
 func appleCommand(ctx context.Context, sc application.StepContext, args ...string) ([]byte, error) {
+	return appleCommandStdout(ctx, sc, nil, nil, args...)
+}
+
+func appleCommandStdout(ctx context.Context, sc application.StepContext, stdout io.Writer, stdoutLine func(string), args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, sc.Container.Binary, args...)
 	// Explicit --env inputs alone cross into the guest. Do not enable SSH
 	// forwarding, and avoid even supplying the client with an agent socket.
@@ -162,7 +167,7 @@ func appleCommand(ctx context.Context, sc application.StepContext, args ...strin
 		}
 	}
 	proc.Isolate(cmd)
-	return runCaptured(cmd, sc)
+	return runCapturedStdout(cmd, sc, stdout, stdoutLine)
 }
 
 // appleCleanupTimeout bounds removing a finished container. Apple's delete
