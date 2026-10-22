@@ -175,8 +175,8 @@ func (f facade) Status() (mcpserver.StatusOutput, error) {
 var _ mcpserver.Facade = facade{}
 
 // newFacade builds the facade for the non-interactive agent surfaces (axi,
-// MCP). It auto-approves unless the repository's profile withholds approval
-// from these surfaces; see agentSurfaceApprover.
+// MCP). These surfaces never approve a gate: a run that needs approval ends
+// needs_approval; see agentSurfaceApprover.
 func newFacade() (facade, error) {
 	svc, err := service.New(mustCwd(), Version, agentSurfaceApprover{})
 	if err != nil {

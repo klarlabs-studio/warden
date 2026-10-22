@@ -16,7 +16,7 @@ import (
 
 // envMCPAllowRun opts the non-interactive agent surfaces (`warden mcp serve`
 // and `warden axi run-trigger`) in to executing the current repository's
-// configured commands. Those surfaces auto-approve gate findings and run the
+// configured commands. Those surfaces run the
 // repo-authored `commands` as shell with no human in the loop, so pointing an
 // MCP client at an untrusted clone and letting it call run_trigger would be
 // arbitrary code execution. run_trigger therefore refuses by default and runs
@@ -89,7 +89,7 @@ func truthyEnv(v string) bool {
 // is actionable rather than a bare "denied".
 func errUntrustedMCPRun() error {
 	return fmt.Errorf(
-		"run_trigger refused: this surface auto-approves and runs the repository's configured commands as shell with no human in the loop, so it will not execute a possibly-untrusted repo's .warden.yaml. Trust this one repository with `warden trust add` (preferred — the grant names its subject), pass --trust to `warden axi run-trigger` for a single invocation, or set %s=1 to trust EVERY repo this process is pointed at",
+		"run_trigger refused: this surface runs the repository's configured commands as shell with no human in the loop, so it will not execute a possibly-untrusted repo's .warden.yaml. Trust this one repository with `warden trust add` (preferred — the grant names its subject), pass --trust to `warden axi run-trigger` for a single invocation, or set %s=1 to trust EVERY repo this process is pointed at",
 		envMCPAllowRun,
 	)
 }

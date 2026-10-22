@@ -344,7 +344,7 @@ func axiRunTrigger(f facade, args []string, stdout, stderr io.Writer) int {
 	if rejectExtraArgs(fs, stderr, "axi run-trigger", "") {
 		return 2
 	}
-	// run-trigger executes repo-authored shell on the auto-approved path, so
+	// run-trigger executes repo-authored shell with no human in the loop, so
 	// refuse unless the operator explicitly trusts this repo. Checked before
 	// hook parsing so the refusal is deterministic.
 	if !mcpRunTrusted(*trustFlag) {

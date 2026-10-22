@@ -253,8 +253,6 @@ type fakeKernel struct {
 	push     PushFunc
 	approved bool
 	execErr  error
-	// approveErr, when set, is the push executor's failure once approved.
-	approveErr error
 	// during, when set, runs as each validation step executes: the stand-in
 	// for what a step does to the worktrees while it runs.
 	during func(domain.StepName)
@@ -300,9 +298,6 @@ func (k *fakeKernel) ExecuteBatch(ctx context.Context, steps []domain.StepName, 
 
 func (k *fakeKernel) Approve(ctx context.Context, _, _, _ string) (StepOutcome, error) {
 	k.approved = true
-	if k.approveErr != nil {
-		return StepOutcome{}, k.approveErr
-	}
 	if _, err := k.push(ctx); err != nil {
 		return StepOutcome{}, err
 	}

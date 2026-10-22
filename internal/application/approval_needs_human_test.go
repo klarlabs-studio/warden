@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
-	"slices"
 	"testing"
 
 	"go.klarlabs.de/warden/internal/domain"
@@ -91,47 +89,6 @@ func TestRunner_ApprovalRequestCarriesTheProfile(t *testing.T) {
 				t.Errorf("an unprofiled run must carry no profile, got %+v", approver.got.Profile)
 			case profile != "" && (approver.got.Profile == nil || approver.got.Profile.Name != "permissive@1"):
 				t.Errorf("profile = %+v, want permissive@1", approver.got.Profile)
-			}
-		})
-	}
-}
-
-// An approver's notice about how it answered reaches the run's warnings
-// whenever a push was attempted on that answer, and stays out of a run the
-// gate stopped, where nothing was approved for it to qualify.
-func TestRunner_ApproverNoticeReachesTheWarnings(t *testing.T) {
-	const notice = "approved by an agent, not a person"
-	cases := []struct {
-		name        string
-		decision    Decision
-		failPush    bool
-		wantOutcome domain.Outcome
-		wantNotice  bool
-	}{
-		{"approved and pushed", Decision{Approved: true, Principal: "agent", Notice: notice}, false, domain.OutcomePassed, true},
-		{"approved, push failed", Decision{Approved: true, Principal: "agent", Notice: notice}, true, domain.OutcomeAborted, true},
-		{"needs a human", Decision{NeedsHuman: true, Principal: "agent", Rationale: "a person must approve", Notice: notice}, false, domain.OutcomeNeedsApproval, false},
-		{"declined", Decision{Principal: "agent", Notice: notice}, false, domain.OutcomeRejected, false},
-		{"no notice", Decision{Approved: true, Principal: "agent"}, false, domain.OutcomePassed, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
-			kernel := &fakeKernel{outcomes: map[domain.StepName]domain.StepStatus{}}
-			if c.failPush {
-				kernel.approveErr = errors.New("remote rejected")
-			}
-			r := newRunner(t, git, kernel, &recordingApprover{decision: c.decision}, approvalCfg())
-
-			res, err := r.Run(context.Background(), domain.PrePush)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if res.Outcome != c.wantOutcome {
-				t.Fatalf("outcome = %s, want %s (%s)", res.Outcome, c.wantOutcome, res.Message)
-			}
-			if got := slices.Contains(res.Warnings, notice); got != c.wantNotice {
-				t.Errorf("notice in warnings = %v, want %v: %q", got, c.wantNotice, res.Warnings)
 			}
 		})
 	}

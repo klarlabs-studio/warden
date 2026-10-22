@@ -75,7 +75,7 @@ How it is applied:
 | Agent timeout | as configured | 10m default when unset | default as standard; `"0"` refused |
 | Container resource limits | n/a | n/a | strict@2 candidate |
 | Signing | as configured | `required: true` | `required: true` (ssh signer recommended, not forced) |
-| `require_approval` via MCP or axi | auto-approved | the agent surface cannot satisfy it | same |
+| `require_approval` via MCP or axi | auto-approved (until 0.43.0; since then refused everywhere, #295) | the agent surface cannot satisfy it | same |
 | `run_trigger` permission | unchanged | unchanged | unchanged |
 | Commits that declare an agent | recorded | recorded | a declared agent requires a notarized Agent Trace |
 | Default agent for built-in agent steps (`agent:`) | applies when it names a bundled preset | same | same |
@@ -197,7 +197,8 @@ requirement. It cannot buy a weaker gate.
 - **A child naming a lower profile** is a load error.
 - **New signed fields** are emitted only when a profile is active.
 - **Auto-approval on the agent surface** is refused under a profile; making that
-  the default everywhere is a separate proposal.
+  the default everywhere was a separate proposal (#295), announced in 0.42.0
+  and shipped in 0.43.0.
 - **The top-level `agent:`** applies only under a profile and only when it names
   a bundled preset. Turning it on everywhere would start model calls on every
   push in existing repositories.
