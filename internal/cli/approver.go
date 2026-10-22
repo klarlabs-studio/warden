@@ -64,11 +64,7 @@ func (a terminalApprover) Approve(ctx context.Context, req application.ApprovalR
 		}
 	}
 	describeApproval(a.out, req)
-	hint := "Approve by running `git push` from an interactive terminal, or via `warden axi`."
-	if !agentSurfaceMayApprove(req.Profile) {
-		hint = "Approve by running `git push` from an interactive terminal."
-	}
-	_, _ = fmt.Fprintln(a.out, "  non-interactive stream and no terminal to ask; declining. "+hint)
+	_, _ = fmt.Fprintln(a.out, "  non-interactive stream and no terminal to ask; declining. Approve by running `git push` from an interactive terminal.")
 	return application.Decision{Approved: false, Principal: "warden-cli", Rationale: "no tty"}, nil
 }
 
@@ -126,48 +122,18 @@ func ask(ctx context.Context, r io.Reader, w io.Writer, req application.Approval
 const agentSurfacePrincipal = "warden-agent-surface"
 
 // agentSurfaceApprover answers the approval gate for runs an agent starts
-// through MCP or axi. Without a profile, and under permissive, it approves
-// every gate, as these surfaces always have, and says so in a notice: a later
-// release stops it (#295). Under a profile that withholds approval from the
-// agent surface (standard, strict) it does not decide: the agent that asked
-// for the run cannot also be the person who approves it, so the run ends
-// needs_approval with nothing pushed and no note written.
+// through MCP or axi. It never approves, in any repository and under any
+// profile: the agent that asked for the run cannot also be the person who
+// approves it (#295). A run that reaches the gate ends needs_approval with
+// nothing pushed and no note written. Clean runs never consult it.
 type agentSurfaceApprover struct{}
 
-func (agentSurfaceApprover) Approve(ctx context.Context, req application.ApprovalRequest) (application.Decision, error) {
-	if agentSurfaceMayApprove(req.Profile) {
-		d, err := autoApprover{}.Approve(ctx, req)
-		d.Notice = agentSelfApprovalNotice
-		return d, err
-	}
+func (agentSurfaceApprover) Approve(_ context.Context, req application.ApprovalRequest) (application.Decision, error) {
 	return application.Decision{
 		NeedsHuman: true,
 		Principal:  agentSurfacePrincipal,
 		Rationale:  agentApprovalRequired(req),
 	}, nil
-}
-
-// agentSelfApprovalNotice announces the change #295 proposes, on the runs it
-// will affect: no person approved this gate, and a later release will stop
-// these surfaces approving it in every repository.
-const agentSelfApprovalNotice = "the approval gate was answered by this agent surface (MCP, axi) as warden-auto, not by a person. " +
-	"A later minor release will stop the agent surfaces approving in every repository, as standard and strict already do: " +
-	"a run like this one will end needs_approval, with nothing pushed and no note written, until a person approves from an interactive terminal. " +
-	"Drop require_approval from rules where no human approval was intended; a blocking finding will still need a person"
-
-// agentSurfaceMayApprove reports whether the agent surface may satisfy an
-// approval gate under profile. No profile keeps today's auto-approval. A
-// profile this warden cannot parse fails closed: the policy named it, so
-// guessing that it permits self-approval would weaken it.
-func agentSurfaceMayApprove(profile *domain.ResolvedProfile) bool {
-	if profile == nil {
-		return true
-	}
-	p, err := domain.ParseComplianceProfile(profile.Name)
-	if err != nil {
-		return false
-	}
-	return p.AgentSurfaceMayApprove()
 }
 
 // agentApprovalRequired is the message an agent reads when its run stopped at
@@ -178,6 +144,6 @@ func agentApprovalRequired(req application.ApprovalRequest) string {
 		how = "`git commit`"
 	}
 	return fmt.Sprintf(
-		"needs human approval: profile %s does not let an agent surface (MCP, axi) approve its own run, so nothing was pushed and no note was written. A person must approve: run %s from an interactive terminal and answer the approval prompt",
-		req.Profile.Name, how)
+		"needs human approval: an agent surface (MCP, axi) cannot approve its own run, so nothing was pushed and no note was written. A person must approve: run %s from an interactive terminal and answer the approval prompt",
+		how)
 }

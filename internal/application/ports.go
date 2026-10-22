@@ -227,10 +227,6 @@ type Decision struct {
 	// gate, and a person must. Approved is false with it. The run ends
 	// needs_approval rather than rejected, and Rationale says how to approve.
 	NeedsHuman bool
-	// Notice is a non-fatal warning about how the gate was answered, carried
-	// into the run's warnings when the run continues past the gate. Empty
-	// means there is nothing to say.
-	Notice string
 }
 
 // approvalRef is the record of an approval gate that required a decision.

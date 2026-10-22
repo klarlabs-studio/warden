@@ -178,7 +178,7 @@ type StatusInput struct{}
 
 // RunGate authorizes run_trigger before it executes the repository's configured
 // commands. It returns nil to permit the run, or a descriptive error to refuse
-// it. run_trigger runs on the auto-approving MCP/axi path with no human in the
+// it. run_trigger runs on the non-interactive MCP/axi path with no human in the
 // loop, so this is the sole operator-controlled checkpoint standing between an
 // AI client and arbitrary shell authored by a possibly-untrusted cloned repo;
 // the CLI supplies a gate backed by an explicit trust opt-in. The read-only
@@ -199,8 +199,7 @@ const runTriggerDescription = "Start the pipeline for a hook. Returns IMMEDIATEL
 	"This EXECUTES the repository's configured commands as shell on the non-interactive path " +
 	"(no human in the loop), so it is refused unless the operator has explicitly trusted this " +
 	"repo (`warden trust add`, the axi --trust flag, or WARDEN_MCP_ALLOW_RUN=1). " +
-	"Approval: without a profile, or under profile permissive, this surface auto-approves the " +
-	"gate and says so in summary.warnings; a later release will stop that in every repository. Under profile standard or strict it cannot: a run that needs approval (a rule's " +
+	"Approval: this surface never approves its own run. A run that needs approval (a rule's " +
 	"require_approval, or a high-severity finding) ends with summary.outcome=needs_approval, " +
 	"nothing pushed and no note written, and summary.message says how a person approves it " +
 	"(run `git push` from an interactive terminal). Do not retry it from here. " +
@@ -320,9 +319,8 @@ func NewServer(f Facade, version string, gate RunGate) *mcp.Server {
 		})
 
 	srv.Tool("run_respond").
-		Description("Not supported: a run never pauses here for an answer. Without a profile " +
-			"(or under permissive) this surface auto-approves; under standard or strict a run " +
-			"that needs approval ends needs_approval and a person approves it at a terminal. The " +
+		Description("Not supported: a run never pauses here for an answer. A run that needs " +
+			"approval ends needs_approval and a person approves it at a terminal. The " +
 			"operator checkpoint here is the per-repo trust grant that permits run_trigger at " +
 			"all, not a per-run prompt.").
 		Handler(func(map[string]any) (struct{}, error) {
