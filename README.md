@@ -1240,9 +1240,16 @@ execution:
   image: local/warden-checks:dev # prebuilt or pulled outside the hook
   platform: linux/arm64          # optional; linux/amd64 also accepted
   network: none                 # bridge explicitly permits network access
+  limits:                       # optional; each field may be left out
+    memory: 4GiB                # whole MiB/GiB/TiB; swap capped at the same size
+    cpus: "1.5"                 # decimal CPUs
+    pids: 1024                  # processes and threads
 ```
 
 Configure `execution.image` to run shell checks in ephemeral Linux containers.
+`execution.limits` bounds each container check's memory, CPUs and processes;
+it is passed to the engine as a request and not yet recorded in the note (see
+[resource limits](docs/container-execution.md#resource-limits)).
 On Apple-silicon macOS, Warden discovers Apple `container` first; Docker,
 Podman, and nerdctl are also supported. `execution.runtime`
 pins an engine and `execution.mode: host` explicitly selects host execution.

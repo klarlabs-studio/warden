@@ -129,6 +129,10 @@ type ContainerExecution struct {
 	// Rootless reports that the engine runs containers in a user namespace
 	// owned by the invoking user, where container root maps to that user.
 	Rootless bool
+	// Limits are the resource limits requested for each container; the zero
+	// value requests none. Selection refuses a runtime that cannot apply
+	// them, so a request is never dropped silently.
+	Limits domain.ExecutionLimits
 }
 
 // PredictionCache holds recent signed local successes for exact staged inputs.

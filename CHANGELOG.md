@@ -6,6 +6,24 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`execution.limits`: memory, CPU and process limits for container
+  checks.** A runaway `lint` or `test` in a container could exhaust the
+  machine or the engine's VM. `execution.limits` takes `memory` (whole MiB,
+  GiB or TiB; swap is capped at the same size), `cpus` (a decimal) and
+  `pids`, and passes them to Docker, Podman and nerdctl as `--memory`,
+  `--memory-swap`, `--cpus` and `--pids-limit`. Apple `container` takes
+  whole CPUs and has no process limit, so a `pids` limit or fractional
+  `cpus` rules it out: discovery moves on to the next engine, or, with
+  `runtime: apple`, the check fails naming the limit. Host steps, native
+  steps and agent steps are not bounded. The limits are a request to the
+  engine and are **not** recorded in the provenance note yet; a later
+  release records what the container observed, and builds `strict@2` on it.
+  An older warden rejects the key, so every machine and CI runner needs this
+  release before a repository adds it. See
+  [resource limits](docs/container-execution.md#resource-limits).
+
 ### Fixed
 
 - **A strict pre-push executes its required steps even on a cache hit.** A

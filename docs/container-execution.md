@@ -43,6 +43,41 @@ the requested image, the gate fails. A configured container never silently
 falls back to host execution. Execution settings inherit through `extends:`
 field by field.
 
+## Resource limits
+
+`execution.limits` bounds what each container check may consume:
+
+```yaml
+execution:
+  image: local/warden-checks:dev
+  limits:
+    memory: 4GiB   # whole MiB, GiB or TiB; swap is capped at the same size
+    cpus: "1.5"    # decimal, at most three places
+    pids: 1024     # processes and threads in the container
+```
+
+Every field is optional; one you leave out stays unbounded. Limits apply to
+container shell checks only: host steps, native steps such as
+`security-scan`, and agent steps (which run on the host) are not bounded.
+Through `extends:` a child that names one limit keeps the others it inherits.
+
+Docker, Podman and nerdctl get `--memory`, `--memory-swap`, `--cpus` and
+`--pids-limit`. Apple `container` sizes each container's VM: it takes whole
+CPUs and has no process limit, so a `pids` limit or a fractional `cpus` value
+rules Apple out. With `runtime: auto` discovery then moves on to the next
+engine; with `runtime: apple` the check fails naming the limit. A limit is
+never dropped silently.
+
+These flags are a request to the engine. An engine can ignore one: rootless
+Podman on cgroup v1 warns and runs the container unbounded. This release
+applies limits but does not record them in the provenance note, so a note
+says nothing about them either way. Recording what the container actually
+observed is planned for a later release.
+
+Every machine and CI runner that reads the configuration needs this warden
+release or later before a repository adds `execution.limits`: an older warden
+rejects the key and blocks the commit.
+
 ## Apple container
 
 Select Apple's CLI explicitly with:
