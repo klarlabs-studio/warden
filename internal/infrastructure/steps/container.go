@@ -39,6 +39,10 @@ func ResolveContainer(cfg domain.ExecutionConfig) (*application.ContainerExecuti
 		}
 		var selected *application.ContainerExecution
 		if runtimeName == "apple" {
+			if _, limitErr := appleLimitArgs(cfg.Limits); limitErr != nil {
+				problems = append(problems, runtimeName+": "+limitErr.Error())
+				continue
+			}
 			selected, err = resolveAppleContainer(bin, cfg)
 		} else {
 			selected, err = resolveCompatContainer(runtimeName, bin, cfg)
@@ -46,6 +50,9 @@ func ResolveContainer(cfg domain.ExecutionConfig) (*application.ContainerExecuti
 		if err != nil {
 			problems = append(problems, runtimeName+": "+err.Error())
 			continue
+		}
+		if cfg.Limits != nil {
+			selected.Limits = *cfg.Limits
 		}
 		return selected, nil
 	}
@@ -201,6 +208,11 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 	}
 	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
 	args = append(args, labelArgs()...)
+	limitArgs, err := compatLimitArgs(selected.Limits)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, limitArgs...)
 	args = append(args, compatUserArgs(selected, os.Getuid(), os.Getgid())...)
 	// Only Warden's explicit step inputs cross the boundary. In particular, do
 	// not inherit PATH, credentials, or host absolute build-cache locations.

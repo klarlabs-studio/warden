@@ -100,6 +100,11 @@ func runAppleContainer(ctx context.Context, sc application.StepContext, dir, nam
 	}
 	args := []string{"create", "--name", name, "--cap-drop", "ALL", "--platform", env.Platform, "--mount", "type=bind,source=" + dir + ",target=/workspace", "--workdir", "/workspace", "--entrypoint", "/bin/sh"}
 	args = append(args, labelArgs()...)
+	limitArgs, err := appleLimitArgs(&selected.Limits)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, limitArgs...)
 	if env.Network == "none" {
 		args = append(args, "--network", "none", "--no-dns")
 	} else {
