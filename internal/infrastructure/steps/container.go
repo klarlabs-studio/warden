@@ -205,7 +205,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 	env := selected.Environment
 	observedFile := ".warden-observed-" + nonce
 	defer func() {
-		if raw, err := os.ReadFile(filepath.Join(dir, observedFile)); err == nil {
+		if raw, err := readContainerObservation(dir, observedFile); err == nil {
 			o := domain.ParseContainerObservation(string(raw))
 			observed = &o
 		}

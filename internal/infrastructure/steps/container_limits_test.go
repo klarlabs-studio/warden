@@ -150,8 +150,8 @@ func TestShellContainerReportsObservedShortfalls(t *testing.T) {
 		name, observed string
 		wantShort      []string
 	}{
-		{"held", `cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\npids.max=128\nroutes=0\n`, nil},
-		{"engine ignored the limits", `cgroup=v2\nmemory.max=max\nmemory.swap.max=max\npids.max=max\nroutes=0\n`, []string{"memory: observed unbounded", "pids: observed unbounded"}},
+		{"held", `cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\npids.max=128\nroutes=0\nroutes6=0\n`, nil},
+		{"engine ignored the limits", `cgroup=v2\nmemory.max=max\nmemory.swap.max=max\npids.max=max\nroutes=0\nroutes6=0\n`, []string{"memory: observed unbounded", "pids: observed unbounded"}},
 		{"probe left nothing", "", []string{"memory: not observed", "network none: routes not observed"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

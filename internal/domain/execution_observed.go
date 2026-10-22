@@ -24,9 +24,12 @@ type ContainerObservation struct {
 	CPUQuota  *int64
 	CPUPeriod *int64
 	// Routes counts the IPv4 routes the workload saw; nil means not observed.
-	// Zero routes is how network none is observed. Interface lists are not
-	// evidence: kernels add fallback tunnel devices to every namespace.
+	// Both address families must be observed without non-loopback routes for
+	// network none. Interface lists are not evidence: kernels add fallback
+	// tunnel devices to every namespace.
 	Routes *int64
+	// RoutesIPv6 counts IPv6 routes outside loopback; nil means not observed.
+	RoutesIPv6 *int64
 }
 
 // unbounded is how a cgroup "max" is held in an observation.
@@ -59,9 +62,13 @@ func ParseContainerObservation(raw string) ContainerObservation {
 			if q, p := cgroupMax(quota), cgroupMax(period); ok && q != nil && p != nil && *p > 0 {
 				o.CPUQuota, o.CPUPeriod = q, p
 			}
-		case "routes":
+		case "routes", "routes6":
 			if n, err := strconv.ParseInt(value, 10, 64); err == nil && n >= 0 {
-				o.Routes = &n
+				if key == "routes" {
+					o.Routes = &n
+				} else {
+					o.RoutesIPv6 = &n
+				}
 			}
 		}
 	}
@@ -117,6 +124,12 @@ func (o ContainerObservation) Shortfalls(limits ExecutionLimits, network string)
 			out = append(out, "network none: routes not observed")
 		case *o.Routes > 0:
 			out = append(out, fmt.Sprintf("network none: observed %d route(s)", *o.Routes))
+		}
+		switch {
+		case o.RoutesIPv6 == nil:
+			out = append(out, "network none: IPv6 routes not observed")
+		case *o.RoutesIPv6 > 0:
+			out = append(out, fmt.Sprintf("network none: observed %d IPv6 route(s)", *o.RoutesIPv6))
 		}
 	}
 	return out
