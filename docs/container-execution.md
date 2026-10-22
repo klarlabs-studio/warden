@@ -69,10 +69,24 @@ engine; with `runtime: apple` the check fails naming the limit. A limit is
 never dropped silently.
 
 These flags are a request to the engine. An engine can ignore one: rootless
-Podman on cgroup v1 warns and runs the container unbounded. This release
-applies limits but does not record them in the provenance note, so a note
-says nothing about them either way. Recording what the container actually
-observed is planned for a later release.
+Podman on cgroup v1 warns and runs the container unbounded. So before the
+configured command runs, the container reads its own bounds: its cgroup v2
+`memory.max`, `memory.swap.max`, `cpu.max` and `pids.max`, and its IPv4
+routes (none under `network: none`). Where that falls short of the request
+(a limit unbounded or looser than asked, a cgroup v1 host where nothing can
+be read, routes under `network: none`), the step's summary and live output
+say so, for example:
+
+```
+warden: test container bounds not observed as requested: memory: observed unbounded; pids: observed unbounded
+```
+
+A shortfall does not change the verdict, and this release records neither
+the limits nor the observation in the provenance note, so a note says
+nothing about them either way. Recording the observation is planned for a
+later release, which will build a `strict@2` profile on it. The probe uses
+only shell builtins and writes one file, `.warden-observed-<nonce>`, to the
+workspace for the length of the check.
 
 Every machine and CI runner that reads the configuration needs this warden
 release or later before a repository adds `execution.limits`: an older warden

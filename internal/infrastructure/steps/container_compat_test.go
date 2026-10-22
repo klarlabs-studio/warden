@@ -130,7 +130,7 @@ func TestRootlessNerdctlRunArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	sc := application.StepContext{WorktreeDir: t.TempDir(), Container: selected}
-	if _, err := runContainer(context.Background(), sc, sc.WorktreeDir, "true"); err != nil {
+	if _, _, err := runContainer(context.Background(), sc, sc.WorktreeDir, "true"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(argsFile)
@@ -146,7 +146,7 @@ func TestRootlessNerdctlRunArguments(t *testing.T) {
 
 func TestContainerRunRequiresReference(t *testing.T) {
 	sc := application.StepContext{WorktreeDir: t.TempDir(), Container: &application.ContainerExecution{Binary: "/nonexistent", Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
-	if _, err := runContainer(context.Background(), sc, sc.WorktreeDir, "true"); err == nil {
+	if _, _, err := runContainer(context.Background(), sc, sc.WorktreeDir, "true"); err == nil {
 		t.Fatal("container ran without an inspected reference")
 	}
 }

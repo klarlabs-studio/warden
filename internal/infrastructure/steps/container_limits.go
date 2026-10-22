@@ -76,3 +76,22 @@ func appleLimitArgs(l *domain.ExecutionLimits) ([]string, error) {
 func formatMilliCPUs(milli int64) string {
 	return strconv.FormatFloat(float64(milli)/1000, 'f', -1, 64)
 }
+
+// observationProbe is the shell the workload runs before the configured
+// command: it writes what it can read of its own bounds to path, one key=value
+// per line (see domain.ParseContainerObservation). Only shell builtins are
+// used, since an image need not ship more than /bin/sh and cat. It never fails
+// the check: a value it cannot read is left out, and the record then says it
+// was not observed.
+//
+// It reads cgroup v2 only, from the workload's own cgroup root, and counts
+// IPv4 routes for the network. A check command runs after it in the same
+// writable workspace and could overwrite the file; ADR 0008 lists that
+// residual.
+func observationProbe(path string) string {
+	return `{ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then echo cgroup=v2;` +
+		` for f in memory.max memory.swap.max cpu.max pids.max; do v=;` +
+		` if read -r v < "/sys/fs/cgroup/$f" || [ -n "$v" ]; then echo "$f=$v"; fi; done; fi 2>/dev/null;` +
+		` if [ -r /proc/net/route ]; then n=0; { read -r _; while read -r _; do n=$((n+1)); done; } < /proc/net/route && echo "routes=$n"; fi 2>/dev/null;` +
+		` } > ` + shellQuote(path) + " 2>/dev/null || true\n"
+}

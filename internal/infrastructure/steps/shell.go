@@ -65,7 +65,7 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 		}
 	}
 	stamp := stampDiagnostics(sc.WorktreeDir, sc.Diagnostics)
-	out, err, contended := s.runIn(ctx, sc, sc.WorktreeDir, command)
+	out, observed, err, contended := s.runInObserved(ctx, sc, sc.WorktreeDir, command)
 	cleanupNote, err := splitCleanup(err)
 	res := s.resultFor(ctx, sc, out, err, contended)
 	s.addDiagnostics(sc, &res, stamp)
@@ -78,6 +78,8 @@ func (s ShellStep) Run(ctx context.Context, sc application.StepContext) (domain.
 	if sc.Container != nil {
 		env := sc.Container.Environment
 		res.Environment = &env
+		res.Observed = observed
+		s.reportShortfalls(sc, &res, observed)
 	}
 	if res.Status == domain.StepPass {
 		res.Contract = finishExecutionContract(ctx, sc, contract)
@@ -297,12 +299,19 @@ var contentionPoll = 2 * time.Second
 // into a pass: only output matching a narrow contention signature is retried,
 // and exhausting the budget still fails the step.
 func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, command string) (out []byte, err error, contended bool) {
+	out, _, err, contended = s.runInObserved(ctx, sc, dir, command)
+	return out, err, contended
+}
+
+// runInObserved is runIn that also returns what a container workload observed
+// of its bounds on the attempt whose output is returned (nil on the host).
+func (s ShellStep) runInObserved(ctx context.Context, sc application.StepContext, dir, command string) (out []byte, observed *domain.ContainerObservation, err error, contended bool) {
 	deadline := time.Now().Add(contentionBudget)
 	for attempt := 0; ; attempt++ {
 		// Run through the shell so configured commands may use pipes and globs,
 		// matching how a developer would run them.
 		if sc.Container != nil {
-			out, err = runContainer(ctx, sc, dir, command)
+			out, observed, err = runContainer(ctx, sc, dir, command)
 		} else {
 			cmd := exec.CommandContext(ctx, "sh", "-c", command)
 			cmd.Dir = dir
@@ -311,11 +320,11 @@ func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, c
 			out, err = runCaptured(cmd, sc)
 		}
 		if err == nil || !isContention(string(out)) {
-			return out, err, false
+			return out, observed, err, false
 		}
 		// A cancelled/timed-out context must surface as itself, not as contention.
 		if ctx.Err() != nil || time.Now().After(deadline) {
-			return out, err, ctx.Err() == nil
+			return out, observed, err, ctx.Err() == nil
 		}
 		if attempt == 0 && sc.OnOutput != nil {
 			// Say why the step appears to hang — once, not on every retry.
@@ -323,7 +332,7 @@ func (s ShellStep) runIn(ctx context.Context, sc application.StepContext, dir, c
 		}
 		select {
 		case <-ctx.Done():
-			return out, err, false
+			return out, observed, err, false
 		case <-time.After(contentionPoll):
 		}
 	}
@@ -395,4 +404,24 @@ func loadCaveat(load proc.Load) string {
 		"A wall-clock failure here may be the machine rather than your change; warden " +
 		"cannot tell which, so the verdict above stands. Re-run on a quiet machine " +
 		"before concluding the code is at fault."
+}
+
+// reportShortfalls says, in the step's summary and live output, where what the
+// container observed falls short of the limits and network it was given. It
+// changes no verdict and writes nothing into the note: the request alone is not
+// evidence, and recording the observation is a later release's job (ADR 0008).
+func (s ShellStep) reportShortfalls(sc application.StepContext, res *domain.StepResult, observed *domain.ContainerObservation) {
+	var o domain.ContainerObservation
+	if observed != nil {
+		o = *observed
+	}
+	shortfalls := o.Shortfalls(sc.Container.Limits, sc.Container.Environment.Network)
+	if len(shortfalls) == 0 {
+		return
+	}
+	line := "not observed as requested: " + strings.Join(shortfalls, "; ")
+	res.Summary += "; " + line
+	if sc.OnOutput != nil {
+		sc.OnOutput("warden: " + string(s.name) + " container bounds " + line)
+	}
 }

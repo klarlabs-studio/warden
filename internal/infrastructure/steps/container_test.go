@@ -41,6 +41,13 @@ image) last=""; for arg in "$@"; do last="$arg"; done
  if [ "$last" = ` + shellQuote(testTargetDigest) + ` ] && [ -n "${WARDEN_TEST_TARGET_INSPECTION:-}" ]; then printf '%s\n' "$WARDEN_TEST_TARGET_INSPECTION"; exit 0; fi
  printf '%s\n' ` + shellQuote(inspection) + ` ;;
 run) printf '%s\000' "$@" > "$WARDEN_TEST_CONTAINER_ARGS"
+ if [ -n "${WARDEN_TEST_OBSERVED:-}" ]; then
+  for a in "$@"; do
+   case "$a" in *src=*,dst=/workspace*) src=${a#*src=}; src=${src%%,dst=*} ;; esac
+   case "$a" in *.warden-observed-*) f=${a#*.warden-observed-}; f=.warden-observed-${f%%\'*} ;; esac
+  done
+  printf '%b' "$WARDEN_TEST_OBSERVED" > "$src/$f"
+ fi
  if [ "${WARDEN_TEST_CONTAINER_WAIT:-}" = yes ]; then exec sleep 30; fi
  echo container-output
  exit "${WARDEN_TEST_CONTAINER_EXIT:-0}" ;;
@@ -170,7 +177,7 @@ func TestContainerTimeoutRemovesContainer(t *testing.T) {
 	sc := application.StepContext{WorktreeDir: t.TempDir(), Container: &application.ContainerExecution{Binary: filepath.Join(dir, "docker"), Reference: testImageID, Environment: domain.ExecutionEnvironment{Runtime: "docker", ImageID: testImageID, Platform: "linux/arm64", Network: "none"}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if _, err := runContainer(ctx, sc, sc.WorktreeDir, "sleep 30"); err == nil {
+	if _, _, err := runContainer(ctx, sc, sc.WorktreeDir, "sleep 30"); err == nil {
 		t.Fatal("cancelled container passed")
 	}
 	if _, err := os.Stat(removed); err != nil {

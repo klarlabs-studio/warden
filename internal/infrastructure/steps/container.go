@@ -172,45 +172,58 @@ func containerProbeContext(ctx context.Context, bin string, args ...string) ([]b
 // runContainer mounts only the disposable tree. A nonce proves the engine sees
 // this exact directory, including with remote engine contexts. Host secrets,
 // dependency caches, git metadata directories and engine sockets are not mounted.
-func runContainer(ctx context.Context, sc application.StepContext, dir, command string) ([]byte, error) {
+//
+// Before the command, the workload records what it observes of its own bounds
+// (see observationProbe); the returned observation is that record, read after
+// the container exits, and is nil when the probe left none.
+func runContainer(ctx context.Context, sc application.StepContext, dir, command string) (out []byte, observed *domain.ContainerObservation, runErr error) {
 	selected := sc.Container
 	token := make([]byte, 16)
 	if _, err := rand.Read(token); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nonce := hex.EncodeToString(token)
 	name := containerName(nonce)
 	marker := ".warden-container-" + nonce
 	if err := os.WriteFile(filepath.Join(dir, marker), []byte(nonce), 0o600); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = os.Remove(filepath.Join(dir, marker)) }()
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var mount strings.Builder
 	writer := csv.NewWriter(&mount)
 	if err := writer.Write([]string{"type=bind", "src=" + abs, "dst=/workspace"}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	env := selected.Environment
-	checked := "test \"$(cat /workspace/" + marker + ")\" = " + shellQuote(nonce) + " || { echo 'warden: worktree mount verification failed' >&2; exit 125; };\n" + command
+	observedFile := ".warden-observed-" + nonce
+	defer func() {
+		if raw, err := os.ReadFile(filepath.Join(dir, observedFile)); err == nil {
+			o := domain.ParseContainerObservation(string(raw))
+			observed = &o
+		}
+		_ = os.Remove(filepath.Join(dir, observedFile))
+	}()
+	checked := "test \"$(cat /workspace/" + marker + ")\" = " + shellQuote(nonce) + " || { echo 'warden: worktree mount verification failed' >&2; exit 125; };\n" + observationProbe("/workspace/"+observedFile) + command
 	if env.Runtime == "apple" {
-		return runAppleContainer(ctx, sc, abs, name, checked)
+		out, runErr = runAppleContainer(ctx, sc, abs, name, checked)
+		return out, nil, runErr
 	}
 	if selected.Reference == "" {
-		return nil, fmt.Errorf("container execution has no inspected image reference to run")
+		return nil, nil, fmt.Errorf("container execution has no inspected image reference to run")
 	}
 	args := []string{"run", "--rm", "--name", name, "--pull=never", "--network=" + env.Network, "--cap-drop=ALL", "--security-opt=no-new-privileges", "--platform=" + env.Platform, "--mount", strings.TrimSuffix(mount.String(), "\n"), "--workdir=/workspace", "--entrypoint=/bin/sh"}
 	args = append(args, labelArgs()...)
 	limitArgs, err := compatLimitArgs(selected.Limits)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	args = append(args, limitArgs...)
 	args = append(args, compatUserArgs(selected, os.Getuid(), os.Getgid())...)
@@ -229,7 +242,7 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 	cmd := exec.CommandContext(ctx, selected.Binary, args...)
 	cmd.Env = scrubbedEnv()
 	proc.Isolate(cmd)
-	out, runErr := runCaptured(cmd, sc)
+	out, runErr = runCaptured(cmd, sc)
 	if ctx.Err() != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -237,8 +250,8 @@ func runContainer(ctx context.Context, sc application.StepContext, dir, command 
 		cleanup.Env = scrubbedEnv()
 		proc.Isolate(cleanup)
 		if cleanupOut, err := cleanup.CombinedOutput(); err != nil {
-			return out, fmt.Errorf("%w; remove container %s: %v (%s)", ctx.Err(), name, err, strings.TrimSpace(string(cleanupOut)))
+			return out, nil, fmt.Errorf("%w; remove container %s: %v (%s)", ctx.Err(), name, err, strings.TrimSpace(string(cleanupOut)))
 		}
 	}
-	return out, runErr
+	return out, nil, runErr
 }

@@ -61,7 +61,7 @@ func (s SecurityScanStep) Run(ctx context.Context, sc application.StepContext) (
 				return s.containerVersionFailure(err.Error()), nil
 			}
 			if found {
-				output, err := runContainer(ctx, sc, sc.WorktreeDir, shellQuote(scan.Binary)+" version")
+				output, _, err := runContainer(ctx, sc, sc.WorktreeDir, shellQuote(scan.Binary)+" version")
 				_, err = splitCleanup(err) // the version was read; a failed removal does not change it
 				if err != nil || !scanner.SameVersion(string(output), pin.Version) {
 					return s.containerVersionFailure("scanner in selected image does not report pinned version " + pin.Version), nil

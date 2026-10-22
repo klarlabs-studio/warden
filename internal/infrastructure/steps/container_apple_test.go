@@ -240,7 +240,7 @@ func TestAppleCancellationDeletesNamedContainer(t *testing.T) {
 	t.Setenv("APPLE_WAIT", "yes")
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	if _, err := runContainer(ctx, sc, sc.WorktreeDir, "sleep 30"); err == nil {
+	if _, _, err := runContainer(ctx, sc, sc.WorktreeDir, "sleep 30"); err == nil {
 		t.Fatal("cancelled run passed")
 	}
 	calls, err := os.ReadFile(os.Getenv("APPLE_CALLS"))

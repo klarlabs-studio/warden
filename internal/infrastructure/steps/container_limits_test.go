@@ -124,4 +124,59 @@ func TestContainerLimitsReachTheCgroup(t *testing.T) {
 	if !slices.Equal(lines, want) {
 		t.Fatalf("cgroup inside the container reads %q, want %q (an engine that ignores limits must be visible here)", lines, want)
 	}
+	// warden's own probe saw the same bounds, and the network none it ran in.
+	res, err := NewShellStep(domain.StepTest, "test").Run(ctx, application.StepContext{WorktreeDir: t.TempDir(), Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": "true"}})
+	if err != nil || res.Observed == nil {
+		t.Fatalf("no observation from a real engine: %+v %v", res, err)
+	}
+	if short := res.Observed.Shortfalls(selected.Limits, "none"); len(short) != 0 {
+		t.Fatalf("the probe saw shortfalls on a real engine: %q (observation %+v)", short, *res.Observed)
+	}
+}
+
+// What the workload observed reaches the step result, and a shortfall against
+// the request is reported in the summary and live output without changing the
+// verdict. An engine that ignored the limits looks exactly like this.
+func TestShellContainerReportsObservedShortfalls(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	fakeContainerEngine(t, dir, "docker", "0", testImageJSON)
+	t.Setenv("WARDEN_TEST_CONTAINER_ARGS", filepath.Join(t.TempDir(), "args"))
+	selected, err := ResolveContainer(domain.ExecutionConfig{Runtime: "docker", Image: "checks:dev", Limits: &domain.ExecutionLimits{Memory: "512MiB", Pids: 128}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, observed string
+		wantShort      []string
+	}{
+		{"held", `cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\npids.max=128\nroutes=0\n`, nil},
+		{"engine ignored the limits", `cgroup=v2\nmemory.max=max\nmemory.swap.max=max\npids.max=max\nroutes=0\n`, []string{"memory: observed unbounded", "pids: observed unbounded"}},
+		{"probe left nothing", "", []string{"memory: not observed", "network none: routes not observed"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("WARDEN_TEST_OBSERVED", c.observed)
+			var lines []string
+			worktree := t.TempDir()
+			sc := application.StepContext{WorktreeDir: worktree, Hook: domain.PreCommit, Container: selected, Commands: map[string]string{"test": "true"}, OnOutput: func(l string) { lines = append(lines, l) }}
+			res, err := NewShellStep(domain.StepTest, "test").Run(context.Background(), sc)
+			if err != nil || res.Status != domain.StepPass {
+				t.Fatalf("a shortfall must not change the verdict: %+v %v", res, err)
+			}
+			if c.observed != "" && (res.Observed == nil || res.Observed.Cgroup != "v2") {
+				t.Fatalf("observation not carried: %+v", res.Observed)
+			}
+			for _, want := range c.wantShort {
+				if !strings.Contains(res.Summary, want) || !strings.Contains(strings.Join(lines, "\n"), want) {
+					t.Errorf("summary %q / output %q lack %q", res.Summary, lines, want)
+				}
+			}
+			if c.wantShort == nil && strings.Contains(res.Summary, "not observed as requested") {
+				t.Errorf("bounds that held reported a shortfall: %q", res.Summary)
+			}
+			if entries, _ := os.ReadDir(worktree); len(entries) != 0 {
+				t.Errorf("probe files left in the worktree: %v", entries)
+			}
+		})
+	}
 }
