@@ -76,3 +76,29 @@ func appleLimitArgs(l *domain.ExecutionLimits) ([]string, error) {
 func formatMilliCPUs(milli int64) string {
 	return strconv.FormatFloat(float64(milli)/1000, 'f', -1, 64)
 }
+
+// observationProbe is the shell the workload runs before the configured
+// command: it writes what it can read of its own bounds to path, one key=value
+// per line (see domain.ParseContainerObservation). Only shell builtins are
+// used, since an image need not ship more than /bin/sh and cat. It never fails
+// the check: a value it cannot read is left out, and the record then says it
+// was not observed.
+//
+// It reads cgroup v2 only, from the workload's own cgroup root, and counts
+// IPv4 and non-loopback IPv6 routes for the network. A check command runs
+// after it in the same writable workspace and could overwrite the file;
+// ADR 0008 lists that residual.
+func observationProbe(path string) string {
+	return `{ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then echo cgroup=v2;` +
+		` for f in memory.max memory.swap.max cpu.max pids.max; do v=;` +
+		` if read -r v < "/sys/fs/cgroup/$f" || [ -n "$v" ]; then echo "$f=$v"; fi; done; fi 2>/dev/null;` +
+		routeObservationProbe("/proc/net/route", "/proc/net/ipv6_route") +
+		` } > ` + shellQuote(path) + " 2>/dev/null || true\n"
+}
+
+// IPv6 tables include loopback and unreachable loopback routes even with
+// network none. Count routes on every other interface conservatively.
+func routeObservationProbe(ipv4, ipv6 string) string {
+	return ` if [ -r ` + shellQuote(ipv4) + ` ]; then n=0; { read -r _; while read -r _; do n=$((n+1)); done; } < ` + shellQuote(ipv4) + ` && echo "routes=$n"; fi 2>/dev/null;` +
+		` if [ -r ` + shellQuote(ipv6) + ` ]; then n=0; while read -r dst dp src sp next metric ref use flags iface; do if [ -n "$iface" ] && [ "$iface" != lo ]; then n=$((n+1)); fi; done < ` + shellQuote(ipv6) + ` && echo "routes6=$n"; fi 2>/dev/null;`
+}

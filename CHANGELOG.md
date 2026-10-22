@@ -17,9 +17,14 @@ All notable changes to warden are documented here. The format follows
   whole CPUs and has no process limit, so a `pids` limit or fractional
   `cpus` rules it out: discovery moves on to the next engine, or, with
   `runtime: apple`, the check fails naming the limit. Host steps, native
-  steps and agent steps are not bounded. The limits are a request to the
-  engine and are **not** recorded in the provenance note yet; a later
-  release records what the container observed, and builds `strict@2` on it.
+  steps and agent steps are not bounded. The flags are only a request, so
+  each container check also reads its own bounds before its command runs
+  (cgroup v2 limits, and its routes for `network: none`) and the step's
+  summary says where they fall short of the request: an engine that ignored
+  a limit, a cgroup v1 host, routes under `network: none`. A shortfall does
+  not change the verdict. Neither the limits nor the observation is recorded
+  in the provenance note yet; a later release records the observation and
+  builds `strict@2` on it.
   An older warden rejects the key, so every machine and CI runner needs this
   release before a repository adds it. See
   [resource limits](docs/container-execution.md#resource-limits).

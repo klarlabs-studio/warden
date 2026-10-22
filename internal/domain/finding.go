@@ -174,6 +174,11 @@ type StepResult struct {
 	// ran for, in path order. The kernel adds one `<step>.workspace` evidence
 	// record per entry, so what ran where is inside the run's evidence chain.
 	Workspaces []WorkspaceOutcome
+	// Observed is what a container check's workload read of its own bounds
+	// (cgroup v2 limits, routes) before its command ran; nil on the host or
+	// when the probe left no record. Like Outcome it is read only by delivery
+	// surfaces and is not part of the evidence chain or the signed record.
+	Observed *ContainerObservation
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See
