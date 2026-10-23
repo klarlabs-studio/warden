@@ -8,6 +8,10 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- Original pre-CI shadow-plan capture with run/attempt/commit binding and
+  independent job-timing checks in the advisory measurement report. Older
+  runs are explicitly labelled retrospective; planner failure keeps CI enabled.
+
 - Advisory CI measurement for Warden itself: protected always-run inventory,
   explicit historical baseline, retained shadow plans and completed-job reports.
   Existing CI gates remain enabled; the bootstrap establishes no job equivalence.

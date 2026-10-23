@@ -144,12 +144,44 @@ def build_report(plan, current, baseline, jobs, baseline_jobs, mapping):
                             "A shadow run authorizes no reuse and claims no avoided runner time."]}
 
 
+def validate_capture(capture, plan, current, jobs, mapping):
+    """Advisory timing check, never an authentication or reuse decision."""
+    for field, expected in (("version", 1), ("run_id", current["id"]),
+                            ("run_attempt", current["run_attempt"])):
+        if type(capture[field]) is not int or capture[field] != expected:
+            raise ValueError("original plan capture " + field + " mismatch")
+    if capture["sha"] != current["head_sha"] or capture["sha"] != plan["sha"]:
+        raise ValueError("original plan capture commit mismatch")
+    captured = timestamp(capture["captured_at"])
+    if captured < timestamp(current["created_at"]):
+        raise ValueError("original plan predates workflow run")
+    planners = [job for job in jobs if job["name"] == "Capture shadow plan"]
+    if len(planners) != 1 or planners[0].get("conclusion") != "success":
+        raise ValueError("original planner job missing, ambiguous or unsuccessful")
+    planner = planners[0]
+    finished = timestamp(planner["completed_at"])
+    if not timestamp(planner["started_at"]) <= captured <= finished:
+        raise ValueError("capture timestamp outside planner job")
+    # The GitHub job boundary independently corroborates the ordering; the
+    # artifact's self-reported timestamp alone is insufficient.
+    # Require each mapped job, not just whichever happens to have timestamps.
+    # Missing/skipped jobs cannot establish pre-execution timing.
+    for name in mapping.values():
+        matches = [job for job in jobs if job["name"] == name]
+        if len(matches) != 1 or not matches[0].get("started_at"):
+            raise ValueError("original plan timing unavailable for " + name)
+        if finished > timestamp(matches[0]["started_at"]):
+            raise ValueError("original plan captured after job started: " + name)
+    return capture["captured_at"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--run", type=int, required=True)
     parser.add_argument("--baseline", type=int, required=True)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--capture", type=Path, help="Original pre-CI capture metadata; omission labels the plan retrospective")
     parser.add_argument("--jobs", type=Path, required=True, help="JSON object mapping policy jobs to exact GitHub job names")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository) or min(args.run, args.baseline) <= 0:
@@ -159,6 +191,14 @@ def main():
         current, jobs = snapshot(args.repository, args.run)
         baseline, previous = snapshot(args.repository, args.baseline)
         report = build_report(plan, current, baseline, jobs, previous, mapping)
+        report["plan_source"] = "retrospective"
+        if args.capture:
+            report["plan_captured_at"] = validate_capture(
+                decode(args.capture.read_text()), plan, current, jobs, mapping)
+            report["plan_source"] = "pre_ci_capture"
+            report["planner_runner_seconds"] = duration(next(
+                job for job in jobs if job["name"] == "Capture shadow plan"))
+            report["limitations"].append("The original artifact and planner timing are advisory measurements, not authenticated execution evidence or skip authorization.")
         report["repository"] = args.repository
         print(json.dumps(report, sort_keys=True, allow_nan=False))
     except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.CalledProcessError) as error:
