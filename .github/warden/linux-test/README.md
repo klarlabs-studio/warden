@@ -105,6 +105,16 @@ engines. Supplying the image opts into containers; no image keeps host execution
 The image here contains the test toolchain, not every tool used by Warden's own
 lint and security steps. Do not enable it globally for those steps.
 
+## Toolchain security refresh
+
+The source recipe and repository toolchain now require Go 1.26.10. Published
+profiles from run `39997734827` still describe the older Go 1.26.7 images; source
+changes cannot update an immutable registry image. The new shared govulncheck
+job reported reachable standard-library advisories for that older toolchain.
+Publish replacements after this refresh merges, verify their signatures and
+non-root offline execution, and update the profiles before adopting shared CI
+reuse. No skip decision is enabled by this source update.
+
 ## Independently prepare per-commit expectations
 
 Reviewed publication pins are checked in under `profiles/amd64` and
