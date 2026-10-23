@@ -32,6 +32,42 @@ It is an additional shadow run, with no authority to suppress CI. It does not
 publish an image. Manual runs should select a reviewed revision. Pull request runs have read-only
 permissions and no persisted checkout credentials.
 
+## Publish a reviewed image
+
+After the publishing workflow is merged, dispatch `Publish Linux test image`
+against `main`. Other branches and forks cannot run its publishing job. Each
+native Linux runner builds and tests its own architecture with network disabled
+during validation. Only a successful offline run reaches the registry push.
+The workflow publishes separate amd64 and arm64 images under
+`ghcr.io/klarlabs-studio/warden/linux-test`, with source commit, architecture,
+run and attempt in the tag. There is no floating `latest` tag or combined index.
+
+The workflow pulls the published digest, checks its Docker config identity
+against the image tested locally, signs the registry digest using keyless
+Cosign, and verifies that signature with the exact workflow identity. Each
+architecture's artifact includes `receipt.json`, build/pull inspection,
+signature verification output and coverage. A failed publication can leave an
+unsigned image; require successful signature verification before adoption.
+Package visibility and pull access must also be checked for the intended users.
+
+Use `registry_reference` from a successful receipt as the immutable pull
+reference. Verify it before pulling (Cosign v3):
+
+```sh
+cosign verify \
+  --certificate-identity 'https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/klarlabs-studio/warden/linux-test@sha256:REVIEWED_DIGEST
+```
+
+Signing establishes the publisher of that image digest. It does not approve a
+CI job policy, attest a candidate commit, or sign the accompanying receipt.
+Review the selected source commit and inspection evidence before pinning policy.
+Docker's `docker_config_id` and the registry manifest digest remain distinct
+identities. Apple users must inspect the pulled image's manifest identity;
+never substitute the Docker config ID for it. Publishing does not change
+`.warden.yaml`, the shadow policy, or any CI skip decision.
+
 For local Warden adoption, merge these settings into a dedicated test-only
 configuration (the execution settings apply to every configured shell step):
 
