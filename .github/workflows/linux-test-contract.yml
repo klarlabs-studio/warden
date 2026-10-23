@@ -23,12 +23,12 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
-            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:54f1ba60ee496bb87eff42b23008f1db274eb0bfeb39919ebec4b83bed63367c
-            config: sha256:2db595ae74e5ddf981c8201ef088f2a40a80562ee5a919b5bbf3dfdf10f3c10c
+            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:b79bd44e3a0505ceb5b649bd6dddd6a9d28ebd6860ea501c25b3022efeb87653
+            config: sha256:73ddfd49f0c86671005a205e770a59f8ea4929b14c987baa23c3420bcd61f261
           - arch: arm64
             runner: ubuntu-24.04-arm
-            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:48b833c9e475cbdd54a7849ac38ff6b2878ee029b36a87ccac06a6729c737382
-            config: sha256:4a10a007243bdb5727eef5f02ba8f8f6e676d90e3abb146cebd562bd350ff07c
+            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:5ec11b743a232d0f519ee247337e6528a17310ab83cd71fcdc23df1b79580578
+            config: sha256:92e764f474113cda400166515361d9adf1c286d67fa0ad2988ce144411a18ba7
     env:
       IMAGE: ${{ matrix.image }}
       IMAGE_CONFIG: ${{ matrix.config }}
@@ -56,7 +56,9 @@ jobs:
       - name: Execute the pinned test contract
         run: |
           set -euo pipefail
-          docker run --rm --network none --volume "$GITHUB_WORKSPACE:/workspace" \
+          sudo chown -R 10001:10001 "$GITHUB_WORKSPACE"
+          docker run --rm --network none --user 10001:10001 --env HOME=/tmp \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
             "$IMAGE_CONFIG" /usr/local/bin/warden-linux-test
           test -s coverage.out
           cp coverage.out "$RUNNER_TEMP/linux-test-contract/coverage.out"

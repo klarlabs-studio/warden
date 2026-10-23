@@ -36,9 +36,10 @@ unchanged, including the per-file SSH interoperability floors.
 
 Images from publication run `39990134467` predate this fix. They passed the
 root CI run but fail the SSH coverage floors under Warden's unmapped host UID.
-Do not adopt those images for local-to-CI reuse. Publish and review replacement
-image identities after this fix merges; old signatures establish the publisher,
-not suitability for Warden's non-root execution.
+Do not adopt those images for local-to-CI reuse. The profiles below pin the
+replacement images from run `39997734827`, which passed non-root validation on
+both architectures. Old signatures establish the publisher, not suitability for
+Warden's non-root execution.
 
 The `Linux test pilot` workflow runs manually or on pull requests changing the
 pilot or dependency manifests. It runs the same command under Docker with
@@ -123,7 +124,7 @@ Pull the pinned image before running Warden; hook validation never needs to
 download a runtime or image. For Apple silicon:
 
 ```sh
-container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:48b833c9e475cbdd54a7849ac38ff6b2878ee029b36a87ccac06a6729c737382
+container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:5ec11b743a232d0f519ee247337e6528a17310ab83cd71fcdc23df1b79580578
 # In a disposable checkout, copy profiles/arm64/.warden.yaml to .warden.yaml,
 # commit it, then run the test-only pre-push gate.
 warden run pre-push --attest-only
@@ -132,7 +133,8 @@ warden run pre-push --attest-only
 `Linux test contract` is a manual/reusable workflow using those same immutable
 image references and `/usr/local/bin/warden-linux-test` command. It verifies the
 publisher signature before pulling, checks the exact Docker config ID and
-platform, and runs without network access. It never rebuilds the image or reads
+platform, and runs as UID/GID 10001 with HOME=/tmp and no network access. It
+never rebuilds the image or reads
 the candidate's policy/config to choose its command. Dependency changes that
 need uncached modules fail offline and require a newly published, reviewed image.
 It has no skipping logic and runs automatically only for changes to these pins,

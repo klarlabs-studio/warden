@@ -19,6 +19,15 @@ func TestPinnedLinuxPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, required := range []string{
+		"sudo chown -R 10001:10001",
+		"--network none --user 10001:10001 --env HOME=/tmp",
+		"cosign verify --certificate-identity",
+	} {
+		if !strings.Contains(string(workflow), required) {
+			t.Fatalf("remote workflow lost non-root signed-image validation %q", required)
+		}
+	}
 	for _, arch := range []string{"amd64", "arm64"} {
 		t.Run(arch, func(t *testing.T) {
 			dir := filepath.Join(root, "warden", "linux-test", "profiles", arch)
@@ -43,7 +52,7 @@ func TestPinnedLinuxPolicies(t *testing.T) {
 				}
 			}
 			readJSON("publication.json", &receipt)
-			if receipt.Source != "badfc349bcb68a4bf24f9c96be8564795f2cbb52" ||
+			if receipt.Source != "ba1e8e1d0c42782328e400911c3e30cf5011664a" ||
 				receipt.Platform != "linux/"+arch || cfg.Execution.Image != receipt.Reference ||
 				!domain.ValidContainerImageID(receipt.ConfigID) {
 				t.Fatal("publication and local environment differ")
