@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Advisory CI measurement for Warden itself: protected always-run inventory,
+  explicit historical baseline, retained shadow plans and completed-job reports.
+  Existing CI gates remain enabled; the bootstrap establishes no job equivalence.
+
 ## [0.45.0] - 2026-10-23
 
 Evaluate protected CI reuse in shadow mode before enabling skips, and compare

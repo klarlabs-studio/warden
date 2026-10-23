@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "jobs": {
+    "build": null,
+    "lint": null,
+    "test": null,
+    "security": null,
+    "windows-amd64": null,
+    "windows-arm64": null,
+    "e2e": null,
+    "podman": null,
+    "nerdctl": null
+  }
+}

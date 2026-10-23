@@ -304,3 +304,39 @@ billed minutes, wall-clock speedup, local validation cost, or money saved. The
 report does not calculate net savings: those require local validation and the
 full workflow overhead as well as provider billing data. GitLab currently has
 shadow plans but no completed-run measurement adapter.
+
+## Warden's own CI measurement
+
+`.github/workflows/ci-shadow.yml` is an advisory `workflow_run` collector. After
+an in-repository `CI` run completes, it records a shadow plan and compares nine
+exact job names against successful baseline run `39917037757` (the v0.45.0
+release PR). It can also backfill a completed run through `workflow_dispatch`
+on `main`. Fork runs are excluded. The collector has read-only repository and
+Actions permissions, executes tooling from the reviewed default-branch revision,
+and never executes candidate commands or consumes candidate artifacts.
+
+The protected inventory and mapping live in `.github/warden/shadow-policy.json`
+and `shadow-jobs.json`. Every bootstrap policy entry is `null`: local host checks
+do not establish equivalence to coverage checks, Linux execution, Windows
+compilation, or the container-engine suites. Empty eligibility is intentional.
+The benchmark is excluded because it is conditional; totals cover only the nine
+mapped jobs, not all workflow overhead, billing, or developer-machine costs.
+
+The artifact retains run metadata, plan and report for 30 days. The summary
+shows verifier duration, observed job duration totals, historical differences
+and eligible failures. Missing jobs remain unknown. A collector failure reports
+measurement failure and cannot change the originating CI result or skip a job.
+The historical baseline is explicit; changing it requires review.
+
+These bootstrap plans are generated **after** CI and are retrospective
+measurements, not a record of what was known before CI started. Before replacing
+any `null` policy with a reusable contract, first review environment and command
+equivalence and move plan capture into the originating CI run using protected
+tooling. Retain that original plan and measure representative runs, especially
+eligible jobs that fail remotely, before considering enforce mode. Do not switch
+the retrospective collector into an authorization path.
+
+Initial manual measurement of run `39920603496` against baseline `39917037757`
+observed all nine jobs: 646 versus 665 summed runner seconds. The 19-second
+difference is normal observed variation; eligibility and estimated avoided work
+were both zero. It does not demonstrate savings caused by Warden.
