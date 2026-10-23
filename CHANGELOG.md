@@ -6,6 +6,14 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-23
+
+Shift CI checks left with protected per-job reuse plans, GitHub and GitLab
+consumers, and enforceable initial container bounds through `strict@2`.
+Upgrade CI readers before enabling signed observations or the new profile;
+older pinned readers reject the new signed field. Reuse eligibility and verifier
+timings do not establish actual skipped jobs or saved CI minutes.
+
 ### Added
 
 - **Forge consumers for protected CI job plans.** The GitHub `warden-plan`
