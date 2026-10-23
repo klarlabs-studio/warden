@@ -1,0 +1,100 @@
+name: Publish Linux test image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-test-image-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Only reviewed main code may execute with package and signing credentials.
+    if: github.ref == 'refs/heads/main' && github.repository == 'klarlabs-studio/warden'
+    name: Publish Linux test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      PLATFORM: linux/${{ matrix.arch }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+      - name: Build prepared image
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/linux-test"
+          tag="$image:sha-$GITHUB_SHA-$ARCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          sh .github/warden/linux-test/build.sh docker "$PLATFORM" "$tag"
+          mkdir -p "$RUNNER_TEMP/linux-test-image"
+          docker image inspect "$tag" > "$RUNNER_TEMP/linux-test-image/built.json"
+          jq -e --arg arch "$ARCH" 'length == 1 and .[0].Os == "linux" and .[0].Architecture == $arch' \
+            "$RUNNER_TEMP/linux-test-image/built.json"
+      - name: Validate the exact image offline
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --volume "$GITHUB_WORKSPACE:/workspace" \
+            "$TAG" /usr/local/bin/warden-linux-test
+          test -s coverage.out
+          cp coverage.out "$RUNNER_TEMP/linux-test-image/coverage.out"
+      - name: Publish and verify registry identity
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$TAG"
+          docker image inspect "$TAG" > "$RUNNER_TEMP/linux-test-image/published.json"
+          reference=$(jq -er --arg image "$IMAGE" \
+            '.[0].RepoDigests | map(select(startswith($image + "@sha256:"))) | unique | if length == 1 then .[0] else error("ambiguous registry identity") end' \
+            "$RUNNER_TEMP/linux-test-image/published.json")
+          [[ "$reference" =~ @sha256:[0-9a-f]{64}$ ]]
+          docker pull --platform "$PLATFORM" "$reference"
+          docker image inspect "$reference" > "$RUNNER_TEMP/linux-test-image/pulled.json"
+          built=$(jq -er '.[0].Id' "$RUNNER_TEMP/linux-test-image/built.json")
+          pulled=$(jq -er '.[0].Id' "$RUNNER_TEMP/linux-test-image/pulled.json")
+          test "$built" = "$pulled"
+          jq -e --arg arch "$ARCH" 'length == 1 and .[0].Os == "linux" and .[0].Architecture == $arch' \
+            "$RUNNER_TEMP/linux-test-image/pulled.json"
+          cosign sign --yes "$reference"
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/linux-test-image.yml@refs/heads/main"
+          cosign verify --certificate-identity "$identity" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference" \
+            > "$RUNNER_TEMP/linux-test-image/signature.json"
+          jq -n --arg source "$GITHUB_SHA" --arg platform "$PLATFORM" \
+            --arg reference "$reference" --arg config "$built" --arg identity "$identity" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{version: 1, source_commit: $source, platform: $platform, registry_reference: $reference,
+              docker_config_id: $config, signing_identity: $identity,
+              run_id: $run, run_attempt: $attempt}' > "$RUNNER_TEMP/linux-test-image/receipt.json"
+          echo "Published and verified: \`$reference\` ($PLATFORM)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain image observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-test-image-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-test-image/
+          if-no-files-found: error
+          retention-days: 30
