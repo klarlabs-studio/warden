@@ -106,6 +106,44 @@ lint and security steps. Do not enable it globally for those steps.
 
 ## Independently prepare per-commit expectations
 
+Reviewed publication pins are checked in under `profiles/amd64` and
+`profiles/arm64`. Each contains a dedicated `.warden.yaml`, the observed
+publication receipt and a Docker policy template. arm64 also has an Apple
+template using the manifest identity observed after pulling that exact digest.
+Both configurations retain runtime auto-discovery. Choose the template matching
+the engine that actually ran; a Docker note will fail the Apple template and
+vice versa. The effective configuration digests are pinned, with regression
+checks against the normal config loader. Editing or merging these settings into
+another configuration changes that digest and requires a separately reviewed
+template.
+
+Use these configurations only in a disposable test checkout: replacing this
+repository's normal `.warden.yaml` would remove its lint and security steps.
+Pull the pinned image before running Warden; hook validation never needs to
+download a runtime or image. For Apple silicon:
+
+```sh
+container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:48b833c9e475cbdd54a7849ac38ff6b2878ee029b36a87ccac06a6729c737382
+# In a disposable checkout, copy profiles/arm64/.warden.yaml to .warden.yaml,
+# commit it, then run the test-only pre-push gate.
+warden run pre-push --attest-only
+```
+
+`Linux test contract` is a manual/reusable workflow using those same immutable
+image references and `/usr/local/bin/warden-linux-test` command. It verifies the
+publisher signature before pulling, checks the exact Docker config ID and
+platform, and runs without network access. It never rebuilds the image or reads
+the candidate's policy/config to choose its command. Dependency changes that
+need uncached modules fail offline and require a newly published, reviewed image.
+It has no skipping logic and is not automatically added to each PR. The
+separate build-based pilot remains available to test proposed recipe/module
+changes before publishing a replacement image.
+
+These templates describe this dedicated test contract only. The pinned shared
+Go CI workflow has no test-job override, so its existing test job remains
+required and cannot yet be suppressed. Aligning its interface or replacing its
+test job is a separate integration step; the current shadow policy stays all-run.
+
 Build the preparer from a reviewed checkout, outside the candidate:
 
 ```sh

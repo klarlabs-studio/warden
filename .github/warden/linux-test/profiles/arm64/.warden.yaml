@@ -1,0 +1,11 @@
+# Dedicated test-only configuration. Install only in a disposable checkout.
+execution:
+  mode: container
+  runtime: auto
+  image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:48b833c9e475cbdd54a7849ac38ff6b2878ee029b36a87ccac06a6729c737382
+  platform: linux/arm64
+  network: none
+commands:
+  test: /usr/local/bin/warden-linux-test
+steps:
+  pre_push: [test]
