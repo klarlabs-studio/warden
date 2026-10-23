@@ -6,10 +6,10 @@
       "steps": {
         "test": {
           "command": "/usr/local/bin/warden-linux-test",
-          "configuration_digest": "sha256:04b976b90a60e8ed30649797427f573b72a71dd678eeeefd387b9c1a1c5d5c48",
+          "configuration_digest": "sha256:d70aeb0ea1477141d7fa3d88fc5bc2edf5ead9ca7d1a6fc8008e97ed203aad35",
           "context_digest": "",
           "inputs": null,
-          "image_id": "sha256:92e764f474113cda400166515361d9adf1c286d67fa0ad2988ce144411a18ba7",
+          "image_id": "sha256:36715d0873bbd86edf9c0a73a810b56c3c1d78f81108d03d165f57e52887ae72",
           "image_id_kind": "config",
           "platform": "linux/arm64",
           "network": "none"

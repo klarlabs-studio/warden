@@ -37,7 +37,7 @@ unchanged, including the per-file SSH interoperability floors.
 Images from publication run `39990134467` predate this fix. They passed the
 root CI run but fail the SSH coverage floors under Warden's unmapped host UID.
 Do not adopt those images for local-to-CI reuse. The profiles below pin the
-replacement images from run `39997734827`, which passed non-root validation on
+replacement images from run `40009451684`, which passed non-root validation on
 both architectures. Old signatures establish the publisher, not suitability for
 Warden's non-root execution.
 
@@ -107,20 +107,21 @@ lint and security steps. Do not enable it globally for those steps.
 
 ## Toolchain security refresh
 
-The source recipe and repository toolchain now require Go 1.26.10. Published
-profiles from run `39997734827` still describe the older Go 1.26.7 images; source
-changes cannot update an immutable registry image. The new shared govulncheck
-job reported reachable standard-library advisories for that older toolchain.
-Publish replacements after this refresh merges, verify their signatures and
-non-root offline execution, and update the profiles before adopting shared CI
-reuse. No skip decision is enabled by this source update.
+The source recipe, repository toolchain and pinned images use Go 1.26.10.
+Run `40009451684` published the replacements after native amd64 and arm64 offline
+validation as UID 10001. Their manifests, config identities, platforms and exact
+publisher signatures were independently verified before pinning. Earlier images
+from run `39997734827` contain Go 1.26.7, for which the shared govulncheck job
+reported reachable standard-library advisories. Updating source cannot update an
+immutable image; use the refreshed references below. CI skipping remains disabled.
 
 ## Independently prepare per-commit expectations
 
 Reviewed publication pins are checked in under `profiles/amd64` and
 `profiles/arm64`. Each contains a dedicated `.warden.yaml`, the observed
 publication receipt and a Docker policy template. arm64 also has an Apple
-template using the manifest identity observed after pulling that exact digest.
+template using the independently verified registry manifest identity. Verify
+the pulled Apple identity against that manifest before using the template.
 Both configurations retain runtime auto-discovery. Choose the template matching
 the engine that actually ran; a Docker note will fail the Apple template and
 vice versa. The effective configuration digests are pinned, with regression
@@ -134,7 +135,7 @@ Pull the pinned image before running Warden; hook validation never needs to
 download a runtime or image. For Apple silicon:
 
 ```sh
-container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:5ec11b743a232d0f519ee247337e6528a17310ab83cd71fcdc23df1b79580578
+container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:e97a6c1dc0a1e3ad504528394bf675ed3aa58f66a75eedb73d561a3491090f24
 # In a disposable checkout, copy profiles/arm64/.warden.yaml to .warden.yaml,
 # commit it, then run the test-only pre-push gate.
 warden run pre-push --attest-only
@@ -152,10 +153,22 @@ their regression test or its workflow, rather than on every PR. The
 separate build-based pilot remains available to test proposed recipe/module
 changes before publishing a replacement image.
 
-These templates describe this dedicated test contract only. The pinned shared
-Go CI workflow has no test-job override, so its existing test job remains
-required and cannot yet be suppressed. Aligning its interface or replacing its
-test job is a separate integration step; the current shadow policy stays all-run.
+The main CI caller now selects this same signed amd64 Docker contract through
+the shared workflow interface merged in `klarlabs-studio/.github#88`. It runs
+the pinned command once, including the coverage check from the produced profile.
+Its `test-reuse-sha` input is explicitly empty and the shadow policy stays all-run.
+The caller pins the reviewed shared merge commit.
+
+The shared container path tests the PR head, which is the commit local evidence
+can attest. The previous host job tested GitHub's synthetic merge checkout.
+The separate E2E/runtime jobs retain their normal merge checkout. Any additional
+merge-result unit-test requirement needs its own gate; local head evidence cannot
+establish that result. The shared pin also includes upstream timeout, nox and
+govulncheck updates since the previous pinned revision.
+
+Protected per-commit policy preparation, independently established base/branch
+context, and a validated planner-to-caller output are still required before
+reuse can be enabled. An Apple arm64 result cannot suppress the amd64 contract.
 
 Build the preparer from a reviewed checkout, outside the candidate:
 
@@ -210,13 +223,12 @@ does not infer either value from the note.
 
 Apple reports a manifest identity; Docker reports a config identity. arm64 and
 amd64 differ too. These are separate expectations. An Apple arm64 pass does not
-replace an amd64 Docker job. The shared CI job currently installs an unpinned
-coverctl version, so this pilot cannot replace that whole job until its command,
-toolchain and image expectations are aligned. End-to-end runtime suites remain
+replace an amd64 Docker job. The opted-in shared CI job uses the pinned image
+and command; ordinary callers without a container contract retain host testing. End-to-end runtime suites remain
 separate; `go test ./...` does not enable WARDEN_E2E.
 Optional platform/tool suites (for example PowerShell) can still skip inside
 this Linux image. A matching Go command alone does not establish CI equivalence.
 The pilot instruments `-coverpkg=./...` so CLI integration tests contribute to
-service coverage in the race profile. The existing shared workflow instead
-collects coverage in a second coverctl test pass. This difference must also be
-reviewed before declaring the whole remote job equivalent.
+service coverage in the race profile. The previous shared host job collected coverage in a
+second coverctl test pass. The opt-in contract consumes the existing profile;
+coverage floors are unchanged.

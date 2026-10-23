@@ -84,7 +84,7 @@ jobs:
     # means here, so leaving it floating lets anyone who can push to another
     # repository change this one's gate. Dependabot bumps it, which makes each
     # change a reviewable diff rather than a silent one.
-    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@4b0f34c9c8efdfe6bb4aa9854e569f894f896118 # main, 2026-08-10
+    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@0691e2eaa419a3998e4a3948ab765a9a8d4c3299 # container contract, .github PR #88
     permissions:
       contents: read
       security-events: write
@@ -93,6 +93,11 @@ jobs:
     with:
       # Runtime tests run on Unix; Windows compilation is checked below.
       cross-platform: false
+      # Match the independently reviewed test-only local contract. Reuse is
+      # deliberately empty until protected per-commit policy preparation is wired.
+      test-container-contract: >-
+        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad","config_id":"sha256:bafb4e708638a0e6af0e072f6931ba32b0eace8c7d6c7220984664acbdb9b1e7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
+      test-reuse-sha: ''
 
   windows-build:
     needs: [shadow-plan]
@@ -219,7 +224,8 @@ jobs:
           PROFILE
           sudo systemctl reload apparmor.service
           sudo loginctl enable-linger "$(id -un)"
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
           for _ in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
           containerd-rootless-setuptool.sh install
