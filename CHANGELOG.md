@@ -6,6 +6,12 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-23
+
+Evaluate protected CI reuse in shadow mode before enabling skips, and compare
+completed GitHub runs using explicit job mappings and a historical baseline.
+The standalone report script requires Python 3.9 or newer and authenticated gh.
+
 ### Added
 
 - Shadow rollout for protected GitHub and GitLab job plans: report matching

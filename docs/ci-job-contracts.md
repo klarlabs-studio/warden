@@ -160,7 +160,7 @@ jobs:
           policy: /protected/ci-jobs.json
           key: ${{ vars.WARDEN_TRUSTED_KEYS }}
           commit: ${{ github.sha }}
-          warden-version: 0.44.0
+          warden-version: 0.45.0
   unit-tests:
     needs: plan
     if: >-
@@ -188,7 +188,7 @@ eligibility counts; it does not measure actual skipped jobs or saved CI time.
 The existing component opts into planning with `job-policy`. It requires
 `on-unverified: run-checks` and cannot combine planning with the global
 requirements/profile inputs. The default verification mode is unchanged.
-Select a reviewed component revision. The component defaults to v0.44.0;
+Select a reviewed component revision. The component defaults to v0.45.0;
 v0.43.0 cannot produce plans and safely enables no reuse.
 
 Provide policy through a protected File-type CI/CD variable outside the
@@ -202,7 +202,7 @@ include:
     inputs:
       key: '$WARDEN_TRUSTED_KEYS'
       job-policy: '$WARDEN_JOB_POLICY'
-      warden-version: 0.44.0
+      warden-version: 0.45.0
       on-unverified: run-checks
 
 unit-tests:
@@ -227,7 +227,7 @@ than claiming to eliminate runner startup or billed minutes.
 ## Roll out in shadow mode
 
 Start with the forge consumer's `mode: shadow` (GitHub) or `plan-mode: shadow`
-(GitLab). The default remains `enforce` for existing integrations. Shadow mode
+(GitLab) from a reviewed v0.45.0 or newer consumer revision. The default remains `enforce` for existing integrations. Shadow mode
 still verifies protected contracts, but writes `action: run` for every job,
 puts every policy job in `run_jobs`, and leaves `reusable_jobs` empty. Existing
 skip predicates therefore keep running all checks. `eligible_jobs` retains
