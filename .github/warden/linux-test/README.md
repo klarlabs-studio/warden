@@ -20,6 +20,10 @@ before validation. Module caches are baked in; validation uses GOPROXY=off,
 GOSUMDB=off, GOTOOLCHAIN=local and -mod=readonly. Dependency changes require a new
 image. The resulting image identity must be inspected and reviewed separately;
 a pinned recipe does not establish identical rebuild outputs.
+Python, Node and jq are installed for the reporting, npm and action regression
+tests; resolved distro package versions are retained inside the image at
+`/opt/warden-distro-packages.txt`. Those distro versions are resolved at build
+time, so only the reviewed finished image establishes their exact identity.
 
 The `Linux test pilot` workflow runs manually or on pull requests changing the
 pilot or dependency manifests. It runs the same command under Docker with
@@ -108,3 +112,9 @@ replace an amd64 Docker job. The shared CI job currently installs an unpinned
 coverctl version, so this pilot cannot replace that whole job until its command,
 toolchain and image expectations are aligned. End-to-end runtime suites remain
 separate; `go test ./...` does not enable WARDEN_E2E.
+Optional platform/tool suites (for example PowerShell) can still skip inside
+this Linux image. A matching Go command alone does not establish CI equivalence.
+The pilot instruments `-coverpkg=./...` so CLI integration tests contribute to
+service coverage in the race profile. The existing shared workflow instead
+collects coverage in a second coverctl test pass. This difference must also be
+reviewed before declaring the whole remote job equivalent.

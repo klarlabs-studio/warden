@@ -2,6 +2,12 @@
 # must be reviewed and pinned in execution requirements.
 FROM docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514
 
+# The Go suite exercises Python reporting, shell/JQ actions and the npm wrapper.
+# Record resolved distro versions; consumers pin the finished image identity.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 nodejs jq \
+    && dpkg-query -W > /opt/warden-distro-packages.txt \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV GOTOOLCHAIN=local CGO_ENABLED=1 GOPATH=/opt/go GOMODCACHE=/opt/go/pkg/mod
 ENV PATH=/opt/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 RUN go install go.klarlabs.de/coverctl@v1.20.0
