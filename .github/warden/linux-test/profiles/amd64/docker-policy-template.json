@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "jobs": {
+    "test": {
+      "version": 1,
+      "steps": {
+        "test": {
+          "command": "/usr/local/bin/warden-linux-test",
+          "configuration_digest": "sha256:983bdee153ca9c4341da7d1c166f26455e9d719c82f67a5af7f9f903f83b4cb1",
+          "context_digest": "",
+          "inputs": null,
+          "image_id": "sha256:2db595ae74e5ddf981c8201ef088f2a40a80562ee5a919b5bbf3dfdf10f3c10c",
+          "image_id_kind": "config",
+          "platform": "linux/amd64",
+          "network": "none"
+        }
+      }
+    }
+  }
+}
