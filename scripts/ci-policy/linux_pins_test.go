@@ -7,9 +7,68 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"go.klarlabs.de/warden/internal/domain"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 )
+
+func TestSharedCIUsesPublishedContractWithoutReuse(t *testing.T) {
+	root := filepath.Join("..", "..", ".github")
+	data, err := os.ReadFile(filepath.Join(root, "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			With map[string]any `yaml:"with"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(data, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	inputs := workflow.Jobs["ci"].With
+	if inputs["test-reuse-sha"] != "" || inputs["cross-platform"] != false {
+		t.Fatal("reuse must remain disabled and the contract must cover only Linux")
+	}
+	var contract map[string]string
+	raw, ok := inputs["test-container-contract"].(string)
+	if !ok {
+		t.Fatal("missing shared container contract")
+	}
+	if err := json.Unmarshal([]byte(raw), &contract); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := os.ReadFile(filepath.Join(root, "warden", "linux-test", "profiles", "amd64", "publication.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(receipt, &fields); err != nil {
+		t.Fatal(err)
+	}
+	publication := make(map[string]string)
+	for _, key := range []string{"registry_reference", "docker_config_id", "platform", "signing_identity"} {
+		var value string
+		if err := json.Unmarshal(fields[key], &value); err != nil {
+			t.Fatal(err)
+		}
+		publication[key] = value
+	}
+	want := map[string]string{
+		"image": publication["registry_reference"], "config_id": publication["docker_config_id"],
+		"platform": publication["platform"], "signing_identity": publication["signing_identity"],
+		"command": "/usr/local/bin/warden-linux-test",
+	}
+	if len(contract) != len(want) {
+		t.Fatal("unexpected shared contract fields")
+	}
+	for key, value := range want {
+		if contract[key] != value {
+			t.Fatalf("shared %s differs from reviewed publication", key)
+		}
+	}
+}
 
 // Independent publication receipts are pinned separately from the candidate
 // records. Catch drift between the remote command, local config and consumer.
