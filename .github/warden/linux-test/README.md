@@ -152,10 +152,22 @@ their regression test or its workflow, rather than on every PR. The
 separate build-based pilot remains available to test proposed recipe/module
 changes before publishing a replacement image.
 
-These templates describe this dedicated test contract only. The pinned shared
-Go CI workflow has no test-job override, so its existing test job remains
-required and cannot yet be suppressed. Aligning its interface or replacing its
-test job is a separate integration step; the current shadow policy stays all-run.
+The main CI caller now selects this same signed amd64 Docker contract through
+the shared workflow interface proposed in `klarlabs-studio/.github#88`. It runs
+the pinned command once, including the coverage check from the produced profile.
+Its `test-reuse-sha` input is explicitly empty and the shadow policy stays all-run.
+The shared dependency must be reviewed and merged before adopting this caller.
+
+The shared container path tests the PR head, which is the commit local evidence
+can attest. The previous host job tested GitHub's synthetic merge checkout.
+The separate E2E/runtime jobs retain their normal merge checkout. Any additional
+merge-result unit-test requirement needs its own gate; local head evidence cannot
+establish that result. The shared pin also includes upstream timeout, nox and
+govulncheck updates since the previous pinned revision.
+
+Protected per-commit policy preparation, independently established base/branch
+context, and a validated planner-to-caller output are still required before
+reuse can be enabled. An Apple arm64 result cannot suppress the amd64 contract.
 
 Build the preparer from a reviewed checkout, outside the candidate:
 
@@ -210,13 +222,12 @@ does not infer either value from the note.
 
 Apple reports a manifest identity; Docker reports a config identity. arm64 and
 amd64 differ too. These are separate expectations. An Apple arm64 pass does not
-replace an amd64 Docker job. The shared CI job currently installs an unpinned
-coverctl version, so this pilot cannot replace that whole job until its command,
-toolchain and image expectations are aligned. End-to-end runtime suites remain
+replace an amd64 Docker job. The opted-in shared CI job uses the pinned image
+and command; ordinary callers without a container contract retain host testing. End-to-end runtime suites remain
 separate; `go test ./...` does not enable WARDEN_E2E.
 Optional platform/tool suites (for example PowerShell) can still skip inside
 this Linux image. A matching Go command alone does not establish CI equivalence.
 The pilot instruments `-coverpkg=./...` so CLI integration tests contribute to
-service coverage in the race profile. The existing shared workflow instead
-collects coverage in a second coverctl test pass. This difference must also be
-reviewed before declaring the whole remote job equivalent.
+service coverage in the race profile. The previous shared host job collected coverage in a
+second coverctl test pass. The opt-in contract consumes the existing profile;
+coverage floors are unchanged.
