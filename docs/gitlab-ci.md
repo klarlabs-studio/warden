@@ -86,7 +86,7 @@ candidate commit can edit `.gitlab-ci.yml`.
 | `container-image-id` | `''` | The inspected `sha256:` image ID required with `container-steps`. |
 | `min-profile` | `''` | The minimum [compliance profile](agent-profiles.md#checking-a-profile-in-ci) the note must conform to: `permissive`, `standard` or `strict`, optionally `name@version`. Fixed text, not a variable reference. Needs `warden-version` 0.37.0 or newer; an older release rejects the flag and the job fails as a configuration error. |
 | `remote` | `origin` | The remote that holds `refs/notes/warden`. |
-| `warden-version` | `0.43.0` | The warden release to install. It must be an exact version, 0.29.0 or newer. |
+| `warden-version` | `0.44.0` | The warden release to install. It must be an exact version, 0.29.0 or newer. |
 | `stage` | `.pre` | The stage the job runs in. |
 | `image` | `buildpack-deps:bookworm-scm` | The job image. It needs bash, git, curl, tar, mktemp and sha256sum or shasum. |
 
@@ -106,7 +106,7 @@ file from a CI/CD variable. It also means the variable's precedence applies; see
 
 Set `job-policy` to a protected policy file outside the checkout and
 `on-unverified: run-checks` to produce a per-job `warden-plan.json` artifact.
-This requires a release containing `ci plan` (after v0.43.0), jq and realpath.
+This requires v0.44.0 or newer, jq and realpath.
 Planning cannot combine with the global verification clauses and never sets
 `WARDEN_VALIDATED=true`. Consume only explicit job decisions using
 `.warden-planned-job`; see [CI job contracts](ci-job-contracts.md#gitlab-ci)

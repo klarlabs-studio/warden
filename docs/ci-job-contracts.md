@@ -134,7 +134,7 @@ compatible.
 
 The composite action `.github/actions/warden-plan` installs a released binary
 with the shared checksum-verifying installer. Pin the action to a reviewed full
-commit SHA and select a Warden release containing `ci plan` (after v0.43.0).
+commit SHA and select Warden v0.44.0 or newer.
 Older binaries or invalid output disable reuse. The action needs Bash, Git, jq
 and realpath on the runner. Installation failures fail the planner job.
 
@@ -160,7 +160,7 @@ jobs:
           policy: /protected/ci-jobs.json
           key: ${{ vars.WARDEN_TRUSTED_KEYS }}
           commit: ${{ github.sha }}
-          warden-version: <release-containing-ci-plan>
+          warden-version: 0.44.0
   unit-tests:
     needs: plan
     if: >-
@@ -188,8 +188,8 @@ eligibility counts; it does not measure actual skipped jobs or saved CI time.
 The existing component opts into planning with `job-policy`. It requires
 `on-unverified: run-checks` and cannot combine planning with the global
 requirements/profile inputs. The default verification mode is unchanged.
-Select a reviewed component revision and a Warden release containing `ci plan`;
-the existing v0.43.0 default cannot produce plans and safely enables no reuse.
+Select a reviewed component revision. The component defaults to v0.44.0;
+v0.43.0 cannot produce plans and safely enables no reuse.
 
 Provide policy through a protected File-type CI/CD variable outside the
 candidate checkout. Ensure untrusted pipelines cannot replace policy, keys,
@@ -202,7 +202,7 @@ include:
     inputs:
       key: '$WARDEN_TRUSTED_KEYS'
       job-policy: '$WARDEN_JOB_POLICY'
-      warden-version: <release-containing-ci-plan>
+      warden-version: 0.44.0
       on-unverified: run-checks
 
 unit-tests:
