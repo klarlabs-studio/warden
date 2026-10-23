@@ -2,7 +2,7 @@
 execution:
   mode: container
   runtime: auto
-  image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:b79bd44e3a0505ceb5b649bd6dddd6a9d28ebd6860ea501c25b3022efeb87653
+  image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad
   platform: linux/amd64
   network: none
 commands:

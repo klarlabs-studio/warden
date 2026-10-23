@@ -111,7 +111,7 @@ func TestPinnedLinuxPolicies(t *testing.T) {
 				}
 			}
 			readJSON("publication.json", &receipt)
-			if receipt.Source != "ba1e8e1d0c42782328e400911c3e30cf5011664a" ||
+			if receipt.Source != "0359ef48190e21db8f20c700193c2e8001bdcc58" ||
 				receipt.Platform != "linux/"+arch || cfg.Execution.Image != receipt.Reference ||
 				!domain.ValidContainerImageID(receipt.ConfigID) {
 				t.Fatal("publication and local environment differ")

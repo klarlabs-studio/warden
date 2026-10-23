@@ -84,7 +84,7 @@ jobs:
     # means here, so leaving it floating lets anyone who can push to another
     # repository change this one's gate. Dependabot bumps it, which makes each
     # change a reviewable diff rather than a silent one.
-    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@a902fafdafea78e288e8b59e4c14d1c3ac86f926 # container contract, .github PR #88
+    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@0691e2eaa419a3998e4a3948ab765a9a8d4c3299 # container contract, .github PR #88
     permissions:
       contents: read
       security-events: write
@@ -96,7 +96,7 @@ jobs:
       # Match the independently reviewed test-only local contract. Reuse is
       # deliberately empty until protected per-commit policy preparation is wired.
       test-container-contract: >-
-        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:b79bd44e3a0505ceb5b649bd6dddd6a9d28ebd6860ea501c25b3022efeb87653","config_id":"sha256:73ddfd49f0c86671005a205e770a59f8ea4929b14c987baa23c3420bcd61f261","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
+        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad","config_id":"sha256:bafb4e708638a0e6af0e072f6931ba32b0eace8c7d6c7220984664acbdb9b1e7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
       test-reuse-sha: ''
 
   windows-build:

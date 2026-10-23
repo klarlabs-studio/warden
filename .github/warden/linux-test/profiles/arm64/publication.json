@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_commit": "ba1e8e1d0c42782328e400911c3e30cf5011664a",
+  "source_commit": "0359ef48190e21db8f20c700193c2e8001bdcc58",
   "platform": "linux/arm64",
-  "registry_reference": "ghcr.io/klarlabs-studio/warden/linux-test@sha256:5ec11b743a232d0f519ee247337e6528a17310ab83cd71fcdc23df1b79580578",
-  "docker_config_id": "sha256:92e764f474113cda400166515361d9adf1c286d67fa0ad2988ce144411a18ba7",
+  "registry_reference": "ghcr.io/klarlabs-studio/warden/linux-test@sha256:e97a6c1dc0a1e3ad504528394bf675ed3aa58f66a75eedb73d561a3491090f24",
+  "docker_config_id": "sha256:36715d0873bbd86edf9c0a73a810b56c3c1d78f81108d03d165f57e52887ae72",
   "signing_identity": "https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main",
-  "run_id": "39997734827",
+  "run_id": "40009451684",
   "run_attempt": "1"
 }
