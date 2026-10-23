@@ -306,23 +306,29 @@ func TestGitLabTemplate_InstallRefusesTamperedCosign(t *testing.T) {
 	}
 }
 
-// Downloads the real default release and runs the full chain: pinned cosign,
+// Downloads a real release and runs the full chain: pinned cosign,
 // keyless signature over checksums.txt, archive digest. Opt-in, because it
-// needs github.com and Sigstore's TUF repository.
+// needs github.com and Sigstore's TUF repository. Defaults to the component
+// version; release-preparation CI can name an already published version with
+// WARDEN_GITLAB_INSTALL_VERSION, avoiding a dependency on its unpublished tag.
 func TestGitLabTemplate_InstallRealRelease(t *testing.T) {
 	if os.Getenv("WARDEN_GITLAB_INSTALL_NETWORK") == "" {
 		t.Skip("set WARDEN_GITLAB_INSTALL_NETWORK=1 to install the real release")
 	}
 	requirePOSIX(t)
 	inputs, _ := loadGitLabTemplate(t)
-	install := scriptItem(t, interpolateGitLab(t, nil)["warden-verify"].Script, "install")
+	version := os.Getenv("WARDEN_GITLAB_INSTALL_VERSION")
+	if version == "" {
+		version = *inputs["warden-version"].Default
+	}
+	install := scriptItem(t, interpolateGitLab(t, map[string]string{"warden-version": version})["warden-verify"].Script, "install")
 	bin := t.TempDir()
 	out, code := runItem(t, t.TempDir(), install, "WARDEN_BIN_DIR="+bin, "HOME="+t.TempDir())
 	if code != 0 {
 		t.Fatalf("install failed (exit %d): %s", code, out)
 	}
 	got, err := exec.Command(filepath.Join(bin, "warden"), "--version").CombinedOutput()
-	if err != nil || !strings.Contains(string(got), strings.TrimPrefix(*inputs["warden-version"].Default, "v")) {
+	if err != nil || !strings.Contains(string(got), strings.TrimPrefix(version, "v")) {
 		t.Fatalf("installed binary reports %q (%v)", got, err)
 	}
 }
