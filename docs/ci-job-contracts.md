@@ -223,3 +223,84 @@ running. Download the artifact only from the trusted producer through `needs`;
 a candidate-supplied artifact is not a trusted plan. The helper exits the job
 script early; GitLab still schedules that job, so this avoids its checks rather
 than claiming to eliminate runner startup or billed minutes.
+
+## Roll out in shadow mode
+
+Start with the forge consumer's `mode: shadow` (GitHub) or `plan-mode: shadow`
+(GitLab). The default remains `enforce` for existing integrations. Shadow mode
+still verifies protected contracts, but writes `action: run` for every job,
+puts every policy job in `run_jobs`, and leaves `reusable_jobs` empty. Existing
+skip predicates therefore keep running all checks. `eligible_jobs` retains
+matching names for analysis only; never use it as a skip condition.
+
+The GitHub action also returns `eligible-jobs` and `plan-json`. Save the latter
+as a run artifact using an environment variable, avoiding expression expansion
+inside shell source:
+
+```yaml
+- id: plan
+  uses: klarlabs-studio/warden/.github/actions/warden-plan@<reviewed-ref>
+  with:
+    policy: /protected/jobs.json
+    key: ${{ vars.WARDEN_TRUSTED_KEYS }}
+    mode: shadow
+- name: Save plan for measurement
+  env:
+    PLAN: ${{ steps.plan.outputs.plan-json }}
+  run: printf '%s\n' "$PLAN" > "$RUNNER_TEMP/warden-plan.json"
+```
+
+Upload that file with your reviewed artifact-upload action. Retain the run ID
+and original plan; do not regenerate a plan after the workflow finishes.
+GitLab already publishes `warden-plan.json` as its plan artifact. Switch to
+`enforce` only after inspecting representative shadow runs, especially eligible
+jobs that fail remotely. A failure identifies a difference to investigate;
+it does not prove the local or remote result was wrong.
+
+## Measure completed GitHub runs
+
+The standalone, read-only `scripts/ci_report.py` uses Python 3.9+ and an
+authenticated GitHub CLI with Actions read access. Run the script from a reviewed
+Warden revision after the target workflow has completed. It does not change
+workflow gates and does not require a new Warden binary. Retrieve the original
+plan artifact from that run through a trusted artifact-download path; the
+report checks its SHA but does not authenticate an arbitrary supplied plan.
+Never consume the report as permission to skip checks.
+
+Provide an explicit earlier successful baseline from the same workflow and a
+JSON object mapping every policy name to one exact GitHub display name:
+
+```json
+{"unit-tests":"Unit tests","integration":"Integration","package":"Package"}
+```
+
+```sh
+python3 scripts/ci_report.py \
+  --repository klarlabs-studio/warden \
+  --run "$COMPLETED_RUN_ID" --baseline "$BASELINE_RUN_ID" \
+  --plan /trusted-artifacts/warden-plan.json \
+  --jobs /protected/github-job-names.json > report.json
+```
+
+The reporter reads all pages from a specific attempt and checks that no rerun
+started during collection. It refuses an incomplete run, wrong commit, different
+workflow, invalid plan partition, or duplicate JSON keys. Missing or ambiguous
+job names, including unexpanded matrices, produce unknown measurements instead
+of zero durations. Map each matrix instance separately if its policy contract
+represents that instance.
+
+| Report field | Evidence and limit |
+|---|---|
+| `observed_skipped_eligible_jobs` | Matching policy jobs GitHub reports skipped; unrelated conditions may have caused the skip |
+| `eligible_failed_jobs` | Eligible jobs GitHub reports failed or timed out; useful during shadow rollout |
+| `observed_mapped_runner_seconds` | Sum of current mapped job timestamp durations; excludes unmapped workflow jobs |
+| `observed_runner_seconds_difference` | Baseline mapped duration minus current mapped duration; can be negative and is not attributed to Warden |
+| `estimated_eligible_runner_seconds` | Baseline duration for matching jobs; potential work, including in shadow mode |
+| `estimated_avoided_runner_seconds` | Baseline duration of explicitly reusable jobs observed skipped; a counterfactual estimate, zero in shadow mode |
+| `verification_ms` | Original planner verification measurement; excludes installation and note fetching |
+
+Baseline workload, runner class and caches can differ. These durations are not
+billed minutes, wall-clock speedup, local validation cost, or money saved. The
+report does not calculate net savings: those require local validation and the
+full workflow overhead as well as provider billing data. GitLab currently has
+shadow plans but no completed-run measurement adapter.

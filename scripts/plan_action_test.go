@@ -50,9 +50,12 @@ func TestPlanActionBoundary(t *testing.T) {
 		symlink bool
 		inside  bool
 		keys    string
+		mode    string
 		valid   bool
 	}{
 		{name: "complete", keys: actionTestPin, valid: true},
+		{name: "shadow", keys: actionTestPin, mode: "shadow", valid: true},
+		{name: "invalid mode", keys: actionTestPin, mode: "typo"},
 		{name: "planner error", keys: actionTestPin, failure: true},
 		{name: "symlink to candidate policy", keys: actionTestPin, inside: true, symlink: true},
 		{name: "wrong commit", keys: actionTestPin, mutate: func(p map[string]any) { p["sha"] = strings.Repeat("0", 40) }},
@@ -110,7 +113,7 @@ func TestPlanActionBoundary(t *testing.T) {
 			output, summary := filepath.Join(t.TempDir(), "out"), filepath.Join(t.TempDir(), "summary")
 			cmd := exec.Command("bash", repoFile(t, ".github/actions/warden-plan/plan.sh"))
 			cmd.Dir = f.checkout
-			cmd.Env = append(os.Environ(), "PATH="+f.bin+":"+os.Getenv("PATH"), "WARDEN_COMMIT="+f.sha, "WARDEN_JOB_POLICY="+policy, "WARDEN_TRUSTED_KEYS="+tc.keys, "GITHUB_OUTPUT="+output, "GITHUB_STEP_SUMMARY="+summary, "GITHUB_ACTION_PATH="+filepath.Dir(repoFile(t, ".github/actions/warden-plan/action.yml")))
+			cmd.Env = append(os.Environ(), "PATH="+f.bin+":"+os.Getenv("PATH"), "WARDEN_PLAN_MODE="+tc.mode, "WARDEN_COMMIT="+f.sha, "WARDEN_JOB_POLICY="+policy, "WARDEN_TRUSTED_KEYS="+tc.keys, "GITHUB_OUTPUT="+output, "GITHUB_STEP_SUMMARY="+summary, "GITHUB_ACTION_PATH="+filepath.Dir(repoFile(t, ".github/actions/warden-plan/action.yml")))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("wrapper: %v %s", err, out)
 			}
@@ -122,7 +125,32 @@ func TestPlanActionBoundary(t *testing.T) {
 			if tc.valid {
 				want = "plan-valid=true\nreusable-jobs=[\"unit\"]\nrun-jobs=[\"integration\"]\ncommit=" + f.sha + "\nverification-ms=3\n"
 			}
-			if string(got) != want {
+			// Compare the stable authorization outputs separately from the full
+			// report artifact; assert the artifact independently below.
+			lines := strings.Split(string(got), "\n")
+			if len(lines) < 3 {
+				t.Fatalf("missing report outputs: %s", got)
+			}
+			if tc.valid {
+				var artifact map[string]any
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(lines[1], "plan-json=")), &artifact); err != nil {
+					t.Fatal(err)
+				}
+				if artifact["sha"] != f.sha || lines[0] != `eligible-jobs=["unit"]` {
+					t.Fatalf("bad artifact: %s", got)
+				}
+				if tc.mode == "shadow" {
+					want = "plan-valid=true\nreusable-jobs=[]\nrun-jobs=[\"integration\",\"unit\"]\ncommit=" + f.sha + "\nverification-ms=3\n"
+					for _, job := range artifact["jobs"].([]any) {
+						if job.(map[string]any)["action"] != "run" {
+							t.Fatal("shadow authorizes skip")
+						}
+					}
+				}
+			} else if lines[0] != "eligible-jobs=[]" || lines[1] != "plan-json=" {
+				t.Fatalf("failure leaked report: %s", got)
+			}
+			if strings.Join(lines[2:], "\n") != want {
 				t.Fatalf("outputs:\n%s\nwant:\n%s", got, want)
 			}
 			s, err := os.ReadFile(summary)
@@ -183,6 +211,30 @@ func TestGitLabPlanHelperMatchesSharedBoundary(t *testing.T) {
 			t.Fatalf("job %s: exit %d", name, code)
 		}
 	}
+	out, code = f.run(map[string]string{"job-policy": policy, "key": actionTestPin, "on-unverified": "run-checks", "plan-mode": "shadow"})
+	if code != 0 {
+		t.Fatalf("shadow plan %d: %s", code, out)
+	}
+	shadow, err := os.ReadFile(filepath.Join(f.checkout, "warden-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shadowPlan struct {
+		Mode     string   `json:"mode"`
+		Eligible []string `json:"eligible_jobs"`
+		Reusable []string `json:"reusable_jobs"`
+		Run      []string `json:"run_jobs"`
+	}
+	if err := json.Unmarshal(shadow, &shadowPlan); err != nil {
+		t.Fatal(err)
+	}
+	if shadowPlan.Mode != "shadow" || len(shadowPlan.Eligible) != 1 || shadowPlan.Eligible[0] != "unit" || len(shadowPlan.Reusable) != 0 || len(shadowPlan.Run) != 2 {
+		t.Fatalf("unsafe shadow artifact: %s", shadow)
+	}
+	if _, code := runItem(t, f.checkout, helper+"\nwarden_job_reusable unit"); code == 0 {
+		t.Fatal("GitLab shadow authorized reuse")
+	}
+
 	if err := os.WriteFile(filepath.Join(f.checkout, "warden-plan.json"), append(artifact, artifact...), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -249,10 +301,16 @@ func TestPlanActionWiring(t *testing.T) {
 
 func TestGitLabPlannedJobRefusesUntrustedArtifacts(t *testing.T) {
 	requirePlannerTools(t)
-	for _, mode := range []string{"missing", "stale", "duplicate", "tracked", "symlink", "unknown version"} {
+	for _, mode := range []string{"missing", "stale", "duplicate", "tracked", "symlink", "unknown version", "shadow"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newVerifyFixture(t, false)
 			p := planReport(f.sha)
+			if mode == "shadow" {
+				p["eligible_jobs"] = []string{"unit"}
+				p["reusable_jobs"] = []string{}
+				p["run_jobs"] = []string{"integration", "unit"}
+				p["jobs"].([]any)[0].(map[string]any)["action"] = "run"
+			}
 			if mode == "stale" {
 				p["sha"] = strings.Repeat("0", 40)
 			}
