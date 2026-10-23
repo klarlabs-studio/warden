@@ -1,0 +1,107 @@
+name: CI shadow measurement
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: Completed CI run to measure against the reviewed baseline
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-shadow-${{ github.event.workflow_run.id || inputs.run-id }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    # workflow_run loads this workflow from the default branch. Manual backfills
+    # also use main. Fork runs are excluded; no candidate commands are executed.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event.workflow_run.id || inputs.run-id }}
+      # Successful PR CI run for the v0.45.0 release preparation. Keep the
+      # baseline explicit and review changes alongside policy and job mapping.
+      BASELINE_RUN_ID: '39917037757'
+      WARDEN_VERSION: '0.45.0'
+      WARDEN_TRUSTED_KEYS: '139e6eb9e2611c76,b3746e61c4d49512,18df642847f69902'
+    steps:
+      - name: Check out reviewed collector and policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Resolve completed CI run
+        id: target
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          mkdir -p "$RUNNER_TEMP/warden-shadow"
+          gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" > "$RUNNER_TEMP/warden-shadow/run.json"
+          sha=$(jq -er --arg repo "$REPOSITORY" '
+            select(.status == "completed" and .path == ".github/workflows/ci.yml" and
+                   .head_repository.full_name == $repo) | .head_sha |
+            select(test("^[0-9a-f]{40}$"))
+          ' "$RUNNER_TEMP/warden-shadow/run.json")
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+      - name: Check out candidate data only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install released verifier
+        run: bash "$GITHUB_WORKSPACE/trusted/.github/actions/install-warden.sh"
+      - name: Produce shadow plan
+        working-directory: candidate
+        env:
+          WARDEN_COMMIT: ${{ steps.target.outputs.sha }}
+          WARDEN_PLAN_MODE: shadow
+        run: |
+          set -euo pipefail
+          git fetch origin refs/notes/warden:refs/notes/warden || true
+          export WARDEN_JOB_POLICY="$GITHUB_WORKSPACE/trusted/.github/warden/shadow-policy.json"
+          bash "$GITHUB_WORKSPACE/trusted/.github/actions/ci-plan.sh" > "$RUNNER_TEMP/warden-shadow/plan.json"
+      - name: Measure completed jobs
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/trusted/scripts/ci_report.py" \
+            --repository "$REPOSITORY" --run "$RUN_ID" --baseline "$BASELINE_RUN_ID" \
+            --plan "$RUNNER_TEMP/warden-shadow/plan.json" \
+            --jobs "$GITHUB_WORKSPACE/trusted/.github/warden/shadow-jobs.json" \
+            > "$RUNNER_TEMP/warden-shadow/report.json"
+          {
+            echo '### Warden shadow measurement'
+            echo "CI run: $RUN_ID; baseline: $BASELINE_RUN_ID."
+            echo 'All CI checks remain enabled. No billing savings are measured.'
+            echo 'The bootstrap policy has no equivalent execution contracts; eligibility is empty.'
+            echo '```json'
+            jq '{run_id, run_attempt, baseline_run_id, mode, verification_ms,
+                 observed_mapped_runner_seconds, baseline_mapped_runner_seconds,
+                 observed_runner_seconds_difference, eligible_failed_jobs,
+                 estimated_eligible_runner_seconds, estimated_avoided_runner_seconds}' \
+              "$RUNNER_TEMP/warden-shadow/report.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain measurement and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: warden-shadow-${{ env.RUN_ID }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/warden-shadow/
+          if-no-files-found: error
+          retention-days: 30

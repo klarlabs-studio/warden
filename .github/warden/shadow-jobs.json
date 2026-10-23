@@ -1,0 +1,11 @@
+{
+  "build": "ci / Build",
+  "lint": "ci / Lint",
+  "test": "ci / Test (ubuntu-latest)",
+  "security": "ci / Security (nox)",
+  "windows-amd64": "Windows compile (amd64)",
+  "windows-arm64": "Windows compile (arm64)",
+  "e2e": "End-to-End",
+  "podman": "Container runtime (podman)",
+  "nerdctl": "Container runtime (nerdctl)"
+}
