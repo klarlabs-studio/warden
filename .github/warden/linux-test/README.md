@@ -135,7 +135,8 @@ publisher signature before pulling, checks the exact Docker config ID and
 platform, and runs without network access. It never rebuilds the image or reads
 the candidate's policy/config to choose its command. Dependency changes that
 need uncached modules fail offline and require a newly published, reviewed image.
-It has no skipping logic and is not automatically added to each PR. The
+It has no skipping logic and runs automatically only for changes to these pins,
+their regression test or its workflow, rather than on every PR. The
 separate build-based pilot remains available to test proposed recipe/module
 changes before publishing a replacement image.
 
