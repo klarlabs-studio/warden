@@ -6,6 +6,16 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Shadow rollout for protected GitHub and GitLab job plans: report matching
+  contracts while every downstream job remains enabled. GitHub exposes the
+  full plan for later measurement.
+- Read-only GitHub completed-run reporting with an explicit baseline and exact
+  job mapping. Separates observed skips and duration differences from historical
+  estimates, flags eligible remote failures, and leaves missing measurements
+  unknown. No billing or causal savings claim.
+
 ## [0.44.0] - 2026-10-23
 
 Shift CI checks left with protected per-job reuse plans, GitHub and GitLab

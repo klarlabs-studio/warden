@@ -3,6 +3,8 @@
 set -euo pipefail
 refuse() { echo "warden-plan: $*" >&2; exit 1; }
 [[ -n "${WARDEN_TRUSTED_KEYS//[[:space:],]/}" ]] || refuse 'explicit trusted keys required'
+mode="${WARDEN_PLAN_MODE:-enforce}"
+case "$mode" in enforce|shadow) ;; *) refuse 'plan mode must be enforce or shadow' ;; esac
 command -v jq >/dev/null || refuse 'jq required'
 command -v realpath >/dev/null || refuse 'realpath required'
 [[ -f "$WARDEN_JOB_POLICY" ]] || refuse 'protected job policy not found'
@@ -34,4 +36,12 @@ jq -e -s --arg sha "$sha" --slurpfile policy "$policy" '
   .run_jobs == ([.jobs[] | select(.action == "run") | .name] | sort) and
   .reusable_jobs == ([.jobs[] | select(.action == "skip") | .name] | sort))
 ' "$tmp/report.json" >/dev/null || refuse 'invalid or inconsistent planner output'
-jq -c . "$tmp/report.json"
+# Preserve eligibility separately; shadow decisions never authorize a skip,
+# including for older consumers which only understand the action/lists.
+jq -c --arg mode "$mode" '
+  .mode = $mode | .eligible_jobs = .reusable_jobs |
+  if $mode == "shadow" then
+    .jobs |= map(.action = "run" | .reasons += ["shadow mode requires CI execution"]) |
+    .run_jobs = ([.jobs[].name] | sort) | .reusable_jobs = []
+  else . end
+' "$tmp/report.json"

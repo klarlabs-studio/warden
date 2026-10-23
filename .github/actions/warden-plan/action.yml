@@ -13,10 +13,19 @@ inputs:
   remote:
     description: Remote publishing provenance notes.
     default: origin
+  mode:
+    description: 'enforce permits verified reuse; shadow reports eligibility but runs every job.'
+    default: enforce
   warden-version:
     description: Released warden version supporting ci plan; older releases disable reuse.
     default: latest
 outputs:
+  eligible-jobs:
+    description: JSON array matching protected contracts, including in shadow mode; never use this output to skip.
+    value: ${{ steps.plan.outputs.eligible-jobs }}
+  plan-json:
+    description: Complete plan for later reporting; empty on failure. Retain as an artifact for the evaluated run.
+    value: ${{ steps.plan.outputs.plan-json }}
   plan-valid:
     description: True only for a complete validated plan; this does not mean all jobs are reusable.
     value: ${{ steps.plan.outputs.plan-valid }}
@@ -49,6 +58,7 @@ runs:
     - id: plan
       shell: bash
       env:
+        WARDEN_PLAN_MODE: ${{ inputs.mode }}
         WARDEN_JOB_POLICY: ${{ inputs.policy }}
         WARDEN_TRUSTED_KEYS: ${{ inputs.key }}
         WARDEN_COMMIT: ${{ inputs.commit }}
