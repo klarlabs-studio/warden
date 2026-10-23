@@ -308,12 +308,14 @@ shadow plans but no completed-run measurement adapter.
 ## Warden's own CI measurement
 
 `.github/workflows/ci-shadow.yml` is an advisory `workflow_run` collector. After
-an in-repository `CI` run completes, it records a shadow plan and compares nine
+an in-repository `CI` run completes, it reads its retained original plan (when
+available) and compares nine
 exact job names against successful baseline run `39917037757` (the v0.45.0
 release PR). It can also backfill a completed run through `workflow_dispatch`
 on `main`. Fork runs are excluded. The collector has read-only repository and
 Actions permissions, executes tooling from the reviewed default-branch revision,
-and never executes candidate commands or consumes candidate artifacts.
+and never executes candidate commands. Original-plan artifacts are consumed only
+as advisory JSON data; they cannot authorize a gate or a skip.
 
 The protected inventory and mapping live in `.github/warden/shadow-policy.json`
 and `shadow-jobs.json`. Every bootstrap policy entry is `null`: local host checks
@@ -328,13 +330,40 @@ and eligible failures. Missing jobs remain unknown. A collector failure reports
 measurement failure and cannot change the originating CI result or skip a job.
 The historical baseline is explicit; changing it requires review.
 
-These bootstrap plans are generated **after** CI and are retrospective
-measurements, not a record of what was known before CI started. Before replacing
-any `null` policy with a reusable contract, first review environment and command
-equivalence and move plan capture into the originating CI run using protected
-tooling. Retain that original plan and measure representative runs, especially
-eligible jobs that fail remotely, before considering enforce mode. Do not switch
-the retrospective collector into an authorization path.
+The originating `CI` workflow now captures a shadow plan before its ordinary
+jobs. The planner and policy come from pinned reviewed revision
+`6942148ef6cd8608a5c23ad59130842f0ee27a1b`, outside the candidate checkout.
+Review and bump that revision when adopting a new policy. Planner failures do
+not suppress the ordinary CI jobs. The additional job introduces installation,
+checkout and artifact overhead; existing totals exclude that overhead.
+
+Original plans are retained as `warden-ci-plan-<run>-<attempt>`. The collector
+selects the exact attempt and refuses ambiguous or expired matching artifacts.
+The report validates commit/run/attempt metadata and corroborates timing against
+the successful `Capture shadow plan` job's GitHub timestamps: that job must finish
+before every mapped job starts. Missing timing fails measurement rather than
+claiming a pre-CI observation. These are advisory measurements, not authenticated
+execution evidence. A candidate can change its workflow; this path must never
+become skip authorization.
+
+Older runs or partial reruns without the matching artifact use a freshly
+computed retrospective plan, explicitly labelled `plan_source: retrospective`.
+An invalid original artifact fails measurement instead of silently falling back.
+`--capture /path/to/capture.json` enables the same validation in
+`scripts/ci_report.py`; validated original plans report
+`plan_source: pre_ci_capture`, `plan_captured_at` and the additional
+`planner_runner_seconds` overhead, separate from mapped-job totals.
+
+Before replacing any `null` entry, review environment and command equivalence.
+The Linux test pilot still needs an immutable offline image with the Go race
+runtime, dependency cache and coverage tooling, and independently derived exact
+configuration/context requirements for each candidate. The shared test job runs
+`go test -count=1 -race -covermode=atomic -coverprofile=coverage.out ./...` followed
+by the coverctl gate; passing race tests alone cannot replace it. Host macOS
+results, different CPU platforms and Apple manifest identities cannot be treated
+as an exact match for a Linux amd64 Docker image configuration identity. Keep
+all checks enabled while measuring representative original plans and eligible
+remote failures before considering enforce mode.
 
 Initial manual measurement of run `39920603496` against baseline `39917037757`
 observed all nine jobs: 646 versus 665 summed runner seconds. The 19-second

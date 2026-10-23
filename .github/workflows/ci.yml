@@ -24,11 +24,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  shadow-plan:
+    name: Capture shadow plan
+    runs-on: ubuntu-latest
+    env:
+      WARDEN_VERSION: '0.45.0'
+      WARDEN_TRUSTED_KEYS: '139e6eb9e2611c76,b3746e61c4d49512,18df642847f69902'
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      # Execute only the reviewed planner. Candidate files are data, including
+      # on forks; this job has no write permissions or persisted credentials.
+      - name: Check out reviewed planner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 6942148ef6cd8608a5c23ad59130842f0ee27a1b
+          path: trusted
+          persist-credentials: false
+      - name: Check out candidate data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install released verifier
+        run: bash "$GITHUB_WORKSPACE/trusted/.github/actions/install-warden.sh"
+      - name: Capture original plan
+        working-directory: candidate
+        env:
+          WARDEN_COMMIT: ${{ env.CANDIDATE_SHA }}
+          WARDEN_PLAN_MODE: shadow
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/warden-original-plan"
+          git fetch origin refs/notes/warden:refs/notes/warden || true
+          export WARDEN_JOB_POLICY="$GITHUB_WORKSPACE/trusted/.github/warden/shadow-policy.json"
+          bash "$GITHUB_WORKSPACE/trusted/.github/actions/ci-plan.sh" > "$RUNNER_TEMP/warden-original-plan/plan.json"
+          jq -n --arg sha "$CANDIDATE_SHA" --arg run "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" --arg captured "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: 1, sha: $sha, run_id: ($run|tonumber), run_attempt: ($attempt|tonumber), captured_at: $captured}' \
+            > "$RUNNER_TEMP/warden-original-plan/capture.json"
+      - name: Retain original plan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: warden-ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/warden-original-plan/
+          if-no-files-found: error
+          retention-days: 30
+
   # The shared klarlabs-studio Go CI: gofmt, golangci-lint (gocritic), race
   # tests, the coverctl coverage gate, and a nox security scan (SARIF -> code
   # scanning). Pinned tool/action versions live in one place and every repo
   # picks up the bump.
   ci:
+    needs: [shadow-plan]
+    # An advisory planner failure must never suppress the ordinary checks.
+    if: ${{ !cancelled() }}
     # Pinned to a commit, not @main. The shared bar defines what "passing"
     # means here, so leaving it floating lets anyone who can push to another
     # repository change this one's gate. Dependabot bumps it, which makes each
@@ -44,6 +95,8 @@ jobs:
       cross-platform: false
 
   windows-build:
+    needs: [shadow-plan]
+    if: ${{ !cancelled() }}
     name: Windows compile (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:

@@ -55,6 +55,7 @@ jobs:
             select(test("^[0-9a-f]{40}$"))
           ' "$RUNNER_TEMP/warden-shadow/run.json")
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          printf 'attempt=%s\n' "$(jq -er '.run_attempt' "$RUNNER_TEMP/warden-shadow/run.json")" >> "$GITHUB_OUTPUT"
       - name: Check out candidate data only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,7 +65,29 @@ jobs:
           persist-credentials: false
       - name: Install released verifier
         run: bash "$GITHUB_WORKSPACE/trusted/.github/actions/install-warden.sh"
-      - name: Produce shadow plan
+      - name: Retrieve original plan when available
+        id: original
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RUN_ATTEMPT: ${{ steps.target.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          name="warden-ci-plan-$RUN_ID-$RUN_ATTEMPT"
+          # Enumerate the target run, never the collector or a previous attempt.
+          gh api --paginate --slurp "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/warden-shadow/artifacts.json"
+          count=$(jq --arg name "$name" '[.[].artifacts[] | select(.name == $name)] | length' "$RUNNER_TEMP/warden-shadow/artifacts.json")
+          if [ "$count" = 0 ]; then
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$count" = 1 ]
+          jq -e --arg name "$name" '[.[].artifacts[] | select(.name == $name)][0].expired == false' "$RUNNER_TEMP/warden-shadow/artifacts.json" >/dev/null
+          gh run download "$RUN_ID" --repo "$REPOSITORY" --name "$name" --dir "$RUNNER_TEMP/warden-shadow/original"
+          # JSON is read only as measurement data. It grants no gate authority.
+          cp "$RUNNER_TEMP/warden-shadow/original/plan.json" "$RUNNER_TEMP/warden-shadow/plan.json"
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+      - name: Produce retrospective bootstrap plan
+        if: steps.original.outputs.available != 'true'
         working-directory: candidate
         env:
           WARDEN_COMMIT: ${{ steps.target.outputs.sha }}
@@ -77,12 +100,17 @@ jobs:
       - name: Measure completed jobs
         env:
           REPOSITORY: ${{ github.repository }}
+          ORIGINAL_AVAILABLE: ${{ steps.original.outputs.available }}
         run: |
           set -euo pipefail
+          capture_args=()
+          if [ "$ORIGINAL_AVAILABLE" = true ]; then
+            capture_args=(--capture "$RUNNER_TEMP/warden-shadow/original/capture.json")
+          fi
           python3 "$GITHUB_WORKSPACE/trusted/scripts/ci_report.py" \
             --repository "$REPOSITORY" --run "$RUN_ID" --baseline "$BASELINE_RUN_ID" \
             --plan "$RUNNER_TEMP/warden-shadow/plan.json" \
-            --jobs "$GITHUB_WORKSPACE/trusted/.github/warden/shadow-jobs.json" \
+            --jobs "$GITHUB_WORKSPACE/trusted/.github/warden/shadow-jobs.json" "${capture_args[@]}" \
             > "$RUNNER_TEMP/warden-shadow/report.json"
           {
             echo '### Warden shadow measurement'
@@ -90,7 +118,7 @@ jobs:
             echo 'All CI checks remain enabled. No billing savings are measured.'
             echo 'The bootstrap policy has no equivalent execution contracts; eligibility is empty.'
             echo '```json'
-            jq '{run_id, run_attempt, baseline_run_id, mode, verification_ms,
+            jq '{run_id, run_attempt, baseline_run_id, mode, plan_source, plan_captured_at, planner_runner_seconds, verification_ms,
                  observed_mapped_runner_seconds, baseline_mapped_runner_seconds,
                  observed_runner_seconds_difference, eligible_failed_jobs,
                  estimated_eligible_runner_seconds, estimated_avoided_runner_seconds}' \

@@ -25,6 +25,35 @@ class ReportTests(unittest.TestCase):
     def build(self):
         return report.build_report(self.plan, self.current, self.baseline, self.jobs, self.old, self.mapping)
 
+    def test_original_capture_matches_run_attempt_commit_and_precedes_jobs(self):
+        capture = {"version": 1, "sha": self.plan["sha"], "run_id": 2,
+                   "run_attempt": 1, "captured_at": "2026-10-23T00:00:00Z"}
+        planner = dict(self.job("Capture shadow plan", "success"),
+                       started_at="2026-10-23T00:00:00Z", completed_at="2026-10-23T00:00:00Z")
+        jobs = self.jobs + [planner]
+        self.assertEqual(report.validate_capture(capture, self.plan, self.current, jobs, self.mapping),
+                         capture["captured_at"])
+        for field, value in (("version", True), ("run_id", 3), ("run_attempt", 2),
+                             ("sha", "b" * 40), ("captured_at", "2026-10-22T23:59:59Z"),
+                             ("captured_at", "2026-10-23T00:00:01Z")):
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                report.validate_capture(dict(capture, **{field: value}), self.plan,
+                                        self.current, jobs, self.mapping)
+        for bad_jobs in ([], jobs + [self.jobs[0]],
+                         [dict(self.jobs[0], started_at=None), self.jobs[1], planner]):
+            with self.subTest(jobs=bad_jobs), self.assertRaises(ValueError):
+                report.validate_capture(capture, self.plan, self.current, bad_jobs, self.mapping)
+
+        for replacement in (dict(planner, conclusion="failure"),
+                            dict(planner, completed_at="2026-10-23T00:00:01Z"),
+                            dict(planner, started_at="2026-10-23T00:00:01Z")):
+            with self.subTest(planner=replacement), self.assertRaises(ValueError):
+                report.validate_capture(capture, self.plan, self.current,
+                                        self.jobs + [replacement], self.mapping)
+        with self.assertRaises(ValueError):
+            report.validate_capture(capture, self.plan, self.current,
+                                    jobs + [planner], self.mapping)
+
     def test_observation_and_counterfactual_are_distinct(self):
         got = self.build()
         self.assertEqual(got["observed_skipped_eligible_jobs"], ["unit"])
