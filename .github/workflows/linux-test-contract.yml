@@ -3,6 +3,11 @@ name: Linux test contract
 on:
   workflow_dispatch:
   workflow_call:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-test-contract.yml'
+      - '.github/warden/linux-test/profiles/**'
+      - 'scripts/ci-policy/linux_pins_test.go'
 
 permissions:
   contents: read
