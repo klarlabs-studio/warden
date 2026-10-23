@@ -4,7 +4,9 @@ FROM docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4
 
 # The Go suite exercises Python reporting, shell/JQ actions and the npm wrapper.
 # Record resolved distro versions; consumers pin the finished image identity.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 nodejs jq \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 nodejs jq libnss-wrapper \
+    && dpkg -L libnss-wrapper | awk '/\/libnss_wrapper.so$/ { print; exit }' > /opt/warden-nss-wrapper-path \
+    && test -s /opt/warden-nss-wrapper-path \
     && dpkg-query -W > /opt/warden-distro-packages.txt \
     && rm -rf /var/lib/apt/lists/*
 

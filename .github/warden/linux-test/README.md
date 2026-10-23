@@ -25,6 +25,21 @@ tests; resolved distro package versions are retained inside the image at
 `/opt/warden-distro-packages.txt`. Those distro versions are resolved at build
 time, so only the reviewed finished image establishes their exact identity.
 
+Warden runs containers as the host UID, which may have no entry in the image's
+passwd database. OpenSSH refuses that identity even when its binaries are
+present. The image includes libnss-wrapper; the command supplies private,
+temporary passwd/group files for an unmapped UID and checks real SSH key
+generation before testing. This leaves the image's account files unchanged.
+The image publishing and build-based pilot workflows validate as UID/GID 10001
+with HOME=/tmp, rather than relying on a root-only pass. Coverage floors remain
+unchanged, including the per-file SSH interoperability floors.
+
+Images from publication run `39990134467` predate this fix. They passed the
+root CI run but fail the SSH coverage floors under Warden's unmapped host UID.
+Do not adopt those images for local-to-CI reuse. Publish and review replacement
+image identities after this fix merges; old signatures establish the publisher,
+not suitability for Warden's non-root execution.
+
 The `Linux test pilot` workflow runs manually or on pull requests changing the
 pilot or dependency manifests. It runs the same command under Docker with
 `--network none`, records its exact image inspection, and preserves coverage.

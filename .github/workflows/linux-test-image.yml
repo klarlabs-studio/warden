@@ -54,7 +54,9 @@ jobs:
       - name: Validate the exact image offline
         run: |
           set -euo pipefail
-          docker run --rm --network none --volume "$GITHUB_WORKSPACE:/workspace" \
+          sudo chown -R 10001:10001 "$GITHUB_WORKSPACE"
+          docker run --rm --network none --user 10001:10001 --env HOME=/tmp \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
             "$TAG" /usr/local/bin/warden-linux-test
           test -s coverage.out
           cp coverage.out "$RUNNER_TEMP/linux-test-image/coverage.out"
