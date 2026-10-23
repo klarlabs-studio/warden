@@ -30,7 +30,8 @@ jobs:
           docker image inspect local/warden-linux-test:pilot > "$RUNNER_TEMP/linux-test-pilot/image.json"
       - name: Test without network access
         run: |
-          docker run --rm --network none \
+          sudo chown -R 10001:10001 "$GITHUB_WORKSPACE"
+          docker run --rm --network none --user 10001:10001 --env HOME=/tmp \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             local/warden-linux-test:pilot /usr/local/bin/warden-linux-test
           test -s coverage.out
