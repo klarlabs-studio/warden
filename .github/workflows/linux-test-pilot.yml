@@ -1,0 +1,45 @@
+name: Linux test pilot
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-test-pilot.yml'
+      - '.github/warden/linux-test/**'
+      - 'scripts/ci-policy/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-test:
+    name: Offline Linux test (shadow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build prepared image
+        run: sh .github/warden/linux-test/build.sh docker linux/amd64
+      - name: Record exact Docker identity
+        run: |
+          mkdir -p "$RUNNER_TEMP/linux-test-pilot"
+          docker image inspect local/warden-linux-test:pilot > "$RUNNER_TEMP/linux-test-pilot/image.json"
+      - name: Test without network access
+        run: |
+          docker run --rm --network none \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            local/warden-linux-test:pilot /usr/local/bin/warden-linux-test
+          test -s coverage.out
+          cp coverage.out "$RUNNER_TEMP/linux-test-pilot/coverage.out"
+      - name: Preserve observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-test-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-test-pilot
+          if-no-files-found: error
+          retention-days: 14

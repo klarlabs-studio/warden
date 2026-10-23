@@ -61,8 +61,8 @@ func TestDispatch_VerifyCiAuditImport(t *testing.T) {
 
 	// ci: reports status for the branch's PR. With no PR (or no gh) it still
 	// produces output and returns; exact code depends on the environment.
-	if _, out, _ := run("ci"); !strings.Contains(out, "CI") && !strings.Contains(out, "gh") {
-		t.Errorf("ci produced no recognizable output: %q", out)
+	if _, out, errb := run("ci"); !strings.Contains(out, "CI") && !strings.Contains(out+errb, "gh") {
+		t.Errorf("ci produced no recognizable output: stdout=%q stderr=%q", out, errb)
 	}
 }
 

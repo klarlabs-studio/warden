@@ -355,9 +355,11 @@ An invalid original artifact fails measurement instead of silently falling back.
 `planner_runner_seconds` overhead, separate from mapped-job totals.
 
 Before replacing any `null` entry, review environment and command equivalence.
-The Linux test pilot still needs an immutable offline image with the Go race
-runtime, dependency cache and coverage tooling, and independently derived exact
-configuration/context requirements for each candidate. The shared test job runs
+The [offline Linux pilot](../.github/warden/linux-test/README.md) provides a
+pinned image recipe with the Go race runtime, dependency cache and coverage
+tooling, a network-disabled shadow run, and an independent per-commit
+policy preparer. Each built image's immutable identity and effective
+configuration still need protected review before adoption. The shared test job runs
 `go test -count=1 -race -covermode=atomic -coverprofile=coverage.out ./...` followed
 by the coverctl gate; passing race tests alone cannot replace it. Host macOS
 results, different CPU platforms and Apple manifest identities cannot be treated
