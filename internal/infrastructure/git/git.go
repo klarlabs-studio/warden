@@ -247,6 +247,20 @@ func (r *Repo) DiffStats(base string) (domain.DiffStats, error) {
 	return parseNumstatZ(out), nil
 }
 
+// DiffStatsBetween reads an explicit immutable comparison, independent of HEAD
+// and the working directory. Both endpoints must be full object identities.
+func (r *Repo) DiffStatsBetween(base, commit string) (domain.DiffStats, error) {
+	if !domain.ValidTreeSHA(base) || !domain.ValidTreeSHA(commit) {
+		return domain.DiffStats{}, errors.New("diff stats: full object identities required")
+	}
+	args := append([]string{"--no-replace-objects"}, changedPathsArgs("--numstat", base+".."+commit)...)
+	out, err := runRawIn(r.Dir, args...)
+	if err != nil {
+		return domain.DiffStats{}, err
+	}
+	return parseNumstatZ(out), nil
+}
+
 // changedPathsArgs builds a `git diff` invocation whose path column is the
 // real repository path, for every caller that derives a set of changed paths.
 //
