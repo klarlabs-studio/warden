@@ -18,7 +18,7 @@ if ! getent passwd "$(id -u)" >/dev/null; then
   export LD_PRELOAD="$wrapper${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly CGO_ENABLED=1
-test "$(go env GOVERSION)" = go1.26.7
+test "$(go env GOVERSION)" = go1.26.10
 test "$(go env GOOS)" = linux
 command -v python3
 command -v node

@@ -2,7 +2,7 @@ module go.klarlabs.de/warden
 
 go 1.26.3
 
-toolchain go1.26.7
+toolchain go1.26.10
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
