@@ -374,3 +374,19 @@ Initial manual measurement of run `39920603496` against baseline `39917037757`
 observed all nine jobs: 646 versus 665 summed runner seconds. The 19-second
 difference is normal observed variation; eligibility and estimated avoided work
 were both zero. It does not demonstrate savings caused by Warden.
+
+### Observed protected test reuse
+
+The collector also reads the target attempt's `warden-test-reuse` plan when
+present. `protected_test_reuse` is separate from the bootstrap shadow plan.
+It requires a matching candidate SHA, a successful protected verifier finishing
+before the test wrapper starts, a successful `Record caller-authorized reuse`
+step, and skipped signed-container, host race-test and coverage steps. Missing
+or duplicate jobs or steps cannot establish observed reuse. The wrapper job
+itself succeeds; it is not a skipped job.
+
+The report retains wrapper time, protected verifier time and historical test
+job time separately. `historical_test_runner_seconds_difference` compares the
+historical test job with the current wrapper only; it excludes verifier and
+local validation costs. It is not a bill reduction or a matched benchmark.
+Artifact and step observations are advisory and grant no execution authority.

@@ -144,6 +144,43 @@ def build_report(plan, current, baseline, jobs, baseline_jobs, mapping):
                             "A shadow run authorizes no reuse and claims no avoided runner time."]}
 
 
+def observe_test_reuse(plan, current, baseline, jobs, previous):
+    """Corroborate the advisory plan with actual workflow step conclusions."""
+    measured = build_report(plan, current, baseline, jobs, previous,
+                            {"test": "ci / Test (ubuntu-latest)"})
+    verifiers = [j for j in jobs if j["name"] == "Verify protected test reuse"]
+    tests = [j for j in jobs if j["name"] == "ci / Test (ubuntu-latest)"]
+    observed = False
+    verifier_seconds = None
+    if len(verifiers) == len(tests) == 1:
+        verifier, test = verifiers[0], tests[0]
+        verifier_seconds = duration(verifier)
+        steps = test.get("steps", [])
+        def concluded(name, conclusion):
+            matches = [s for s in steps if s["name"] == name]
+            return (len(matches) == 1 and matches[0].get("status") == "completed"
+                    and matches[0].get("conclusion") == conclusion)
+        observed = (plan.get("mode") == "enforce" and plan["reusable_jobs"] == ["test"]
+                    and verifier.get("status") == "completed"
+                    and verifier.get("conclusion") == test.get("conclusion") == "success"
+                    and test.get("status") == "completed"
+                    and verifier_seconds is not None and duration(test) is not None
+                    and timestamp(verifier["completed_at"]) <= timestamp(test["started_at"])
+                    and concluded("Record caller-authorized reuse", "success")
+                    and concluded("Run signed offline test contract", "skipped")
+                    and concluded("Test (race + coverage)", "skipped")
+                    and concluded("Coverage gate", "skipped"))
+    row = measured["jobs"][0]
+    return {"observed": observed,
+            "test_wrapper_runner_seconds": row["observed_runner_seconds"],
+            "protected_verifier_runner_seconds": verifier_seconds,
+            "historical_test_runner_seconds": row["baseline_runner_seconds"],
+            "historical_test_runner_seconds_difference": (
+                measured["observed_runner_seconds_difference"] if observed else None),
+            "limitations": ["Step conclusions corroborate an advisory artifact; this report grants no execution authority.",
+                            "Historical differences are not billing savings; verifier, local validation and other work are separate costs."]}
+
+
 def validate_capture(capture, plan, current, jobs, mapping):
     """Advisory timing check, never an authentication or reuse decision."""
     for field, expected in (("version", 1), ("run_id", current["id"]),
@@ -188,6 +225,7 @@ def main():
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--capture", type=Path, help="Original pre-CI capture metadata; omission labels the plan retrospective")
     parser.add_argument("--jobs", type=Path, required=True, help="JSON object mapping policy jobs to exact GitHub job names")
+    parser.add_argument("--reuse-plan", type=Path, help="Same-run protected test plan; corroborated against observed job steps")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository) or min(args.run, args.baseline) <= 0:
         parser.error("invalid repository or run ID")
@@ -203,6 +241,9 @@ def main():
             report["planner_runner_seconds"] = duration(next(
                 job for job in jobs if job["name"] == "Capture shadow plan"))
             report["limitations"].append("The original artifact and planner timing are advisory measurements, not authenticated execution evidence or skip authorization.")
+        if args.reuse_plan:
+            report["protected_test_reuse"] = observe_test_reuse(
+                decode(args.reuse_plan.read_text()), current, baseline, jobs, previous)
         report["repository"] = args.repository
         print(json.dumps(report, sort_keys=True, allow_nan=False))
     except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.CalledProcessError) as error:

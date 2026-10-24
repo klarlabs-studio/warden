@@ -86,6 +86,20 @@ jobs:
           # JSON is read only as measurement data. It grants no gate authority.
           cp "$RUNNER_TEMP/warden-shadow/original/plan.json" "$RUNNER_TEMP/warden-shadow/plan.json"
           echo 'available=true' >> "$GITHUB_OUTPUT"
+      - name: Retrieve protected reuse observations when available
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RUN_ATTEMPT: ${{ steps.target.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          name="warden-test-reuse-$RUN_ID-$RUN_ATTEMPT"
+          count=$(jq --arg name "$name" '[.[].artifacts[] | select(.name == $name)] | length' "$RUNNER_TEMP/warden-shadow/artifacts.json")
+          if [ "$count" = 0 ]; then
+            exit 0
+          fi
+          [ "$count" = 1 ]
+          jq -e --arg name "$name" '[.[].artifacts[] | select(.name == $name)][0].expired == false' "$RUNNER_TEMP/warden-shadow/artifacts.json" >/dev/null
+          gh run download "$RUN_ID" --repo "$REPOSITORY" --name "$name" --dir "$RUNNER_TEMP/warden-shadow/reuse"
       - name: Produce retrospective bootstrap plan
         if: steps.original.outputs.available != 'true'
         working-directory: candidate
@@ -107,6 +121,9 @@ jobs:
           if [ "$ORIGINAL_AVAILABLE" = true ]; then
             capture_args=(--capture "$RUNNER_TEMP/warden-shadow/original/capture.json")
           fi
+          if [ -f "$RUNNER_TEMP/warden-shadow/reuse/plan.json" ]; then
+            capture_args+=(--reuse-plan "$RUNNER_TEMP/warden-shadow/reuse/plan.json")
+          fi
           python3 "$GITHUB_WORKSPACE/trusted/scripts/ci_report.py" \
             --repository "$REPOSITORY" --run "$RUN_ID" --baseline "$BASELINE_RUN_ID" \
             --plan "$RUNNER_TEMP/warden-shadow/plan.json" \
@@ -115,13 +132,13 @@ jobs:
           {
             echo '### Warden shadow measurement'
             echo "CI run: $RUN_ID; baseline: $BASELINE_RUN_ID."
-            echo 'All CI checks remain enabled. No billing savings are measured.'
+            echo 'Protected reuse observations are reported separately from the bootstrap shadow plan. No billing savings are measured.'
             echo 'The bootstrap policy has no equivalent execution contracts; eligibility is empty.'
             echo '```json'
             jq '{run_id, run_attempt, baseline_run_id, mode, plan_source, plan_captured_at, capture_timing_unavailable_jobs, planner_runner_seconds, verification_ms,
                  observed_mapped_runner_seconds, baseline_mapped_runner_seconds,
                  observed_runner_seconds_difference, eligible_failed_jobs,
-                 estimated_eligible_runner_seconds, estimated_avoided_runner_seconds}' \
+                 estimated_eligible_runner_seconds, estimated_avoided_runner_seconds, protected_test_reuse}' \
               "$RUNNER_TEMP/warden-shadow/report.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
