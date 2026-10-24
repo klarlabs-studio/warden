@@ -118,7 +118,7 @@ jobs:
             echo 'All CI checks remain enabled. No billing savings are measured.'
             echo 'The bootstrap policy has no equivalent execution contracts; eligibility is empty.'
             echo '```json'
-            jq '{run_id, run_attempt, baseline_run_id, mode, plan_source, plan_captured_at, planner_runner_seconds, verification_ms,
+            jq '{run_id, run_attempt, baseline_run_id, mode, plan_source, plan_captured_at, capture_timing_unavailable_jobs, planner_runner_seconds, verification_ms,
                  observed_mapped_runner_seconds, baseline_mapped_runner_seconds,
                  observed_runner_seconds_difference, eligible_failed_jobs,
                  estimated_eligible_runner_seconds, estimated_avoided_runner_seconds}' \
