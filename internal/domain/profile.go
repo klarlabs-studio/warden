@@ -107,6 +107,9 @@ type profileDefinition struct {
 	TraceForDeclaredAgents bool `json:"trace_for_declared_agents,omitempty"`
 	// ObservedBounds requires initial container measurements and bounded resources.
 	ObservedBounds bool `json:"observed_bounds,omitempty"`
+	// ShellTimeoutRequired requires a finite timeout on every required shell
+	// step, and the deadline warden applied to be signed into the note.
+	ShellTimeoutRequired bool `json:"shell_timeout_required,omitempty"`
 }
 
 // builtinProfiles holds every published definition, keyed by "name@version".
@@ -152,6 +155,32 @@ var builtinProfiles = map[string]profileDefinition{
 	"strict@2": {
 		Name: "strict", Version: 2, Level: ProfileStrict,
 		ObservedBounds: true,
+		RequiredSteps: map[string][]StepName{
+			PrePush.ConfigKey():   {StepCredentials, StepLint, StepTest, StepSecurityScan, StepReview},
+			PreCommit.ConfigKey(): {StepCredentials, StepLint},
+		},
+		NoSkipRequired:         true,
+		RequireCommands:        true,
+		ContainerExecution:     true,
+		NetworkNone:            true,
+		NoAgentWrites:          true,
+		AgentTimeout:           DefaultAgentTimeout,
+		AgentTimeoutRequired:   true,
+		SigningRequired:        true,
+		NoAgentSurfaceApproval: true,
+		RequireAgentExecution:  true,
+		IsolateAgents:          true,
+		AgentEnvAllowlist:      true,
+		BundledAgentsOnly:      true,
+		TraceForDeclaredAgents: true,
+	},
+	// strict@3 is strict@2 plus ADR 0008's decision 4, which strict@2 shipped
+	// without: a finite timeout on every required shell step. strict@2 was
+	// already published, so the rule is a new version rather than an edit.
+	"strict@3": {
+		Name: "strict", Version: 3, Level: ProfileStrict,
+		ObservedBounds:       true,
+		ShellTimeoutRequired: true,
 		RequiredSteps: map[string][]StepName{
 			PrePush.ConfigKey():   {StepCredentials, StepLint, StepTest, StepSecurityScan, StepReview},
 			PreCommit.ConfigKey(): {StepCredentials, StepLint},
@@ -354,6 +383,7 @@ const (
 	FloorSigningRequired = "signing-required"
 	FloorBundledAgents   = "bundled-agents"
 	FloorObservedBounds  = "observed-container-bounds"
+	FloorShellTimeout    = "shell-timeout"
 )
 
 // Floors lists the floors this profile checks at load, in a fixed order.
@@ -384,6 +414,9 @@ func (p ComplianceProfile) Floors() []ProfileFloor {
 	}
 	if d.AgentTimeoutRequired {
 		out = append(out, ProfileFloor{FloorAgentTimeout, "every agent step has a timeout (\"0\" is refused)"})
+	}
+	if d.ShellTimeoutRequired {
+		out = append(out, ProfileFloor{FloorShellTimeout, "every required shell step has a finite timeout (\"0\" or none is refused)"})
 	}
 	if d.SigningRequired {
 		out = append(out, ProfileFloor{FloorSigningRequired, "signing.required is true"})
@@ -437,6 +470,8 @@ func (p ComplianceProfile) checkFloor(id string, cfg Config) []FloorViolation {
 		return checkAgentWrites(cfg)
 	case FloorAgentTimeout:
 		return checkAgentTimeouts(cfg)
+	case FloorShellTimeout:
+		return p.checkShellTimeouts(cfg)
 	case FloorBundledAgents:
 		return checkBundledAgents(cfg)
 	case FloorSigningRequired:
@@ -619,6 +654,43 @@ func checkAgentTimeouts(cfg Config) []FloorViolation {
 	return out
 }
 
+// checkShellTimeouts refuses a required shell step, in any hook, whose timeout
+// is missing or is "0" (no limit). Unlike an agent step, a shell step gets no
+// default: the repository states the bound it is prepared to stand behind.
+func (p ComplianceProfile) checkShellTimeouts(cfg Config) []FloorViolation {
+	var out []FloorViolation
+	seen := map[StepName]bool{}
+	for _, h := range hooksInOrder {
+		for _, s := range p.RequiredShellSteps(h) {
+			if seen[s] {
+				continue
+			}
+			seen[s] = true
+			out = append(out, shellTimeoutViolation(cfg, s)...)
+		}
+	}
+	return out
+}
+
+func shellTimeoutViolation(cfg Config, s StepName) []FloorViolation {
+	field := "timeouts." + string(s)
+	v, ok := cfg.Timeouts[string(s)]
+	if !ok {
+		return []FloorViolation{{Floor: FloorShellTimeout, Field: field, Message: "is not set; required shell steps need a finite timeout"}}
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return nil
+	}
+	return []FloorViolation{{
+		Floor: FloorShellTimeout, Field: field,
+		Message: fmt.Sprintf("is %q (no limit); required shell steps need a finite timeout", v),
+		SetBy: func(c Config) bool {
+			got, ok := c.Timeouts[string(s)]
+			return ok && got == v
+		},
+	}}
+}
+
 // checkBundledAgents refuses every agent the config names that is not a bundled
 // preset: the top-level agent: and each rule's then.agent. A custom agent's
 // environment needs are unknown, so the allowlist cannot serve it (ADR 0007
@@ -763,6 +835,10 @@ func (p ComplianceProfile) RequiresNetworkNone() bool { return p.def.NetworkNone
 // RequiresObservedBounds reports whether initial bounded-resource and route
 // evidence is required, in addition to the recorded execution environment.
 func (p ComplianceProfile) RequiresObservedBounds() bool { return p.def.ObservedBounds }
+
+// RequiresShellTimeout reports whether required shell steps need a finite
+// timeout, and the note the deadline warden applied to each (strict@3).
+func (p ComplianceProfile) RequiresShellTimeout() bool { return p.def.ShellTimeoutRequired }
 
 func checkObservedBounds(cfg Config) []FloorViolation {
 	var out []FloorViolation

@@ -93,6 +93,9 @@ func Conformance(minimum domain.ComplianceProfile, res VerifyResult) Conformance
 	if minimum.RequiresObservedBounds() {
 		checkObservedContainerBounds(&rep, minimum, rec)
 	}
+	if minimum.RequiresShellTimeout() {
+		checkDeadlines(&rep, minimum, rec)
+	}
 	checkAgentBoundaries(&rep, minimum, rec)
 	if minimum.RequiresTraceForDeclaredAgents() {
 		checkAgentTrace(&rep, rec)
@@ -306,6 +309,20 @@ func applyConformance(res *VerifyResult, mins []domain.ComplianceProfile) {
 		for _, f := range rep.Failures {
 			res.RequirementFailures = append(res.RequirementFailures, "profile "+rep.Min+": "+f)
 			res.Validated = false
+		}
+	}
+}
+
+// checkDeadlines requires each required shell step to have run under a deadline
+// warden enforced, read from the signed record rather than from the config the
+// note was gated under.
+func checkDeadlines(rep *ConformanceReport, minimum domain.ComplianceProfile, rec *domain.RunRecord) {
+	steps := minimum.RequiredShellSteps(domain.PrePush)
+	clause := fmt.Sprintf("required shell steps %s ran under a deadline warden enforced", domain.JoinSteps(steps))
+	rep.Checked = append(rep.Checked, clause)
+	for _, step := range steps {
+		if ms := rec.Deadlines[step]; ms <= 0 {
+			rep.fail(clause, fmt.Sprintf("%s has no recorded deadline", step))
 		}
 	}
 }

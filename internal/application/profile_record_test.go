@@ -220,3 +220,40 @@ func TestRunner_ObservationSigningDefaultsOff(t *testing.T) {
 		})
 	}
 }
+
+// Under strict@3 the note carries the deadline warden applied to each step
+// that executed; under any other profile it carries none, so those notes keep
+// the payload every released verifier already reads.
+func TestRunner_DeadlinesSignedOnlyUnderStrictV3(t *testing.T) {
+	for _, c := range []struct {
+		profile string
+		want    map[domain.StepName]int64
+	}{
+		{"strict@3", map[domain.StepName]int64{domain.StepLint: 300000}},
+		{"strict@2", nil},
+		{"permissive", nil},
+	} {
+		t.Run(c.profile, func(t *testing.T) {
+			k := observedRunKernel()
+			lint := k.results[domain.StepLint]
+			lint.Deadline = 5 * time.Minute
+			k.results[domain.StepLint] = lint
+			cached := k.results[domain.StepTest]
+			cached.Deadline = 5 * time.Minute
+			k.results[domain.StepTest] = cached
+
+			git := &fakeGit{root: t.TempDir(), branch: "main", head: "sha1", wt: &fakeWorktree{dir: "/wt", headSHA: "sha1"}}
+			r := newRunner(t, git, k, fakeApprover{approve: true}, observedRunCfg(c.profile))
+			r.Signer = newFakeSigner(t)
+			if _, err := r.Run(context.Background(), domain.PrePush); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(git.note.Deadlines, c.want) {
+				t.Fatalf("deadlines = %v, want %v", git.note.Deadlines, c.want)
+			}
+			if !git.note.VerifySignature() {
+				t.Fatal("the note must verify")
+			}
+		})
+	}
+}

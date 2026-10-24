@@ -70,6 +70,11 @@ func (e stepExecutor) Execute(ctx context.Context, _ any, _ axidomain.Capability
 	if err != nil {
 		return axidomain.ExecutionResult{}, nil, fmt.Errorf("step %s: %w", e.step.Name(), err)
 	}
+	// Recorded here, where the deadline is applied, so it is what warden
+	// enforced rather than what a config asked for.
+	if sc.Timeout > 0 {
+		res.Deadline = sc.Timeout
+	}
 	if e.priors != nil {
 		e.priorsMu.Lock()
 		*e.priors = append(*e.priors, res.Findings...)

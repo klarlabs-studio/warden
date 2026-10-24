@@ -37,12 +37,13 @@ func TestComplianceProfile_DigestsArePinned(t *testing.T) {
 		"standard@1":   goldenStandard1,
 		"strict@1":     goldenStrict1,
 		"strict@2":     "sha256:9ed9e755f8c271f4ddf455069ea9f8cb75b99e806df0e9bd22c8eb2b3774f618",
+		"strict@3":     "sha256:4605bbf4c0cdd131e5c1bf15d6139c8482673107232982652a23af1ee6c520a5",
 	} {
 		if got := mustProfile(t, name).Digest(); got != want {
 			t.Errorf("%s digest = %s, want %s: a published definition changed", name, got, want)
 		}
 	}
-	if len(builtinProfiles) != 4 {
+	if len(builtinProfiles) != 5 {
 		t.Errorf("a new profile version needs its own pinned digest here; have %d definitions", len(builtinProfiles))
 	}
 }
@@ -67,12 +68,12 @@ func TestParseComplianceProfile(t *testing.T) {
 	if mustProfile(t, "strict").Digest() != mustProfile(t, "strict@1").Digest() {
 		t.Error("bare strict must mean strict@1")
 	}
-	for _, bad := range []string{"", "Strict", "paranoid", "strict@3", "strict@0", "strict@", "strict@01", "strict@x", "@1", "strict@1@1"} {
+	for _, bad := range []string{"", "Strict", "paranoid", "strict@4", "strict@0", "strict@", "strict@01", "strict@x", "@1", "strict@1@1"} {
 		if _, err := ParseComplianceProfile(bad); err == nil {
 			t.Errorf("%q must be rejected", bad)
 		}
 	}
-	_, err := ParseComplianceProfile("strict@3")
+	_, err := ParseComplianceProfile("strict@4")
 	if err == nil || !strings.Contains(err.Error(), "newer warden") {
 		t.Errorf("an unknown version must say it needs a newer warden: %v", err)
 	}
@@ -380,7 +381,7 @@ func TestConfigValidate_Profile(t *testing.T) {
 			t.Errorf("profile %q must validate: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"paranoid", "strict@3"} {
+	for _, bad := range []string{"paranoid", "strict@4"} {
 		if err := (Config{Profile: bad}).Validate(); err == nil {
 			t.Errorf("profile %q must be a load error", bad)
 		}
@@ -445,7 +446,7 @@ func TestComplianceProfileVerifierAccessors(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		version int
-	}{{"strict", 3}, {"paranoid", 1}, {"", 1}, {"strict", 0}} {
+	}{{"strict", 4}, {"paranoid", 1}, {"", 1}, {"strict", 0}} {
 		if _, ok := LookupComplianceProfile(c.name, c.version); ok {
 			t.Errorf("lookup of %s@%d must fail", c.name, c.version)
 		}
@@ -474,5 +475,45 @@ func TestStrictV2Floors(t *testing.T) {
 	cfg.Execution.AttestObservations = &disabled
 	if got := p.Check(cfg); len(got) != 1 || got[0].Field != "execution.attest_observations" {
 		t.Fatalf("opt-out accepted: %v", got)
+	}
+}
+
+// strict@3 completes ADR 0008's accepted decision 4, which strict@2 shipped
+// without: every required shell step needs a finite timeout. warden applies
+// that deadline itself, so it is an observation rather than a claim.
+func TestStrictV3RequiresShellTimeouts(t *testing.T) {
+	p := mustProfile(t, "strict@3")
+	v2 := mustProfile(t, "strict@2")
+	if !p.RequiresShellTimeout() || v2.RequiresShellTimeout() || !v2.Lowers(p) {
+		t.Fatal("strict@3 must require shell timeouts and rank above strict@2, which does not")
+	}
+	if !p.RequiresObservedBounds() {
+		t.Fatal("strict@3 keeps strict@2's observed bounds")
+	}
+
+	cfg := p.Apply(compliant())
+	cfg.Execution.Limits = &ExecutionLimits{Memory: "512MiB", CPUs: "1.5", Pids: 128}
+	var missing []string
+	for _, v := range p.Check(cfg) {
+		if v.Floor != FloorShellTimeout {
+			t.Fatalf("unexpected floor: %v", v)
+		}
+		missing = append(missing, v.Field)
+	}
+	if want := []string{"timeouts.lint", "timeouts.test", "timeouts.security-scan"}; !slices.Equal(missing, want) {
+		t.Fatalf("shell steps without a timeout = %v, want %v", missing, want)
+	}
+
+	cfg.Timeouts["lint"], cfg.Timeouts["test"], cfg.Timeouts["security-scan"] = "5m", "0", "10m"
+	if got := p.Check(cfg); len(got) != 1 || got[0].Field != "timeouts.test" || !strings.Contains(got[0].Message, "no limit") {
+		t.Fatalf("a timeout of 0 must be refused: %v", got)
+	}
+
+	cfg.Timeouts["test"] = "15m"
+	if got := p.Check(cfg); len(got) != 0 {
+		t.Fatalf("every required shell step bounded: %v", got)
+	}
+	if got := v2.Check(v2.Apply(compliant())); slices.ContainsFunc(got, func(v FloorViolation) bool { return v.Floor == FloorShellTimeout }) {
+		t.Fatalf("strict@2 gained the timeout floor: %v", got)
 	}
 }

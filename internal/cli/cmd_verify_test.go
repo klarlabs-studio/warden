@@ -450,7 +450,7 @@ func TestVerifyMinProfile(t *testing.T) {
 		{"no pinned key", []string{"--min-profile", "standard"}, 2, "needs a pinned --key"},
 		{"blank pinned key", []string{"--key", " , ", "--min-profile", "standard"}, 2, "needs a pinned --key"},
 		{"unknown level", []string{"--key", fp, "--min-profile", "paranoid"}, 2, "invalid --min-profile"},
-		{"unknown version", []string{"--key", fp, "--min-profile", "strict@3"}, 2, "invalid --min-profile"},
+		{"unknown version", []string{"--key", fp, "--min-profile", "strict@4"}, 2, "invalid --min-profile"},
 		{"explicit empty", []string{"--key", fp, "--min-profile", ""}, 2, "invalid --min-profile"},
 		{"v2 file meets standard", []string{"--key", fp, "--requirements", v2Standard}, 0, "conforms to standard@1"},
 		{"v2 file below strict", []string{"--key", fp, "--requirements", v2Strict}, 1, "profile strict@1"},

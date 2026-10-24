@@ -8,6 +8,19 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **`strict@3`: a finite timeout on every required shell step.** ADR 0008
+  accepted this for `strict@2`, but `strict@2` shipped in 0.44.0 without it,
+  and a published profile version never changes, so it arrives as version 3:
+  everything in `strict@2`, plus a load error for a required shell step
+  (`lint`, `test`, `security-scan`) whose `timeout` is missing or `"0"`. warden
+  enforces that deadline itself, so a `strict@3` note signs the deadline applied
+  to each step that executed (`deadlines_ms`), and `verify --min-profile
+  strict@3` requires one for every required pre-push shell step. `strict@2` is
+  unchanged, and only `strict@3` notes carry the new field, so every other note
+  keeps the payload released verifiers check. Upgrade CI verifiers and every
+  developer binary before selecting it: an older warden rejects the name. See
+  [strict version 3](docs/container-execution.md#strict-version-3).
+
 - Original pre-CI shadow-plan capture with run/attempt/commit binding and
   independent job-timing checks in the advisory measurement report. Older
   runs are explicitly labelled retrospective; planner failure keeps CI enabled.

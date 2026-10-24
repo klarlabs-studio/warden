@@ -190,7 +190,7 @@ func TestLoad_FloorErrorListsEveryViolation(t *testing.T) {
 }
 
 func TestLoad_UnknownProfileIsALoadError(t *testing.T) {
-	for _, v := range []string{"paranoid", "strict@3", "Strict"} {
+	for _, v := range []string{"paranoid", "strict@4", "Strict"} {
 		dir := writeChain(t, map[string]string{FileName: "profile: " + v + "\n"})
 		if _, err := NewRepository(dir).Load(); err == nil {
 			t.Errorf("profile %q must fail the load", v)
@@ -317,5 +317,42 @@ func TestLoadStrictV2AndInheritedOptOut(t *testing.T) {
 				t.Fatalf("lost strict@2: %+v", result.cfg)
 			}
 		}
+	}
+}
+
+// strict@3 loads only when every required shell step has a finite timeout, and
+// a child file cannot lift one back to no limit. Both load paths agree.
+func TestLoadStrictV3RequiresShellTimeouts(t *testing.T) {
+	base := strings.Replace(strictBase, "profile: strict", "profile: strict@3", 1)
+	base = strings.Replace(base, `image: "golang:1.26"`, `image: "golang:1.26", limits: {memory: 512MiB, cpus: "1.5", pids: 128}`, 1)
+	bounded := base + "timeouts: { lint: 5m, test: 15m, security-scan: 10m }\n"
+	for _, c := range []struct {
+		name, base, child, wantErr string
+	}{
+		{"bounded", bounded, "extends: base.yaml\n", ""},
+		{"missing", base, "extends: base.yaml\n", "timeouts.lint"},
+		{"child lifts the bound", bounded, "extends: base.yaml\ntimeouts: { test: \"0\" }\n", "timeouts.test"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := writeChain(t, map[string]string{"base.yaml": c.base, FileName: c.child})
+			a, ae, b, be := loadBoth(t, dir)
+			for _, result := range []struct {
+				cfg domain.Config
+				err error
+			}{{a, ae}, {b, be}} {
+				if c.wantErr == "" {
+					if result.err != nil {
+						t.Fatal(result.err)
+					}
+					if result.cfg.Profile != "strict@3" {
+						t.Fatalf("lost strict@3: %+v", result.cfg)
+					}
+					continue
+				}
+				if result.err == nil || !strings.Contains(result.err.Error(), c.wantErr) {
+					t.Fatalf("want a load error naming %s, got %v", c.wantErr, result.err)
+				}
+			}
+		})
 	}
 }
