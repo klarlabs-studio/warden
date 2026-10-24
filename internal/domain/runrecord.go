@@ -88,6 +88,11 @@ type RunRecord struct {
 	MatchedRules      []string                          `json:"matched_rules"`
 	EvidenceChainRoot string                            `json:"evidence_chain_root"`
 	Evidence          []EvidenceEntry                   `json:"evidence"`
+	// Deadlines is the timeout, in milliseconds, warden enforced on each step
+	// that executed in this run. Written only under a profile that requires
+	// shell timeouts (strict@3), so every other note keeps the payload older
+	// verifiers sign over.
+	Deadlines map[StepName]int64 `json:"deadlines_ms,omitempty"`
 	// Dependencies is the SBOM: the dependency lockfiles present at validation,
 	// each content-digested. Being part of the record, it is covered by the
 	// evidence chain and the signature — a signed statement of exactly which

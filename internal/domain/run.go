@@ -312,6 +312,24 @@ func (r *Run) StepNotes() map[StepName]OutcomeNote {
 	return out
 }
 
+// StepDeadlines reports, in milliseconds, the deadline warden applied to each
+// step that executed in this run. A cached, predicted or skipped step ran
+// nothing, so no deadline can be evidence about it.
+func (r *Run) StepDeadlines() map[StepName]int64 {
+	var out map[StepName]int64
+	for i := range r.results {
+		res := &r.results[i]
+		if res.Deadline <= 0 || res.Reuse != nil || res.ObservedOutcome() != StepExecuted {
+			continue
+		}
+		if out == nil {
+			out = make(map[StepName]int64)
+		}
+		out[res.Step] = res.Deadline.Milliseconds()
+	}
+	return out
+}
+
 // ExecutionObservations reports fresh container probes only. Values are copied
 // so pointer fields cannot mutate the record after capture.
 func (r *Run) ExecutionObservations() map[StepName]ContainerObservation {

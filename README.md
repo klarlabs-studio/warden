@@ -1266,7 +1266,9 @@ and supported boundaries.
 `profile: strict@2` requires explicit memory, CPU and process limits, enables
 signed initial measurements, and rejects checks whose observations cannot confirm
 them. CI can require `verify --min-profile strict@2`; specific numeric ceilings
-use protected version 3 requirements. Bare `strict` retains version 1 semantics.
+use protected version 3 requirements. `profile: strict@3` adds a required finite
+`timeout` on every required shell step and signs the deadline warden enforced.
+Bare `strict` retains version 1 semantics.
 See [strict version 2](docs/container-execution.md#strict-version-2) for rollout
 and engine compatibility.
 

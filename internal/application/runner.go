@@ -1321,6 +1321,11 @@ func attachProfileObservations(rec *domain.RunRecord, run *domain.Run, approval 
 	ref := domain.NewProfileRef(p)
 	rec.Profile = &ref
 	rec.StepOutcomes = run.StepOutcomes()
+	// Only a profile that demands them signs deadlines: any other note keeps
+	// the exact payload older verifiers sign over.
+	if p.RequiresShellTimeout() {
+		rec.Deadlines = run.StepDeadlines()
+	}
 	if approval.Channel == "" {
 		approval.Channel = domain.ApprovalNone
 	}

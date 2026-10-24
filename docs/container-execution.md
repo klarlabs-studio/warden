@@ -165,6 +165,44 @@ selection fails. Cgroup v1 or engines unable to expose the required measurements
 fail too. Upgrade CI readers first, adopt the profile locally, then raise the CI
 minimum only after compliant notes exist.
 
+## Strict version 3
+
+`strict@3` is version 2 plus one floor: every required shell step (`lint`,
+`test` and `security-scan` at pre-push, `lint` at pre-commit) needs a finite
+timeout. Shell steps get no default, so the repository states each bound:
+
+```yaml
+profile: strict@3
+execution:
+  image: local/warden-checks:dev
+  limits:
+    memory: 4GiB
+    cpus: "2"
+    pids: 1024
+timeouts:
+  lint: 5m
+  test: 15m
+  security-scan: 10m
+```
+
+A missing timeout, or `"0"` (no limit), is a load error, including one a file
+sets lower in an `extends` chain. warden applies each deadline itself, so the
+note records the deadline it enforced on every step that executed, in
+milliseconds (`deadlines_ms`), not the configured text. A cached, predicted or
+skipped step ran nothing and records no deadline.
+
+In protected CI, `verify --min-profile strict@3` checks every version 2 clause
+and that each required pre-push shell step ran under a recorded deadline. It
+establishes that warden would have stopped the step at that deadline; it does
+not say how long the step took.
+
+`strict@2` is unchanged: its definition and digest are the ones 0.44.0 and
+0.45.0 publish, so a `strict@2` note neither carries nor needs deadlines. Only a
+`strict@3` note carries the `deadlines_ms` field, so notes under every other
+profile keep the payload older verifiers check. As with version 2, upgrade CI
+verifiers and every developer binary before selecting `strict@3`: an older
+warden rejects the profile name.
+
 ## Apple container
 
 Select Apple's CLI explicitly with:

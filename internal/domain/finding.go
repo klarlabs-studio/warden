@@ -179,6 +179,11 @@ type StepResult struct {
 	// when the probe left no record. Fresh probes enter the evidence chain and
 	// the signed record; cached and per-workspace aggregates do not.
 	Observed *ContainerObservation
+	// Deadline is the timeout warden's executor applied to this run of the
+	// step, zero when it applied none. warden enforces it itself, so it is an
+	// observation, not the configured value: strict@3 signs it (see
+	// Run.StepDeadlines).
+	Deadline time.Duration
 }
 
 // StepOutcome classifies whether a passing (or failing) step did its work. See
