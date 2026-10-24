@@ -1,0 +1,97 @@
+{
+  "run": {
+    "id": 40081541978,
+    "workflow_id": 305852422,
+    "status": "completed",
+    "head_sha": "b57d6f3eb4ab792feaa4d81d8dd5a77575c39f0f",
+    "conclusion": "success",
+    "created_at": "2026-10-24T09:20:10Z",
+    "run_attempt": 1
+  },
+  "baseline": {
+    "id": 40079586504,
+    "workflow_id": 305852422,
+    "status": "completed",
+    "head_sha": "6621046011cb1bec53e9345b92d7cf305b5f627a",
+    "conclusion": "success",
+    "created_at": "2026-10-24T08:50:14Z",
+    "run_attempt": 1
+  },
+  "jobs": [
+    {
+      "name": "Verify protected test reuse",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T09:20:14Z",
+      "completed_at": "2026-10-24T09:20:34Z"
+    },
+    {
+      "name": "ci / Test (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T09:20:37Z",
+      "completed_at": "2026-10-24T09:20:42Z",
+      "steps": [
+        {
+          "name": "Record caller-authorized reuse",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test (race + coverage)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Coverage gate",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run signed offline test contract",
+          "status": "completed",
+          "conclusion": "skipped"
+        }
+      ]
+    }
+  ],
+  "baseline_jobs": [
+    {
+      "name": "Verify protected test reuse",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:50:18Z",
+      "completed_at": "2026-10-24T08:50:51Z"
+    },
+    {
+      "name": "ci / Test (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:50:54Z",
+      "completed_at": "2026-10-24T08:52:53Z"
+    }
+  ],
+  "plan": {
+    "version": 1,
+    "sha": "b57d6f3eb4ab792feaa4d81d8dd5a77575c39f0f",
+    "jobs": [
+      {
+        "name": "test",
+        "action": "skip",
+        "reasons": [
+          "matching trusted commit-bound execution contracts"
+        ],
+        "verification_ms": 1
+      }
+    ],
+    "run_jobs": [],
+    "reusable_jobs": [
+      "test"
+    ],
+    "verification_ms": 116,
+    "mode": "enforce",
+    "eligible_jobs": [
+      "test"
+    ]
+  }
+}

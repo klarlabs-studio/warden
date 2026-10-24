@@ -30,6 +30,41 @@ class ReportTests(unittest.TestCase):
     def build(self):
         return report.build_report(self.plan, self.current, self.baseline, self.jobs, self.old, self.mapping)
 
+    def test_real_protected_reuse_requires_actual_steps_and_prior_verification(self):
+        fixture = json.loads((Path(__file__).parent / "testdata" / "ci_report_protected_reuse.json").read_text())
+        def observe(jobs, plan=None):
+            return report.observe_test_reuse(plan or fixture["plan"], fixture["run"],
+                                             fixture["baseline"], jobs, fixture["baseline_jobs"])
+        got = observe(fixture["jobs"])
+        self.assertTrue(got["observed"])
+        self.assertEqual(got["test_wrapper_runner_seconds"], 5)
+        self.assertEqual(got["protected_verifier_runner_seconds"], 20)
+        self.assertEqual(got["historical_test_runner_seconds"], 119)
+        self.assertEqual(got["historical_test_runner_seconds_difference"], 114)
+        for name in ["Record caller-authorized reuse", "Run signed offline test contract",
+                     "Test (race + coverage)", "Coverage gate"]:
+            for change in ["missing", "duplicate", "wrong_conclusion"]:
+                jobs = copy.deepcopy(fixture["jobs"])
+                test = jobs[1]
+                step = next(s for s in test["steps"] if s["name"] == name)
+                if change == "missing":
+                    test["steps"].remove(step)
+                elif change == "duplicate":
+                    test["steps"].append(copy.deepcopy(step))
+                else:
+                    step["conclusion"] = "failure"
+                with self.subTest(name=name, change=change):
+                    self.assertFalse(observe(jobs)["observed"])
+                    self.assertIsNone(observe(jobs)["historical_test_runner_seconds_difference"])
+        for field, value in [("conclusion", "failure"), ("completed_at", "2026-10-24T10:00:00Z")]:
+            jobs = copy.deepcopy(fixture["jobs"])
+            jobs[0][field] = value
+            self.assertFalse(observe(jobs)["observed"])
+        self.assertFalse(observe(fixture["jobs"][1:])["observed"])
+        self.assertFalse(observe(fixture["jobs"] + [fixture["jobs"][0]])["observed"])
+        with self.assertRaises(ValueError):
+            observe(fixture["jobs"], dict(fixture["plan"], sha="b" * 40))
+
     def test_original_capture_matches_run_attempt_commit_and_precedes_jobs(self):
         capture = {"version": 1, "sha": self.plan["sha"], "run_id": 2,
                    "run_attempt": 1, "captured_at": "2026-10-23T00:00:00Z"}
