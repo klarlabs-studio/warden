@@ -47,6 +47,8 @@ jq -e --arg sha "$sha" '.commit_sha == $sha and .contracts.test.version == 1 and
 # A fresh consumer gets the public note, not the signer's private directory.
 git clone --no-hardlinks "$PWD" "$work/consumer"
 cd "$work/consumer"
+git config user.name warden-reuse-fixture
+git config user.email warden-reuse-fixture
 git remote set-url origin "$work/origin.git"
 git fetch origin refs/notes/warden:refs/notes/warden
 export WARDEN_CONFIG_DIR="$work/consumer-key"
