@@ -169,6 +169,23 @@ govulncheck updates since the previous pinned revision.
 
 ## Protected test reuse in this repository
 
+### Native integration fixture
+
+`Native container reuse integration` runs on a native Linux amd64 runner when
+its script/workflow changes, or by manual dispatch. It builds the reviewed
+verifier, verifies the published image, and runs the full offline test profile
+through Warden in a disposable repository. The repository publishes its signed
+note to a local bare remote. A fresh consumer fetches that note and checks the
+independently prepared policy. Missing evidence, an untrusted signer, a different
+platform and a note copied to another commit must all keep the test running.
+
+The signer is generated for this fixture alone. Its private directory is never
+uploaded, and it is never added to the production roster. Public artifacts
+retain the actual note, policies, plans and gate timing. This establishes a
+controlled integration result, not a developer-machine observation, a skipped
+production job or measured CI savings. Cross-architecture compiler failures on
+an Apple silicon host cannot substitute for this native execution.
+
 The read-only `Verify protected test reuse` job builds the verifier and preparer
 from reviewed commit `369231d82fe3563979dbf0b4cd036de5a347bab8`, outside the
 candidate checkout. It executes no candidate code. Its protected amd64 Docker
