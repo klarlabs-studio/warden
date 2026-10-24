@@ -1,0 +1,295 @@
+{
+  "source": "GitHub Actions CI run 40078559747, attempt 1; baseline 39917037757, attempt 1",
+  "run": {
+    "id": 40078559747,
+    "workflow_id": 305852422,
+    "status": "completed",
+    "head_sha": "ab8082b2b012e50799ddf682d243f91cda0008de",
+    "conclusion": "success",
+    "created_at": "2026-10-24T08:34:20Z",
+    "run_attempt": 1
+  },
+  "jobs": [
+    {
+      "name": "Capture shadow plan",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:23Z",
+      "completed_at": "2026-10-24T08:34:31Z"
+    },
+    {
+      "name": "Verify protected test reuse",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-24T08:34:21Z",
+      "completed_at": "2026-10-24T08:34:20Z"
+    },
+    {
+      "name": "Windows compile (amd64)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:33Z",
+      "completed_at": "2026-10-24T08:34:46Z"
+    },
+    {
+      "name": "Windows compile (arm64)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:33Z",
+      "completed_at": "2026-10-24T08:35:12Z"
+    },
+    {
+      "name": "ci / Build",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:34Z",
+      "completed_at": "2026-10-24T08:34:53Z"
+    },
+    {
+      "name": "ci / Security (nox)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:33Z",
+      "completed_at": "2026-10-24T08:35:00Z"
+    },
+    {
+      "name": "ci / Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:33Z",
+      "completed_at": "2026-10-24T08:34:58Z"
+    },
+    {
+      "name": "ci / Test (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:33Z",
+      "completed_at": "2026-10-24T08:36:06Z"
+    },
+    {
+      "name": "ci / Vulnerabilities (govulncheck)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:34Z",
+      "completed_at": "2026-10-24T08:35:00Z"
+    },
+    {
+      "name": "ci / Image (smoke build)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T08:34:34Z",
+      "completed_at": "2026-10-24T08:34:42Z"
+    },
+    {
+      "name": "ci / Benchmark",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-24T08:34:31Z",
+      "completed_at": "2026-10-24T08:34:31Z"
+    },
+    {
+      "name": "Container runtime (${{ matrix.runtime }})",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-24T08:36:06Z",
+      "completed_at": "2026-10-24T08:36:06Z"
+    },
+    {
+      "name": "End-to-End",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-24T08:36:06Z",
+      "completed_at": "2026-10-24T08:36:06Z"
+    }
+  ],
+  "baseline": {
+    "id": 39917037757,
+    "workflow_id": 305852422,
+    "status": "completed",
+    "head_sha": "0073c281695b6465ba7aafece4dfc4cf1ef1d852",
+    "conclusion": "success",
+    "created_at": "2026-10-23T07:20:01Z",
+    "run_attempt": 1
+  },
+  "baseline_jobs": [
+    {
+      "name": "Windows compile (amd64)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:05Z",
+      "completed_at": "2026-10-23T07:20:26Z"
+    },
+    {
+      "name": "Windows compile (arm64)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:04Z",
+      "completed_at": "2026-10-23T07:20:41Z"
+    },
+    {
+      "name": "ci / Test (ubuntu-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:04Z",
+      "completed_at": "2026-10-23T07:22:43Z"
+    },
+    {
+      "name": "ci / Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:04Z",
+      "completed_at": "2026-10-23T07:20:31Z"
+    },
+    {
+      "name": "ci / Build",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:05Z",
+      "completed_at": "2026-10-23T07:20:25Z"
+    },
+    {
+      "name": "ci / Security (nox)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:20:04Z",
+      "completed_at": "2026-10-23T07:20:33Z"
+    },
+    {
+      "name": "Container runtime (nerdctl)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:22:47Z",
+      "completed_at": "2026-10-23T07:24:48Z"
+    },
+    {
+      "name": "Container runtime (podman)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:22:46Z",
+      "completed_at": "2026-10-23T07:24:42Z"
+    },
+    {
+      "name": "End-to-End",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-23T07:22:46Z",
+      "completed_at": "2026-10-23T07:25:01Z"
+    },
+    {
+      "name": "ci / Benchmark",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-23T07:23:51Z",
+      "completed_at": "2026-10-23T07:20:01Z"
+    }
+  ],
+  "plan": {
+    "version": 1,
+    "sha": "ab8082b2b012e50799ddf682d243f91cda0008de",
+    "jobs": [
+      {
+        "name": "build",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "e2e",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "lint",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "nerdctl",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "podman",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "security",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "test",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "windows-amd64",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      },
+      {
+        "name": "windows-arm64",
+        "action": "run",
+        "reasons": [
+          "job requires CI execution",
+          "shadow mode requires CI execution"
+        ],
+        "verification_ms": 0
+      }
+    ],
+    "run_jobs": [
+      "build",
+      "e2e",
+      "lint",
+      "nerdctl",
+      "podman",
+      "security",
+      "test",
+      "windows-amd64",
+      "windows-arm64"
+    ],
+    "reusable_jobs": [],
+    "verification_ms": 182,
+    "mode": "shadow",
+    "eligible_jobs": []
+  },
+  "capture": {
+    "version": 1,
+    "sha": "ab8082b2b012e50799ddf682d243f91cda0008de",
+    "run_id": 40078559747,
+    "run_attempt": 1,
+    "captured_at": "2026-10-24T08:34:28Z"
+  }
+}

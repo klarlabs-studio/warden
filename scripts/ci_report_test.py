@@ -1,4 +1,9 @@
 import copy
+import contextlib
+import io
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -30,19 +35,18 @@ class ReportTests(unittest.TestCase):
                    "run_attempt": 1, "captured_at": "2026-10-23T00:00:00Z"}
         planner = dict(self.job("Capture shadow plan", "success"),
                        started_at="2026-10-23T00:00:00Z", completed_at="2026-10-23T00:00:00Z")
-        jobs = self.jobs + [planner]
+        jobs = [dict(self.jobs[0], conclusion="success"), self.jobs[1], planner]
         self.assertEqual(report.validate_capture(capture, self.plan, self.current, jobs, self.mapping),
-                         capture["captured_at"])
+                         {"plan_captured_at": capture["captured_at"],
+                          "capture_timing_unavailable_jobs": [], "plan_source": "pre_ci_capture"})
         for field, value in (("version", True), ("run_id", 3), ("run_attempt", 2),
                              ("sha", "b" * 40), ("captured_at", "2026-10-22T23:59:59Z"),
                              ("captured_at", "2026-10-23T00:00:01Z")):
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 report.validate_capture(dict(capture, **{field: value}), self.plan,
                                         self.current, jobs, self.mapping)
-        for bad_jobs in ([], jobs + [self.jobs[0]],
-                         [dict(self.jobs[0], started_at=None), self.jobs[1], planner]):
-            with self.subTest(jobs=bad_jobs), self.assertRaises(ValueError):
-                report.validate_capture(capture, self.plan, self.current, bad_jobs, self.mapping)
+        with self.assertRaises(ValueError):
+            report.validate_capture(capture, self.plan, self.current, [], self.mapping)
 
         for replacement in (dict(planner, conclusion="failure"),
                             dict(planner, completed_at="2026-10-23T00:00:01Z"),
@@ -53,6 +57,52 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             report.validate_capture(capture, self.plan, self.current,
                                     jobs + [planner], self.mapping)
+
+    def test_incomplete_job_timing_is_explicit_and_does_not_hide_late_capture(self):
+        capture = {"version": 1, "sha": self.plan["sha"], "run_id": 2,
+                   "run_attempt": 1, "captured_at": "2026-10-23T00:00:00Z"}
+        planner = self.job("Capture shadow plan", "success")
+        # Skipped timestamps do not prove that a job actually executed.
+        for unavailable in ([], [self.jobs[0]], [self.jobs[0]] * 2,
+                            [dict(self.jobs[0], conclusion="success", started_at=None)]):
+            jobs = unavailable + [self.jobs[1], planner]
+            with self.subTest(jobs=jobs):
+                got = report.validate_capture(capture, self.plan, self.current, jobs, self.mapping)
+                self.assertEqual(got["plan_source"], "capture_timing_unavailable")
+                self.assertEqual(got["capture_timing_unavailable_jobs"], ["Unit tests"])
+                with self.assertRaisesRegex(ValueError, "after job started"):
+                    report.validate_capture(capture, self.plan, self.current,
+                                            unavailable + [self.jobs[1], dict(
+                                                planner, completed_at="2026-10-23T00:00:01Z")],
+                                            self.mapping)
+
+    def test_real_main_run_with_skipped_matrix_still_emits_report(self):
+        fixture = json.loads((Path(__file__).parent / "testdata" / "ci_report_skipped_matrix.json").read_text())
+        current, jobs, plan, capture = (fixture[name] for name in ("run", "jobs", "plan", "capture"))
+        mapping = json.loads((Path(__file__).parents[1] / ".github/warden/shadow-jobs.json").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, value in (("plan", plan), ("capture", capture), ("mapping", mapping)):
+                (root / name).write_text(json.dumps(value))
+            args = ["ci_report.py", "--repository", "klarlabs-studio/warden", "--run", str(current["id"]),
+                    "--baseline", str(fixture["baseline"]["id"]), "--plan", str(root / "plan"),
+                    "--capture", str(root / "capture"), "--jobs", str(root / "mapping")]
+            output = io.StringIO()
+            with patch("sys.argv", args), patch.object(report, "snapshot", side_effect=[
+                    (current, jobs), (fixture["baseline"], fixture["baseline_jobs"])]), contextlib.redirect_stdout(output):
+                self.assertEqual(report.main(), 0)
+            got = json.loads(output.getvalue())
+        self.assertEqual(got["plan_source"], "capture_timing_unavailable")
+        self.assertEqual(got["capture_timing_unavailable_jobs"],
+                         ["Container runtime (nerdctl)", "Container runtime (podman)", "End-to-End"])
+        self.assertIsNone(got["observed_mapped_runner_seconds"])
+        self.assertIsNone(got["observed_runner_seconds_difference"])
+        self.assertEqual(got["estimated_avoided_runner_seconds"], 0)
+        rows = {row["name"]: row for row in got["jobs"]}
+        for name in ("podman", "nerdctl"):
+            self.assertIsNone(rows[name]["observed_runner_seconds"])
+            self.assertEqual(rows[name]["measurement"], "missing_or_ambiguous")
+        self.assertEqual(rows["e2e"]["observed_runner_seconds"], 0)
 
     def test_observation_and_counterfactual_are_distinct(self):
         got = self.build()

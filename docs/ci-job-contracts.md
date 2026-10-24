@@ -341,8 +341,11 @@ Original plans are retained as `warden-ci-plan-<run>-<attempt>`. The collector
 selects the exact attempt and refuses ambiguous or expired matching artifacts.
 The report validates commit/run/attempt metadata and corroborates timing against
 the successful `Capture shadow plan` job's GitHub timestamps: that job must finish
-before every mapped job starts. Missing timing fails measurement rather than
-claiming a pre-CI observation. These are advisory measurements, not authenticated
+before every mapped job starts. Missing, ambiguous or skipped jobs produce
+`plan_source: capture_timing_unavailable` and a list of exact GitHub job names in
+`capture_timing_unavailable_jobs`. Observed durations remain available; missing
+matrix children remain unknown rather than being counted as zero. Invalid
+metadata and evidence of late capture still fail measurement. These are advisory measurements, not authenticated
 execution evidence. A candidate can change its workflow; this path must never
 become skip authorization.
 

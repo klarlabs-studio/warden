@@ -164,15 +164,20 @@ def validate_capture(capture, plan, current, jobs, mapping):
         raise ValueError("capture timestamp outside planner job")
     # The GitHub job boundary independently corroborates the ordering; the
     # artifact's self-reported timestamp alone is insufficient.
-    # Require each mapped job, not just whichever happens to have timestamps.
-    # Missing/skipped jobs cannot establish pre-execution timing.
+    # Missing, ambiguous and skipped jobs cannot establish pre-execution
+    # timing. Retain that uncertainty without discarding the other observations.
+    unavailable = []
     for name in mapping.values():
         matches = [job for job in jobs if job["name"] == name]
-        if len(matches) != 1 or not matches[0].get("started_at"):
-            raise ValueError("original plan timing unavailable for " + name)
+        if (len(matches) != 1 or matches[0].get("conclusion") == "skipped"
+                or not matches[0].get("started_at")):
+            unavailable.append(name)
+            continue
         if finished > timestamp(matches[0]["started_at"]):
             raise ValueError("original plan captured after job started: " + name)
-    return capture["captured_at"]
+    return {"plan_captured_at": capture["captured_at"],
+            "capture_timing_unavailable_jobs": sorted(unavailable),
+            "plan_source": "capture_timing_unavailable" if unavailable else "pre_ci_capture"}
 
 
 def main():
@@ -193,9 +198,8 @@ def main():
         report = build_report(plan, current, baseline, jobs, previous, mapping)
         report["plan_source"] = "retrospective"
         if args.capture:
-            report["plan_captured_at"] = validate_capture(
-                decode(args.capture.read_text()), plan, current, jobs, mapping)
-            report["plan_source"] = "pre_ci_capture"
+            report.update(validate_capture(
+                decode(args.capture.read_text()), plan, current, jobs, mapping))
             report["planner_runner_seconds"] = duration(next(
                 job for job in jobs if job["name"] == "Capture shadow plan"))
             report["limitations"].append("The original artifact and planner timing are advisory measurements, not authenticated execution evidence or skip authorization.")
