@@ -72,12 +72,115 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  test-reuse-plan:
+    name: Verify protected test reuse
+    # Forks always execute CI. Never obtain the expected base/branch from notes.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      reuse-sha: ${{ steps.decision.outcome == 'success' && steps.decision.outputs.reuse-sha || '' }}
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      COMPARISON_BASE: ${{ github.event.pull_request.base.sha }}
+      EXPECTED_CONTRACT: >-
+        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad","config_id":"sha256:bafb4e708638a0e6af0e072f6931ba32b0eace8c7d6c7220984664acbdb9b1e7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
+      WARDEN_TRUSTED_KEYS: '139e6eb9e2611c76,b3746e61c4d49512,18df642847f69902'
+    steps:
+      - name: Check out protected verifier and policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 369231d82fe3563979dbf0b4cd036de5a347bab8
+          path: trusted-reuse
+          persist-credentials: false
+      - name: Check out candidate objects
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: reuse-candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: trusted-reuse/go.mod
+          cache-dependency-path: trusted-reuse/go.sum
+      # No candidate build, hook, configuration or executable runs in this job.
+      - name: Build protected verifier
+        working-directory: trusted-reuse
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/warden-reuse-bin"
+          go build -o "$RUNNER_TEMP/warden-reuse-bin/warden" .
+          go build -o "$RUNNER_TEMP/warden-reuse-bin/ci-policy" ./scripts/ci-policy
+      - name: Prepare and verify exact test policy
+        id: decision
+        continue-on-error: true
+        working-directory: reuse-candidate
+        env:
+          WARDEN_COMMIT: ${{ env.CANDIDATE_SHA }}
+          WARDEN_PLAN_MODE: enforce
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_NO_REPLACE_OBJECTS: '1'
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$COMPARISON_BASE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          EXPECTED_BRANCH=$(jq -er '.pull_request.head.ref | select(type == "string" and length > 0)' "$GITHUB_EVENT_PATH")
+          git check-ref-format "refs/heads/$EXPECTED_BRANCH"
+          mkdir -p "$RUNNER_TEMP/warden-test-reuse"
+          export PATH="$RUNNER_TEMP/warden-reuse-bin:$PATH"
+          export WARDEN_JOB_POLICY="$RUNNER_TEMP/warden-test-reuse/policy.json"
+          # Bind the protected template to the exact contract the caller runs.
+          jq -e --argjson contract "$EXPECTED_CONTRACT" \
+            --slurpfile receipt "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/publication.json" '
+            .version == 1 and (.jobs | keys) == ["test"] and
+            .jobs.test.version == 1 and (.jobs.test.steps | keys) == ["test"] and
+            (.jobs.test.steps.test |
+              .command == $contract.command and .image_id == $contract.config_id and
+              .image_id_kind == "config" and .platform == $contract.platform and
+              .network == "none") and
+            ($receipt | length) == 1 and
+            $receipt[0].registry_reference == $contract.image and
+            $receipt[0].docker_config_id == $contract.config_id and
+            $receipt[0].platform == $contract.platform and
+            $receipt[0].signing_identity == $contract.signing_identity
+          ' "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" >/dev/null
+          ci-policy --repo "$PWD" \
+            --template "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" \
+            --base "$COMPARISON_BASE" --commit "$CANDIDATE_SHA" \
+            --branch "$EXPECTED_BRANCH" > "$WARDEN_JOB_POLICY"
+          git fetch origin refs/notes/warden:refs/notes/warden
+          bash "$GITHUB_WORKSPACE/trusted-reuse/.github/actions/ci-plan.sh" \
+            > "$RUNNER_TEMP/warden-test-reuse/plan.json"
+          # ci-plan validates the complete policy partition. Only the single
+          # expected test job may authorize the shared caller's reuse input.
+          if jq -e -s --arg sha "$CANDIDATE_SHA" '
+            length == 1 and (.[0] |
+              .version == 1 and .mode == "enforce" and .sha == $sha and
+              .run_jobs == [] and .reusable_jobs == ["test"] and
+              .eligible_jobs == ["test"] and (.jobs | length) == 1 and
+              .jobs[0].name == "test" and .jobs[0].action == "skip")
+          ' "$RUNNER_TEMP/warden-test-reuse/plan.json" >/dev/null; then
+            printf 'reuse-sha=%s\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Retain protected reuse observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: warden-test-reuse-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/warden-test-reuse/
+          if-no-files-found: warn
+          retention-days: 30
+
   # The shared klarlabs-studio Go CI: gofmt, golangci-lint (gocritic), race
   # tests, the coverctl coverage gate, and a nox security scan (SARIF -> code
   # scanning). Pinned tool/action versions live in one place and every repo
   # picks up the bump.
   ci:
-    needs: [shadow-plan]
+    needs: [shadow-plan, test-reuse-plan]
     # An advisory planner failure must never suppress the ordinary checks.
     if: ${{ !cancelled() }}
     # Pinned to a commit, not @main. The shared bar defines what "passing"
@@ -93,11 +196,11 @@ jobs:
     with:
       # Runtime tests run on Unix; Windows compilation is checked below.
       cross-platform: false
-      # Match the independently reviewed test-only local contract. Reuse is
-      # deliberately empty until protected per-commit policy preparation is wired.
+      # Only the protected verifier may supply an exact candidate reuse SHA.
+      # A skipped/failed verifier emits nothing and leaves the container running.
       test-container-contract: >-
         {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad","config_id":"sha256:bafb4e708638a0e6af0e072f6931ba32b0eace8c7d6c7220984664acbdb9b1e7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
-      test-reuse-sha: ''
+      test-reuse-sha: ${{ needs.test-reuse-plan.outputs.reuse-sha || '' }}
 
   windows-build:
     needs: [shadow-plan]

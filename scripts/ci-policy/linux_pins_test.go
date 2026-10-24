@@ -13,7 +13,7 @@ import (
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 )
 
-func TestSharedCIUsesPublishedContractWithoutReuse(t *testing.T) {
+func TestSharedCIUsesPublishedContractWithProtectedReuse(t *testing.T) {
 	root := filepath.Join("..", "..", ".github")
 	data, err := os.ReadFile(filepath.Join(root, "workflows", "ci.yml"))
 	if err != nil {
@@ -28,8 +28,8 @@ func TestSharedCIUsesPublishedContractWithoutReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := workflow.Jobs["ci"].With
-	if inputs["test-reuse-sha"] != "" || inputs["cross-platform"] != false {
-		t.Fatal("reuse must remain disabled and the contract must cover only Linux")
+	if inputs["test-reuse-sha"] != "${{ needs.test-reuse-plan.outputs.reuse-sha || '' }}" || inputs["cross-platform"] != false {
+		t.Fatal("reuse must come from the protected verifier and the contract must cover only Linux")
 	}
 	var contract map[string]string
 	raw, ok := inputs["test-container-contract"].(string)

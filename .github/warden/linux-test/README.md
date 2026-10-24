@@ -113,7 +113,7 @@ validation as UID 10001. Their manifests, config identities, platforms and exact
 publisher signatures were independently verified before pinning. Earlier images
 from run `39997734827` contain Go 1.26.7, for which the shared govulncheck job
 reported reachable standard-library advisories. Updating source cannot update an
-immutable image; use the refreshed references below. CI skipping remains disabled.
+immutable image; use the refreshed references below.
 
 ## Independently prepare per-commit expectations
 
@@ -156,8 +156,9 @@ changes before publishing a replacement image.
 The main CI caller now selects this same signed amd64 Docker contract through
 the shared workflow interface merged in `klarlabs-studio/.github#88`. It runs
 the pinned command once, including the coverage check from the produced profile.
-Its `test-reuse-sha` input is explicitly empty and the shadow policy stays all-run.
-The caller pins the reviewed shared merge commit.
+Its `test-reuse-sha` input comes only from the protected verification job described
+below. The independent telemetry shadow policy stays all-run. The caller pins the
+reviewed shared merge commit.
 
 The shared container path tests the PR head, which is the commit local evidence
 can attest. The previous host job tested GitHub's synthetic merge checkout.
@@ -166,9 +167,38 @@ merge-result unit-test requirement needs its own gate; local head evidence canno
 establish that result. The shared pin also includes upstream timeout, nox and
 govulncheck updates since the previous pinned revision.
 
-Protected per-commit policy preparation, independently established base/branch
-context, and a validated planner-to-caller output are still required before
-reuse can be enabled. An Apple arm64 result cannot suppress the amd64 contract.
+## Protected test reuse in this repository
+
+The read-only `Verify protected test reuse` job builds the verifier and preparer
+from reviewed commit `369231d82fe3563979dbf0b4cd036de5a347bab8`, outside the
+candidate checkout. It executes no candidate code. Its protected amd64 Docker
+policy and publication receipt must match the exact contract supplied to shared
+CI: image, config identity, platform, command, network and publisher.
+
+Only same-repository pull requests are eligible. The candidate SHA, comparison
+base SHA and branch come from GitHub event metadata. Candidate Git objects supply
+dependency inputs; notes never supply expectations. The signed, trusted,
+commit-bound planner must approve the complete one-job test inventory before the
+job emits the candidate SHA. The shared workflow accepts that SHA only if it
+matches its own candidate. This is an accepted caller decision, not a new test
+observation. Lint, builds, vulnerability checks, E2E and runtime tests still run.
+
+Missing notes, errors, partial plans or contract/context mismatches emit no reuse
+SHA. Failed or skipped verification jobs do not suppress ordinary CI. Forks and
+push-to-main runs always execute the container test. Policy/plan observations are
+retained as artifacts; an eligible result is not a claim that a forge job skipped.
+
+The expected comparison is the pull request's base SHA, not a base copied from
+the note. A local pre-push run against an earlier remote feature-branch tip or
+another branch context will not qualify. The normal host gate and Apple arm64
+profiles cannot replace the Linux amd64 Docker test. Use a dedicated matching
+profile and inspect actual CI execution before claiming savings. To refresh the
+contract, review and advance the protected source pin as well as the caller and
+profile pins; runtime comparisons reject drift between them.
+
+GitHub must protect changes to the caller workflow itself through repository
+review rules. A pinned verifier cannot secure a caller that has been changed to
+ignore its result.
 
 Build the preparer from a reviewed checkout, outside the candidate:
 
