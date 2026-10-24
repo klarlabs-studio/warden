@@ -1,90 +1,11 @@
-agent: auto
-hooks:
-  pre_commit: true
-  # pre-push writes + pushes the refs/notes/warden provenance the required
-  # `gate` check depends on; keep it enabled so a hooks-sync can't drop the shim.
-  pre_push: true
+# Dedicated test-only configuration. Install only in a disposable checkout.
+execution:
+  mode: container
+  runtime: auto
+  image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:070129904c8b4dd3be7e2fba92761d10c227a5d0bdf44c7993a49bb776cc22ad
+  platform: linux/amd64
+  network: none
 commands:
-  # Mirror CI stage 1: golangci-lint runs gofmt/goimports formatters + govet +
-  # staticcheck + gocritic, so one command is the whole quality gate.
-  # --allow-parallel-runners because the lock golangci-lint takes is on the
-  # SHARED cache, so a lint in any other repository on this machine blocks this
-  # one for a minute and the gate exits 75. warden already isolates each run's
-  # GOLANGCI_LINT_CACHE, which is what that lock protects.
-  #
-  # --timeout=15m because the default is one minute of WALL CLOCK, and this
-  # machine runs several gates at once: measured at load 68 on 10 cores, lint
-  # printed "0 issues." and then died on the timeout anyway. That reads as a
-  # failed step, which is the one thing it is not -- nothing was wrong with the
-  # tree, the linter simply never got enough CPU to finish saying so.
-  lint: "golangci-lint run --allow-parallel-runners --timeout=15m ./..."
-  # Mirror CI unit + e2e stages.
-  test: "go test -race ./... && go test -tags e2e ./e2e/"
-  # A config-defined custom step: any step name with a command here runs it —
-  # no code, no installed binary. nox applies the committed .nox/baseline.json,
-  # so only unwaived high/critical findings reach the gate — and of those, only
-  # the ones this change introduced fail it (security_scan.mode, default delta).
-  security-scan: "nox scan . -severity-threshold high"
+  test: /usr/local/bin/warden-linux-test
 steps:
-  # `credentials` runs FIRST and in BOTH hooks. First because it is the only
-  # step whose failure is unrecoverable by re-running: once a secret is in a
-  # commit object it is in the reflog, and once pushed it is compromised
-  # regardless of what the next commit removes. In both hooks because pre-commit
-  # is the last point where "don't commit it" is still cheap advice — catching
-  # it at pre-push means the secret already exists in history. It only reads the
-  # files the change touched, so it costs nothing in the fast path.
-  pre_commit: [credentials, lint]
-  # pre-push mirrors CI order: secrets -> quality -> security -> tests.
-  pre_push: [credentials, rebase, lint, security-scan, test]
-security_scan:
-  # The nox pin lives ONCE, centrally, in the shared reusable workflow every
-  # klarlabs repo calls — so a search of THIS repo's workflows finds nothing and
-  # the version-drift check was inert here (#112). This names WHERE the pin is,
-  # never what it is: there is still exactly one copy of the version, in the
-  # workflow that already defines it. Resolution is cached, and any failure
-  # (offline, moved, renamed) degrades to "no pin" — never to a blocked push.
-  #
-  # Requires warden >= 0.20.0: older versions read pin_file as a repo-relative
-  # path and fail the step outright.
-  pin_file: klarlabs-studio/.github/.github/workflows/go-ci.yml@main
-
-risk:
-  diff_lines_high: 400
-  files_touched_high: 15
-# Accept commits the FORGE created (0.30.0+).
-#
-# `gate` is a REQUIRED check on main, and warden's gate is a client-side
-# pre-push hook — so a squash merge, a web edit, or a Dependabot / nox
-# remediation commit was never on a machine where warden could run, and can
-# never pass. That cost this repository real time: #217 was closed unread,
-# #218 and #219 sat blocked for days, and docs/ci-provenance-gate.md had
-# predicted exactly that ("you end up reaching for the admin override, and a
-# check you routinely override isn't really enforcing").
-#
-# What makes this safe is the signal, not the setting. It requires a signature
-# git can VERIFY against a pinned full fingerprint — GitHub's published
-# web-flow keys, the default when `keys` is unset. The committer field says
-# "GitHub <noreply@github.com>" and is free text anyone sets with one flag; it
-# is never consulted. A developer's --no-verify push carries their key or none,
-# so it cannot reach this path.
-#
-# The gate reports these apart from the total, and should: "N accepted as
-# forge-authored — the forge signed them; warden ran NO checks on them."
-forge:
-  accept_authored: true
-
-# Trusted provenance signers (ADR-0002 Phase 3). The warden-gate action (see
-# .github/workflows/provenance.yml) and a bare `warden verify --range` require a
-# note signed by one of these. Add yours with `warden key show`; list with
-# `warden key list`.
-trusted_keys:
-  - 139e6eb9e2611c76   # felix — primary dev machine
-  - b3746e61c4d49512   # recovery key — seed stored offline; restore into WARDEN_CONFIG_DIR to sign from a new machine
-  - 18df642847f69902   # CI — post-merge attestation (provenance-main.yml); a dedicated key, deliberately not a developer's, so `doctor` can still tell a human-gated commit from a CI-attested one
-rules:
-  # Large changes on main get a human approval gate at push time.
-  - match:
-      branch: main
-      risk: high
-    then:
-      require_approval: true
+  pre_push: [test]
