@@ -1,0 +1,67 @@
+name: Native container reuse integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/native-container-reuse.yml'
+      - 'scripts/native-container-reuse.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  reuse:
+    name: Native amd64 signed reuse fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out protected tools and profile
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 369231d82fe3563979dbf0b4cd036de5a347bab8
+          path: protected
+          persist-credentials: false
+      - name: Check out integration test source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: protected/go.mod
+          cache-dependency-path: protected/go.sum
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+      - name: Prepare protected tools and signed image
+        working-directory: protected
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/native-container-reuse"
+          mkdir -p "$work/bin" "$work/observations"
+          go build -o "$work/bin/warden" .
+          go build -o "$work/bin/ci-policy" ./scripts/ci-policy
+          image=$(jq -er '.registry_reference' .github/warden/linux-test/profiles/amd64/publication.json)
+          cosign verify --certificate-identity \
+            'https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$image" \
+            > "$work/observations/signature.json"
+          docker pull --platform linux/amd64 "$image"
+          docker image inspect "$image" > "$work/observations/image.json"
+          config=$(jq -er '.docker_config_id' .github/warden/linux-test/profiles/amd64/publication.json)
+          jq -e --arg config "$config" 'length == 1 and .[0].Id == $config and
+            .[0].Os == "linux" and .[0].Architecture == "amd64"' "$work/observations/image.json"
+      - name: Exercise real gate and independent consumer
+        run: |
+          bash "$GITHUB_WORKSPACE/source/scripts/native-container-reuse.sh" \
+            "$GITHUB_WORKSPACE/protected" "$GITHUB_WORKSPACE/source" \
+            "$RUNNER_TEMP/native-container-reuse"
+      - name: Retain public observations only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-container-reuse-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-container-reuse/observations/
+          if-no-files-found: error
+          retention-days: 14
