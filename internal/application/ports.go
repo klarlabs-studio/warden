@@ -274,6 +274,26 @@ type DepDriftDetector interface {
 	DetectDepDrift(worktreeDir, rev string) []domain.DepDrift
 }
 
+// BuildCache guards and bounds the per-clone build cache (see BuildCacheDir).
+//
+// The cache is shared by every run in the clone — a watcher and a hook can run
+// at once — so removing it must never happen under a build that is using it.
+// Runs therefore hold a SHARED hold on it while their steps execute, and
+// bounding it takes an EXCLUSIVE hold without waiting: a busy cache is left
+// alone until a later run finds it idle.
+//
+// It is optional, and best-effort even when set. Losing the cache costs a cold
+// rebuild and nothing else, so nothing here can fail a run or change its
+// verdict.
+type BuildCache interface {
+	// Share takes a shared hold on the cache at dir for the duration of a run's
+	// steps, waiting out an eviction in progress. release ends the hold.
+	Share(dir string) (release func(), err error)
+	// Trim measures the cache at dir and removes it when it exceeds the bound,
+	// unless another run holds it. The error is informational only.
+	Trim(dir string) error
+}
+
 // Signer produces detached signatures over provenance payloads. It is optional:
 // a nil Signer leaves run records unsigned, and a signing failure never fails a
 // run by default — the note is still written, just without a signature (§9),

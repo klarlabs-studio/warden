@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/buildcache"
 	"go.klarlabs.de/warden/internal/infrastructure/git"
 	"go.klarlabs.de/warden/internal/infrastructure/notify"
 	"go.klarlabs.de/warden/internal/infrastructure/scanner"
@@ -67,6 +69,9 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	}
 
 	_, _ = fmt.Fprintf(stdout, "\nprovenance: %s\n", provenanceMode(svc))
+	if dir, err := svc.BuildCacheDir(); err == nil {
+		_, _ = fmt.Fprintf(stdout, "\nbuild cache: %s\n", buildCacheLine(dir, os.Getenv))
+	}
 
 	pre, push, err := svc.StepsList()
 	if err == nil {
@@ -85,6 +90,28 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	}
 	_, _ = fmt.Fprintln(stdout, "\nrun `warden policy explain` for the fully resolved policy.")
 	return 0
+}
+
+// buildCacheLine describes the build cache's size against its bound, so the
+// cost of the cache — and why it may be cold after a run — is visible without
+// measuring .git by hand. Pure apart from reading dir, so the wording is
+// testable.
+func buildCacheLine(dir string, getenv func(string) string) string {
+	size, err := buildcache.Size(dir)
+	if err != nil {
+		return fmt.Sprintf("unreadable (%v) — %s", err, dir)
+	}
+	used := buildcache.FormatSize(size)
+	bound, err := buildcache.BoundFrom(getenv)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s, never trimmed: %v — %s", used, err, dir)
+	case bound == 0:
+		return fmt.Sprintf("%s, unbounded (%s=0) — %s\n  `warden clean` removes it", used, buildcache.EnvMax, dir)
+	default:
+		return fmt.Sprintf("%s of a %s bound (%s overrides) — %s\n  removed after a run that finds it over the bound; `warden clean` removes it now",
+			used, buildcache.FormatSize(bound), buildcache.EnvMax, dir)
+	}
 }
 
 // notifyAdviceLine warns when desktop notifications are enabled but will be

@@ -1300,6 +1300,40 @@ deliberately placed a cache somewhere, that wins. **Go is absent on purpose** â€
 build cache already lives outside the repo, so a fresh worktree is already warm
 and redirecting it would only make things worse.
 
+**Where it lives and how big it gets.** The cache is `.git/warden/build-cache/`,
+one per clone. It is never committed and goes away when the clone does. A Rust target dir
+grows with every toolchain, profile and dependency bump, so warden bounds it.
+After each run it measures the cache, and if the cache is over the bound it
+removes **the whole cache**. The next build is cold. Nothing else changes.
+
+| Setting | Default | Override |
+|---|---|---|
+| Bound | 5 GiB | `WARDEN_BUILD_CACHE_MAX=500MiB` (also `2G`, `1.5GiB`, plain bytes); `0` = unbounded |
+
+The bound is an environment variable, not a `.warden.yaml` key, because an older
+warden rejects a config key it does not know. An unreadable value turns eviction
+off; warden never deletes the cache on a misread bound.
+
+A watcher and a hook can share the cache at once. Runs hold it **shared** while their
+steps use it (an OS file lock on `.git/warden/build-cache.lock`; `flock` on Unix,
+`LockFileEx` on Windows). Eviction takes the lock **exclusively without waiting**
+and skips a busy cache, so it never deletes under a running build. Eviction is
+best-effort, and it never fails a run or changes its verdict. `warden status`
+shows the current size against the bound.
+
+To remove it now:
+
+```sh
+warden clean                       # remove the build cache (exits 75 if a run is using it)
+warden clean --legacy-containers   # also remove stopped warden-<nonce> containers left by releases before v0.38.0
+```
+
+`--legacy-containers` exists because those containers carry no owner pid or
+labels, so the automatic orphan sweep can't attribute them and leaves them
+alone. It only matches the exact old name shape (`warden-` + 32 hex digits). It
+skips anything carrying a `de.klarlabs.warden.*` label and only lists stopped
+containers. It also removes without `--force`, so an engine refuses a running one.
+
 ### Steps whose toolchain isn't installed
 
 A validation worktree is a git worktree, so it starts with tracked files only.

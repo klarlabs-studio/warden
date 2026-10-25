@@ -21,6 +21,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(stdout, stderr)
 	case "init":
 		return cmdInit(rest, stdout, stderr)
+	case "clean":
+		return cmdClean(rest, stdout, stderr)
 	case "import":
 		return cmdImport(rest, stdout, stderr)
 	case "audit":
@@ -117,6 +119,7 @@ Usage:
   warden watch --staged [--once]                precompute opted-in staged container checks
   warden feedback status [--format json|sarif|problems]  what the staged watcher last observed, with freshness
   warden attach                                watch a running gate live from another terminal
+  warden clean [--legacy-containers]           remove the build cache (and stopped pre-v0.38.0 containers)
   warden axi <verb>                           agent surface (TOON output)
   warden mcp serve                            MCP server over stdio
   warden version
