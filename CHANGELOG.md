@@ -6,6 +6,13 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-25
+
+Bound the build cache warden keeps under `.git/`, add `warden clean`, and add
+the `strict@3` profile, which requires and signs a finite timeout on every
+required shell step. Upgrade CI verifiers and developer binaries before
+selecting `strict@3`.
+
 ### Added
 
 - **The build cache is bounded, and `warden clean` removes it (#363).** Nothing
