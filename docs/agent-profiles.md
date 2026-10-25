@@ -49,9 +49,12 @@ supports it. It requires explicit memory, CPU and process limits and signed
 initial measurements, and refuses workspace aggregates. CI checks finite bounds;
 protected version 3 requirements enforce numeric ceilings. See
 [strict version 2](container-execution.md#strict-version-2) for the rollout,
-engine compatibility, and exact claim. The tables below describe version 1.
-An unknown name or version (such as `strict@3`) is a load error, never a fallback
-to something weaker.
+engine compatibility, and exact claim. `strict@3` keeps everything in version 2
+and also requires a finite `timeout` on every required shell step, signing the
+deadline warden enforced into the note; see
+[strict version 3](container-execution.md#strict-version-3). The tables below
+describe version 1. An unknown name or version (such as `strict@4`) is a load
+error, never a fallback to something weaker.
 
 ## What each level does in this release
 

@@ -282,9 +282,9 @@ func TestConformanceAgainstSignedRecords(t *testing.T) {
 		{
 			name: "unknown version fails closed", min: "permissive",
 			mutate: func(r *domain.RunRecord) {
-				r.Profile = &domain.ProfileRef{Name: "strict", Version: 3, Digest: r.Profile.Digest}
+				r.Profile = &domain.ProfileRef{Name: "strict", Version: 4, Digest: r.Profile.Digest}
 			},
-			wantFail: "strict@3 is not a profile this warden knows",
+			wantFail: "strict@4 is not a profile this warden knows",
 		},
 		{
 			name: "below the minimum rank fails", min: "strict",
@@ -476,5 +476,76 @@ func TestStrictV2AgainstSignedNotes(t *testing.T) {
 				t.Fatalf("validated=%v failures=%v", res.Validated, res.RequirementFailures)
 			}
 		})
+	}
+}
+
+func TestStrictV3AgainstSignedNotes(t *testing.T) {
+	svc, err := New(initRepo(t), "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.Repo().HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	p := mustProfile(t, "strict@3")
+	for _, scenario := range []string{"valid", "missing", "zero", "strict@2 note", "tampered"} {
+		t.Run(scenario, func(t *testing.T) {
+			rec := strictConformingRecord(t, head)
+			ref := domain.NewProfileRef(p)
+			rec.Profile = &ref
+			rec.PublicKey = base64.StdEncoding.EncodeToString(pub)
+			rec.Observations = map[domain.StepName]domain.ContainerObservation{}
+			rec.Deadlines = map[domain.StepName]int64{}
+			for _, s := range p.RequiredShellSteps(domain.PrePush) {
+				rec.Observations[s] = domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=150000 100000\npids.max=128\nroutes=0\nroutes6=0\n")
+				rec.Deadlines[s] = 600000
+			}
+			switch scenario {
+			case "missing":
+				delete(rec.Deadlines, domain.StepTest)
+			case "zero":
+				rec.Deadlines[domain.StepTest] = 0
+			case "strict@2 note":
+				old := domain.NewProfileRef(mustProfile(t, "strict@2"))
+				rec.Profile = &old
+			}
+			payload, err := rec.SigningPayload()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, payload))
+			if scenario == "tampered" {
+				delete(rec.Deadlines, domain.StepTest)
+			}
+			if err := svc.Repo().WriteNote(head, rec); err != nil {
+				t.Fatal(err)
+			}
+			res, err := svc.VerifyMinProfile(head, ExternalReject, []domain.ComplianceProfile{p}, rec.SignerFingerprint())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Validated != (scenario == "valid") {
+				t.Fatalf("validated=%v failures=%v", res.Validated, res.RequirementFailures)
+			}
+		})
+	}
+}
+
+// A strict@2 minimum does not start demanding deadlines: notes written under
+// strict@2 by 0.44.0 and 0.45.0 carry none and still conform to it.
+func TestStrictV2MinimumIgnoresDeadlines(t *testing.T) {
+	p := mustProfile(t, "strict@2")
+	rec := strictConformingRecord(t, "abc")
+	ref := domain.NewProfileRef(p)
+	rec.Profile = &ref
+	rec.Observations = map[domain.StepName]domain.ContainerObservation{}
+	for _, s := range p.RequiredShellSteps(domain.PrePush) {
+		rec.Observations[s] = domain.ParseContainerObservation("cgroup=v2\nmemory.max=536870912\nmemory.swap.max=0\ncpu.max=150000 100000\npids.max=128\nroutes=0\nroutes6=0\n")
+	}
+	rep := Conformance(p, VerifyResult{Validated: true, Trusted: true, Record: &rec})
+	if !rep.OK() {
+		t.Fatalf("a strict@2 note without deadlines must still meet strict@2: %v", rep.Failures)
 	}
 }
