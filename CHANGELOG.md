@@ -8,6 +8,22 @@ All notable changes to warden are documented here. The format follows
 
 ### Added
 
+- **The build cache is bounded, and `warden clean` removes it (#363).** Nothing
+  used to shrink `.git/warden/build-cache`, and a Rust target dir there grew
+  without limit. After each run warden measures the cache and removes it whole
+  if it is over the bound. The default bound is 5 GiB.
+  `WARDEN_BUILD_CACHE_MAX` overrides it (`500MiB`, `2G`, …; `0` = unbounded).
+  The cache is measured at most once an hour per clone, and measuring stops
+  once it passes the bound: walking a 15 GiB cargo target took 15-19s.
+  It is an environment variable, not a config key, so older wardens keep
+  loading the config. Runs hold the cache under a shared file lock while their
+  steps use it. Eviction takes the lock exclusively without waiting and skips a
+  busy cache. Eviction is best-effort and never fails a run or changes its
+  verdict. `warden status` shows the size against the bound.
+  `warden clean --legacy-containers` also removes stopped, unlabeled
+  `warden-<nonce>` containers from releases before v0.38.0, which the orphan
+  sweep cannot attribute and so never removes.
+
 - **`strict@3`: a finite timeout on every required shell step.** ADR 0008
   accepted this for `strict@2`, but `strict@2` shipped in 0.44.0 without it,
   and a published profile version never changes, so it arrives as version 3:

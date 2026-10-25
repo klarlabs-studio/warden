@@ -129,6 +129,10 @@ type Runner struct {
 	// A run whose steps include one fails when it is nil rather than run the
 	// step over nothing.
 	Workspaces WorkspaceSource
+	// BuildCache is optional: when set, a run's steps hold the build cache
+	// shared while they use it, and the cache is bounded once the run is over.
+	// Nil leaves the cache unguarded and unbounded.
+	BuildCache BuildCache
 	Settings   Settings
 	// Now and NewID are injected for deterministic tests.
 	Now   func() time.Time
@@ -164,10 +168,12 @@ type Settings struct {
 
 // Run executes the pipeline for hook against the repository.
 func (r *Runner) Run(ctx context.Context, hook domain.Hook) (RunResult, error) {
+	defer r.boundBuildCache()
 	return r.run(ctx, hook, false)
 }
 
 func (r *Runner) PredictStaged(ctx context.Context) (RunResult, error) {
+	defer r.boundBuildCache()
 	return r.run(ctx, domain.PreCommit, true)
 }
 
@@ -187,6 +193,7 @@ var ErrNoLiveChecks = errors.New("no read-only container shell checks to run: co
 //     is ever written back to the developer's tree;
 //   - nothing is signed, and no note is written.
 func (r *Runner) CheckWorkingTree(ctx context.Context, base, tree string) (RunResult, error) {
+	defer r.boundBuildCache()
 	if !domain.ValidTreeSHA(base) {
 		return RunResult{}, errors.New("live checks need a commit to check the working tree against; make the first commit")
 	}
@@ -316,7 +323,45 @@ func (r *Runner) buildCacheDir() string {
 	if err != nil || gitDir == "" {
 		return ""
 	}
+	return BuildCacheDir(gitDir)
+}
+
+// BuildCacheDir is the build-cache directory of the clone whose git dir is
+// gitDir. Every surface that reads, bounds or removes the cache resolves it
+// here, so they cannot disagree about where it is.
+func BuildCacheDir(gitDir string) string {
 	return filepath.Join(gitDir, "warden", "build-cache")
+}
+
+// holdBuildCache takes the run's shared hold on the build cache, for as long
+// as its steps run. A cache that cannot be held is not used: sc loses its
+// BuildCacheDir, so the steps build cold rather than in a directory a
+// concurrent eviction could remove underneath them. That costs speed, never
+// the run.
+func (r *Runner) holdBuildCache(sc *StepContext) (release func()) {
+	if r.BuildCache == nil || sc.BuildCacheDir == "" {
+		return func() {}
+	}
+	release, err := r.BuildCache.Share(sc.BuildCacheDir)
+	if err != nil {
+		sc.BuildCacheDir = ""
+		return func() {}
+	}
+	return release
+}
+
+// boundBuildCache trims the build cache once a run is over — after its steps,
+// its push and its note, so the measurement is never in a step's critical
+// path. It is deferred by the public entry points and reads nothing of the
+// run: the verdict is already decided and cannot depend on whether eviction
+// happened, was skipped because the cache was busy, or failed.
+func (r *Runner) boundBuildCache() {
+	if r.BuildCache == nil {
+		return
+	}
+	if dir := r.buildCacheDir(); dir != "" {
+		_ = r.BuildCache.Trim(dir)
+	}
 }
 
 // diffForRisk computes the diff stats that drive risk and path matching: the
@@ -958,6 +1003,8 @@ func (r *Runner) runValidation(ctx context.Context, run *domain.Run, resolved do
 		sels = newWorkspaceSelections()
 	}
 	sc.Selection = sels.get
+	release := r.holdBuildCache(&sc)
+	defer release()
 
 	var priors []domain.Finding
 	kernel, err := r.Kernels.New(resolved, sc, &priors, push)

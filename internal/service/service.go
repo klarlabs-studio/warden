@@ -11,6 +11,7 @@ import (
 
 	"go.klarlabs.de/warden/internal/application"
 	"go.klarlabs.de/warden/internal/domain"
+	"go.klarlabs.de/warden/internal/infrastructure/buildcache"
 	"go.klarlabs.de/warden/internal/infrastructure/cache"
 	"go.klarlabs.de/warden/internal/infrastructure/config"
 	"go.klarlabs.de/warden/internal/infrastructure/detect"
@@ -65,6 +66,7 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 		Forge:      gh,
 		SBOM:       sbom.New(),
 		Workspaces: workspace.NewRunSource(repo),
+		BuildCache: buildcache.Manager{},
 		Settings:   application.Settings{Version: version, Remote: DefaultRemote},
 	}
 	// Provenance signing is best-effort: if the key can't be loaded (e.g. a
@@ -78,6 +80,16 @@ func New(startDir, version string, approver application.Approver) (*Service, err
 		}
 	}
 	return &Service{repo: repo, configs: configs, forge: gh, runner: runner, signer: signer, version: version, remote: DefaultRemote}, nil
+}
+
+// BuildCacheDir is the clone's build-cache directory, the one runs redirect
+// toolchain caches into and bound after they finish.
+func (s *Service) BuildCacheDir() (string, error) {
+	gitDir, err := s.repo.GitDir()
+	if err != nil {
+		return "", err
+	}
+	return application.BuildCacheDir(gitDir), nil
 }
 
 // provenanceSigner is a Signer that can also identify itself for display and
