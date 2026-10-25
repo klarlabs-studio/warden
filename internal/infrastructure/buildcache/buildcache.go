@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // EnvMax names the environment variable that overrides the bound. An
@@ -98,6 +99,18 @@ func BoundFrom(getenv func(string) string) (int64, error) {
 // Size is the total size of the regular files under dir. Symlinks are counted
 // as themselves and never followed. A missing dir is empty.
 func Size(dir string) (int64, error) {
+	return sizeUpTo(dir, 0)
+}
+
+// errOverLimit stops a walk that has already counted past its limit.
+var errOverLimit = errors.New("over limit")
+
+// sizeUpTo is Size, except that with a positive limit it stops counting as
+// soon as the total passes it and returns that partial total. Measuring is the
+// expensive part of a trim (a 15 GiB cargo target is ~200k files, measured at
+// 15-19s), and once the cache is over its bound the exact figure no longer
+// matters: it is removed whole either way.
+func sizeUpTo(dir string, limit int64) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -114,17 +127,25 @@ func Size(dir string) (int64, error) {
 			return err
 		}
 		total += info.Size()
+		if limit > 0 && total > limit {
+			return errOverLimit
+		}
 		return nil
 	})
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
+	}
+	if errors.Is(err, errOverLimit) {
+		return total, nil
 	}
 	return total, err
 }
 
 // Eviction reports what a Trim or Clean found and did.
 type Eviction struct {
-	// Size is the cache's measured size before anything was removed.
+	// Size is the cache's measured size before anything was removed. For a
+	// cache over its bound, Trim stops counting once past it, so Size is then a
+	// lower bound.
 	Size int64
 	// Removed is true when the cache was deleted.
 	Removed bool
@@ -142,7 +163,7 @@ func Trim(dir string, bound int64) (Eviction, error) {
 	if bound <= 0 {
 		return Eviction{}, nil
 	}
-	size, err := Size(dir)
+	size, err := sizeUpTo(dir, bound)
 	if err != nil || size <= bound {
 		return Eviction{Size: size}, err
 	}
@@ -221,11 +242,41 @@ func openLock(dir string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 }
 
+// TrimInterval is how often a clone's cache is measured at most. A trim runs
+// at the end of every hook, and walking a large cache takes seconds, so a run
+// within TrimInterval of the last check skips it. The bound is therefore soft
+// by up to an interval's growth, which costs disk space only.
+const TrimInterval = time.Hour
+
+// CheckedPath is the file whose modification time records the last trim
+// check of the cache at dir. Like the lock, it sits beside the cache, so
+// removing the cache does not reset the interval.
+func CheckedPath(dir string) string { return filepath.Clean(dir) + ".checked" }
+
+// due reports whether the cache at dir is due a trim check, and if so marks
+// it checked first, so that runs finishing together do not all walk it.
+func due(dir string, now time.Time) bool {
+	path := CheckedPath(dir)
+	if info, err := os.Stat(path); err == nil && now.Sub(info.ModTime()) < TrimInterval {
+		return false
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return true
+	}
+	if f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600); err == nil {
+		_ = f.Close()
+	}
+	_ = os.Chtimes(path, now, now)
+	return true
+}
+
 // Manager adapts the package to application.BuildCache, reading the bound
 // from the environment on every trim.
 type Manager struct {
 	// Getenv reads EnvMax; nil means os.Getenv.
 	Getenv func(string) string
+	// Now is the clock for TrimInterval; nil means time.Now.
+	Now func() time.Time
 }
 
 // Share implements application.BuildCache.
@@ -235,8 +286,15 @@ func (Manager) Share(dir string) (func(), error) { return Share(dir) }
 // evicts nothing.
 func (m Manager) Trim(dir string) error {
 	bound, err := BoundFrom(m.Getenv)
-	if err != nil {
+	if err != nil || bound <= 0 {
 		return err
+	}
+	now := time.Now
+	if m.Now != nil {
+		now = m.Now
+	}
+	if !due(dir, now()) {
+		return nil
 	}
 	_, err = Trim(dir, bound)
 	return err

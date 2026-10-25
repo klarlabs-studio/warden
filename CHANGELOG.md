@@ -13,6 +13,8 @@ All notable changes to warden are documented here. The format follows
   without limit. After each run warden measures the cache and removes it whole
   if it is over the bound. The default bound is 5 GiB.
   `WARDEN_BUILD_CACHE_MAX` overrides it (`500MiB`, `2G`, …; `0` = unbounded).
+  The cache is measured at most once an hour per clone, and measuring stops
+  once it passes the bound: walking a 15 GiB cargo target took 15-19s.
   It is an environment variable, not a config key, so older wardens keep
   loading the config. Runs hold the cache under a shared file lock while their
   steps use it. Eviction takes the lock exclusively without waiting and skips a

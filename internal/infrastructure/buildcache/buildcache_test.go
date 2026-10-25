@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
+	"time"
 )
 
 // fill creates dir with one file of size bytes, standing in for a toolchain's
@@ -270,5 +272,71 @@ func TestFormatSize(t *testing.T) {
 		if got := FormatSize(tt.in); got != tt.want {
 			t.Errorf("FormatSize(%d) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// TestManagerTrimThrottled: a trim runs at the end of every hook and measuring
+// a large cache takes seconds, so a clone is checked at most once per
+// TrimInterval. Within it even an over-bound cache is left alone; after it the
+// next trim evicts.
+func TestManagerTrimThrottled(t *testing.T) {
+	dir := fill(t, filepath.Join(t.TempDir(), "build-cache"), 4096)
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	m := Manager{
+		Getenv: func(k string) string {
+			if k == EnvMax {
+				return "1KiB"
+			}
+			return ""
+		},
+		Now: func() time.Time { return now },
+	}
+	// A check that just happened: nothing is measured or removed.
+	if err := os.WriteFile(CheckedPath(dir), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(CheckedPath(dir), now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Trim(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, dir) {
+		t.Fatal("a cache checked a minute ago was evicted; the interval was not respected")
+	}
+	// Once the interval has passed, the over-bound cache goes, and the check
+	// is recorded so the next run within the interval skips again.
+	now = now.Add(TrimInterval)
+	if err := m.Trim(dir); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, dir) {
+		t.Fatal("an over-bound cache past the interval was not evicted")
+	}
+	info, err := os.Stat(CheckedPath(dir))
+	if err != nil || !info.ModTime().Equal(now) {
+		t.Fatalf("check not recorded at %v: %v %v", now, info, err)
+	}
+}
+
+// TestSizeUpToStopsPastTheLimit: measuring stops once the total passes the
+// limit, so an over-bound cache costs at most a bound's worth of walking.
+func TestSizeUpToStopsPastTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 50 {
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), make([]byte, 1000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	full, err := Size(dir)
+	if err != nil || full != 50_000 {
+		t.Fatalf("Size = %d, %v; want 50000", full, err)
+	}
+	got, err := sizeUpTo(dir, 2500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got <= 2500 || got > 3500 {
+		t.Fatalf("sizeUpTo(2500) = %d; want just past the limit (3000), not the full 50000", got)
 	}
 }

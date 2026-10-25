@@ -120,14 +120,14 @@ func TestRunner_EvictionNeverChangesVerdict(t *testing.T) {
 		"passing": {},
 		"failing": {domain.StepLint: domain.StepFail},
 	}
-	evictions := map[string]func(*testing.T) BuildCache{
-		"removes the cache": func(t *testing.T) BuildCache {
+	evictions := map[string]func() BuildCache{
+		"removes the cache": func() BuildCache {
 			return &fakeBuildCache{trim: func(dir string) error { return os.RemoveAll(dir) }}
 		},
-		"fails": func(t *testing.T) BuildCache {
+		"fails": func() BuildCache {
 			return &fakeBuildCache{trim: func(string) error { return errors.New("disk on fire") }}
 		},
-		"cache busy": func(t *testing.T) BuildCache {
+		"cache busy": func() BuildCache {
 			return &fakeBuildCache{trim: func(string) error { return nil }}
 		},
 	}
@@ -151,7 +151,7 @@ func TestRunner_EvictionNeverChangesVerdict(t *testing.T) {
 		baseline := runOnce(t, status, nil)
 		for evName, newCache := range evictions {
 			t.Run(name+"/"+evName, func(t *testing.T) {
-				got := runOnce(t, status, newCache(t))
+				got := runOnce(t, status, newCache())
 				if !reflect.DeepEqual(got, baseline) {
 					t.Errorf("result changed by the eviction:\n got  %+v\n want %+v", got, baseline)
 				}

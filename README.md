@@ -1309,6 +1309,7 @@ removes **the whole cache**. The next build is cold. Nothing else changes.
 | Setting | Default | Override |
 |---|---|---|
 | Bound | 5 GiB | `WARDEN_BUILD_CACHE_MAX=500MiB` (also `2G`, `1.5GiB`, plain bytes); `0` = unbounded |
+| Checked | at most once an hour per clone | Measuring a large cache takes seconds, so the bound is soft by up to an hour's growth |
 
 The bound is an environment variable, not a `.warden.yaml` key, because an older
 warden rejects a config key it does not know. An unreadable value turns eviction
