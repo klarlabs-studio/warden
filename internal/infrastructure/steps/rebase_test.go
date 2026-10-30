@@ -103,6 +103,49 @@ func TestRebaseStepCleanRebase(t *testing.T) {
 	}
 }
 
+// An attest-only run attests the commit it was handed. Rebasing it would check
+// a different tree — the runner then refuses the note, so a tag or push that
+// is not at the base's tip could never be attested. Found on a build box: a
+// release tag behind main was rebased onto main on every tick and failed with
+// "tree rewritten during an attest-only run".
+func TestRebaseStepSkipsUnderAttestOnly(t *testing.T) {
+	dir := newGitRepo(t)
+	runGit(t, dir, "branch", "upstream", "main")
+	runGit(t, dir, "checkout", "-q", "-b", "feature", "main")
+	runGit(t, dir, "branch", "--set-upstream-to=upstream", "feature")
+	runGit(t, dir, "checkout", "-q", "upstream")
+	if err := os.WriteFile(filepath.Join(dir, "up.txt"), []byte("up\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "up.txt")
+	runGit(t, dir, "commit", "-q", "-m", "upstream advance")
+	runGit(t, dir, "checkout", "-q", "feature")
+	before := gitHead(t, dir)
+
+	res, err := NewRebaseStep().Run(context.Background(), application.StepContext{WorktreeDir: dir, AttestOnly: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if after := gitHead(t, dir); after != before {
+		t.Fatalf("attest-only rebase moved HEAD from %s to %s", before, after)
+	}
+	if res.Status != domain.StepPass || res.Outcome != domain.StepSkipped {
+		t.Errorf("want a skipped pass, got status=%s outcome=%q", res.Status, res.Outcome)
+	}
+	if !strings.Contains(res.OutcomeReason, "attest-only") {
+		t.Errorf("reason = %q, want it to name attest-only", res.OutcomeReason)
+	}
+}
+
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestRebaseStepName(t *testing.T) {
 	if NewRebaseStep().Name() != domain.StepRebase {
 		t.Errorf("Name() = %s, want rebase", NewRebaseStep().Name())

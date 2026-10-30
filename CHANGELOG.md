@@ -52,6 +52,13 @@ selecting `strict@3`.
   explicit historical baseline, retained shadow plans and completed-job reports.
   Existing CI gates remain enabled; the bootstrap establishes no job equivalence.
 
+### Fixed
+
+- `--attest-only` no longer rebases. The rebase step skipped nothing in that
+  mode, so a commit behind its integration base — a release tag, a push that
+  is not at main's tip — was rebased onto main and then refused with "tree
+  rewritten during an attest-only run". It now attests the commit as it is.
+
 ## [0.45.0] - 2026-10-23
 
 Evaluate protected CI reuse in shadow mode before enabling skips, and compare
