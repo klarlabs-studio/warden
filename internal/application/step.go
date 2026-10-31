@@ -68,6 +68,10 @@ type StepContext struct {
 	// INTEGRATION point, which is what a rebase should target — as opposed to
 	// the branch's own remote-tracking ref (see RebaseStep).
 	PRBase string
+	// AttestOnly echoes Settings.AttestOnly. A step that would rewrite the
+	// tree as part of its job (rebase) must not: the run attests the commit it
+	// was handed, and the runner refuses a note for any other tree.
+	AttestOnly bool
 	// SecurityScan is the resolved security-scan gate configuration (delta vs
 	// total, base ref, scanner version check).
 	SecurityScan domain.SecurityScanConfig

@@ -617,7 +617,7 @@ func (r *Runner) runPrePush(ctx context.Context, resolved domain.ResolvedPolicy,
 	}
 	defer func() { _ = wt.Remove() }()
 
-	sc := r.withStream(StepContext{Hook: domain.PrePush, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base})
+	sc := r.withStream(StepContext{Hook: domain.PrePush, BuildCacheDir: r.buildCacheDir(), WorktreeDir: wt.Dir(), Branch: branch, Diff: diff, Commands: resolved.Commands, SecurityScan: resolved.SecurityScan, Remote: r.Settings.Remote, PRBase: cfg.PR.Base, AttestOnly: r.Settings.AttestOnly})
 	run := r.newRun(domain.PrePush, resolved, branch)
 	if err := r.preflightAuthorship(resolved, branch, seedTip, cfg, wt.Dir()); err != nil {
 		return RunResult{}, err

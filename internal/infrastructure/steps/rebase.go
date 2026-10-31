@@ -21,6 +21,17 @@ func NewRebaseStep() RebaseStep { return RebaseStep{} }
 func (RebaseStep) Name() domain.StepName { return domain.StepRebase }
 
 func (RebaseStep) Run(ctx context.Context, sc application.StepContext) (domain.StepResult, error) {
+	if sc.AttestOnly {
+		// An attest-only run vouches for the commit it was handed. A rebase
+		// would check a different tree, which the runner then rightly refuses
+		// to attest — so a tag or push behind the base could never be noted.
+		const why = "attest-only checks the commit as it is"
+		return domain.StepResult{
+			Step: domain.StepRebase, Status: domain.StepPass,
+			Outcome: domain.StepSkipped, OutcomeReason: why,
+			Summary: "rebase: " + why + ", skipped",
+		}, nil
+	}
 	base, why := resolveIntegrationBase(ctx, sc)
 	if base == "" {
 		// Nothing to rebase onto, so nothing was done: SKIPPED, not executed.
