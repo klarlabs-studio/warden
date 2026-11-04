@@ -232,7 +232,8 @@ func TestGoldenFleet_LiveContainerWatchCommitDuringACheck(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- watcher.Wait() }()
 	select {
-	case <-done:
+	case err := <-done: // stopping is the contract here, not the exit status
+		t.Logf("live watcher exited after interrupt: %v", err)
 	case <-time.After(30 * time.Second):
 		t.Fatalf("the live watcher did not stop on interrupt:\n%s", out.String())
 	}

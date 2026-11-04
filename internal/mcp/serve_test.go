@@ -16,8 +16,9 @@ func TestServe_ReturnsOnCancelledContext(t *testing.T) {
 	go func() { done <- Serve(ctx, &fakeFacade{}, "test", AllowAllRuns) }()
 
 	select {
-	case <-done:
+	case err := <-done:
 		// Returned promptly — the contract we care about.
+		t.Logf("Serve returned %v", err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Serve did not return on a canceled context")
 	}

@@ -132,7 +132,12 @@ func (l Loop) Run(ctx context.Context) {
 func (s *loopState) stop() {
 	if s.cancel != nil {
 		s.cancel()
-		<-s.done
+		// Wait for the canceled evaluation to exit. Its error is the
+		// cancellation the caller just asked for, so it is dropped. Two
+		// statements because errcheck rejects a bare receive and staticcheck
+		// S1005 rejects `_ = <-s.done` (kisielk/errcheck#294).
+		err := <-s.done
+		_ = err
 	}
 }
 
