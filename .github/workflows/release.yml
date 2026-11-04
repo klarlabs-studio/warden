@@ -106,7 +106,7 @@ jobs:
         with:
           # Exact, not a range. A release is the artifact that most needs to be
           # reproducible from what this file says.
-          version: "2.16.0"
+          version: "2.19.0"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -214,7 +214,7 @@ jobs:
           # npm artifacts for a given tag are built by whichever 2.x happened to
           # be newest that day, while the GitHub and Homebrew artifacts for that
           # same tag come from the pinned one. One version, two builders.
-          version: "2.16.0"
+          version: "2.19.0"
           args: build --clean --snapshot=false
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"

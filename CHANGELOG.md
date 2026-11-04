@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases are built with goreleaser 2.19.0** (was 2.16.0), in both the
+  release job and the npm job, which still pin the same exact version.
+- **The Homebrew cask no longer prints a deprecation warning on install.**
+  Homebrew deprecated the raw-Ruby `postflight` stanza, and every
+  `brew install --cask warden` warned the user and asked them to report it to
+  the tap. The quarantine strip is now a declarative `postflight_steps` block,
+  which goreleaser 2.19 can generate. Steps take no conditionals, so the old
+  `xattr -h` probe is gone; `xattr -dr` exits 0 whether or not the attribute is
+  set.
+
 ## [0.46.1] - 2026-10-31
 
 Let `--attest-only` attest a commit that is behind its integration base.

@@ -96,9 +96,14 @@ homebrew_casks:
     # The binary isn't notarized, so Gatekeeper quarantines it and the first
     # `warden` invocation hangs/blocks on an unsigned-binary check. Strip the
     # quarantine attribute on install so the CLI runs immediately.
+    #
+    # Homebrew's declarative install steps, not a raw Ruby postflight: brew
+    # deprecated `postflight` and warns every user installing a cask that uses
+    # it. Steps take no conditionals, so the old `xattr -h` probe is gone;
+    # `xattr -dr` exits 0 whether or not the attribute is present.
     hooks:
       post:
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/warden"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/warden"]
           end
