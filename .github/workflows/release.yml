@@ -102,6 +102,31 @@ jobs:
             *)   echo "::error::unexpected HTTP $code from the tap repo." ; exit 1 ;;
           esac
 
+      # goreleaser's notarize block is enabled only when MACOS_SIGN_P12 is set,
+      # so a local snapshot still builds without Apple credentials. In a release
+      # that same switch would ship UNSIGNED darwin binaries from a green run:
+      # an undefined secret expands to the empty string. Refuse instead.
+      - name: Check the macOS signing secrets
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::empty macOS signing secret(s):$missing. Without them" \
+                 "goreleaser skips notarization and the darwin binaries ship" \
+                 "unsigned. Set them on the repository, then re-drive the release."
+            exit 1
+          fi
+          echo "macOS signing secrets present"
+
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           # Exact, not a range. A release is the artifact that most needs to be
@@ -122,6 +147,34 @@ jobs:
           # unprefixed name sent an empty credential and got 401 Bad
           # credentials (401, not 403 — no credential presented at all).
           TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
+      # Check the binaries, not goreleaser's exit status. A Developer ID
+      # signature embeds the certificate chain in the Mach-O, so its subject is
+      # readable from Linux; an ad-hoc signature (what the Go linker applies by
+      # itself) carries none. Notarization is not re-checked here: goreleaser
+      # waits for Apple's verdict and fails the build on a rejection.
+      - name: Check the darwin binaries are Developer ID signed
+        if: always() && !cancelled()
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r bin; do
+            found=$((found + 1))
+            if ! grep -qa "Developer ID Application" "$bin"; then
+              echo "::error::$bin carries no Developer ID signature."
+              exit 1
+            fi
+            echo "signed: $bin"
+          done < <(find dist -type f -name warden -path '*darwin*')
+          if [ "$found" -ne 2 ]; then
+            echo "::error::found $found darwin binaries under dist/, want 2 (amd64, arm64)."
+            exit 1
+          fi
 
       # Attach CycloneDX + SPDX SBOMs to the release, matching fortify/mcp/
       # statekit. nox scan exits non-zero on findings (even baselined) — SBOM
@@ -196,6 +249,30 @@ jobs:
           package-manager-cache: false
       - name: Report toolchain
         run: echo "node $(node -v) / npm $(npm -v)"
+      # goreleaser's notarize block is enabled only when MACOS_SIGN_P12 is set,
+      # so a local snapshot still builds without Apple credentials. In a release
+      # that same switch would ship UNSIGNED darwin binaries from a green run:
+      # an undefined secret expands to the empty string. Refuse instead.
+      - name: Check the macOS signing secrets
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::empty macOS signing secret(s):$missing. Without them" \
+                 "goreleaser skips notarization and the darwin binaries ship" \
+                 "unsigned. Set them on the repository, then re-drive the release."
+            exit 1
+          fi
+          echo "macOS signing secrets present"
       # The SAME pinned action the goreleaser job uses, for the same reason it
       # uses it: the action ships a goreleaser binary, so the release does not
       # depend on the runner's Go being new enough to COMPILE goreleaser.
@@ -216,6 +293,34 @@ jobs:
           # same tag come from the pinned one. One version, two builders.
           version: "2.19.0"
           args: build --clean --snapshot=false
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      # Check the binaries, not goreleaser's exit status. A Developer ID
+      # signature embeds the certificate chain in the Mach-O, so its subject is
+      # readable from Linux; an ad-hoc signature (what the Go linker applies by
+      # itself) carries none. Notarization is not re-checked here: goreleaser
+      # waits for Apple's verdict and fails the build on a rejection.
+      - name: Check the darwin binaries are Developer ID signed
+        if: always() && !cancelled()
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r bin; do
+            found=$((found + 1))
+            if ! grep -qa "Developer ID Application" "$bin"; then
+              echo "::error::$bin carries no Developer ID signature."
+              exit 1
+            fi
+            echo "signed: $bin"
+          done < <(find dist -type f -name warden -path '*darwin*')
+          if [ "$found" -ne 2 ]; then
+            echo "::error::found $found darwin binaries under dist/, want 2 (amd64, arm64)."
+            exit 1
+          fi
       - name: Assemble npm packages
         run: node npm/scripts/build-packages.mjs "${GITHUB_REF_NAME#v}"
       # npm trusted publishing (OIDC). registry-url (above) is what makes the npm

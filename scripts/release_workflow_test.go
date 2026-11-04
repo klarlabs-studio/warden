@@ -299,3 +299,77 @@ func TestReleaseWorkflow_GoreleaserVersionsArePinnedExactly(t *testing.T) {
 			"different toolchains", versions)
 	}
 }
+
+// macOSSigningSecrets are the inputs goreleaser's notarize block reads. An
+// undefined secret expands to the empty string, and the block is enabled only
+// when MACOS_SIGN_P12 is set (so local snapshots still build) — which means a
+// missing secret would ship UNSIGNED darwin binaries from a green release.
+var macOSSigningSecrets = []string{
+	"MACOS_SIGN_P12",
+	"MACOS_SIGN_PASSWORD",
+	"MACOS_NOTARY_ISSUER_ID",
+	"MACOS_NOTARY_KEY_ID",
+	"MACOS_NOTARY_KEY",
+}
+
+// Every job that runs goreleaser builds darwin binaries a user installs — the
+// release job for GitHub and Homebrew, the npm job for npm — so each must
+// refuse to start without the signing secrets, hand them to goreleaser, and
+// afterwards check the binaries it produced rather than its exit status.
+func TestReleaseWorkflow_DarwinBinariesAreSignedOrTheReleaseFails(t *testing.T) {
+	w := loadReleaseWorkflow(t)
+
+	jobs := 0
+	for name, job := range w.Jobs {
+		build := -1
+		for i, s := range job.Steps {
+			if strings.Contains(s.Uses, "goreleaser-action") {
+				build = i
+				break
+			}
+		}
+		if build < 0 {
+			continue
+		}
+		jobs++
+
+		guard, check := -1, -1
+		for i, s := range job.Steps {
+			body := stripShellComments(s.Run)
+			if _, reads := s.Env["MACOS_SIGN_P12"]; reads && s.Run != "" && guard < 0 {
+				guard = i
+				for _, secret := range macOSSigningSecrets {
+					if _, ok := s.Env[secret]; !ok {
+						t.Errorf("%s: the signing guard does not read %s", name, secret)
+					}
+				}
+				if !strings.Contains(body, "-z ") {
+					t.Errorf("%s: the signing guard does not test for an EMPTY secret; "+
+						"an undefined secret expands to the empty string", name)
+				}
+			}
+			if i > build && strings.Contains(body, "Developer ID Application") && check < 0 {
+				check = i
+			}
+		}
+
+		if guard < 0 || guard > build {
+			t.Errorf("%s: no step checks the macOS signing secrets before goreleaser runs; "+
+				"without them goreleaser skips notarization and the release ships "+
+				"unsigned darwin binaries without failing", name)
+		}
+		for _, secret := range macOSSigningSecrets {
+			if _, ok := job.Steps[build].Env[secret]; !ok {
+				t.Errorf("%s: goreleaser is not given %s", name, secret)
+			}
+		}
+		if check < 0 {
+			t.Errorf("%s: nothing after goreleaser checks that the darwin binaries carry "+
+				"a Developer ID signature; a green build is not evidence of a signed one", name)
+		}
+	}
+	if jobs < 2 {
+		t.Fatalf("found %d job(s) running goreleaser, want the release and npm jobs; "+
+			"the workflow shape changed and this check is now partly blind", jobs)
+	}
+}

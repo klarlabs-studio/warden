@@ -6,6 +6,18 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The macOS binaries are signed with a Developer ID certificate and
+  notarized by Apple.** Gatekeeper used to block a warden downloaded from the
+  release page in a browser ("cannot be verified") until the user removed the
+  quarantine attribute by hand; the Homebrew cask removed it for them. goreleaser
+  signs and notarizes the darwin binaries on the Linux release runner, before
+  archives and checksums are made, in both the release job and the npm job.
+  The release refuses to start without the five signing secrets, since an empty
+  one would otherwise ship unsigned binaries from a green run, and afterwards
+  checks that each darwin binary carries a Developer ID signature.
+
 ### Changed
 
 - **Releases are built with goreleaser 2.19.0** (was 2.16.0), in both the

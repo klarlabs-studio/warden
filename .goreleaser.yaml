@@ -32,6 +32,31 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Sign the darwin binaries with the Developer ID certificate and notarize them
+# with Apple, cross-platform (quill), so the Ubuntu release runner can do it.
+# Gatekeeper then accepts a quarantined download — a browser download from the
+# release page, or the Homebrew cask — without anyone stripping the attribute.
+#
+# Runs in the BUILD pipeline, so `goreleaser build` (the npm job) signs too, and
+# before archives and checksums, so checksums.txt covers the signed bytes.
+# Enabled only when the certificate is present, so a local snapshot builds
+# without Apple credentials; release.yml refuses to run without the secrets, so
+# a release cannot take the unsigned branch. wait: a rejection fails the build
+# before anything is published. 20m is the cap Apple's token lifetime allows.
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids: [warden]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
 # Sign checksums.txt with cosign keyless (Sigstore: Fulcio cert + Rekor
 # transparency log). The digest list that install.sh, install.ps1 and the
 # self-fetching git hook verify downloads against is thereby itself verifiable
