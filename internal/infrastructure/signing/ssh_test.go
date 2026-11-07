@@ -132,3 +132,21 @@ func TestSSHSigner_UsesAWardenSpecificNamespace(t *testing.T) {
 			"cannot be replayed as a git commit signature", domain.SSHSigNamespace)
 	}
 }
+
+// Fingerprint is what `warden key show` prints for the operator to compare with
+// the forge; it must be OpenSSH's own SHA256 form of the loaded key.
+func TestSSHSigner_FingerprintMatchesSSHKeygen(t *testing.T) {
+	key := newSSHKey(t)
+	s, err := LoadSSH(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("ssh-keygen", "-lf", key+".pub").CombinedOutput()
+	if err != nil {
+		t.Skipf("ssh-keygen -l failed: %v %s", err, out)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 || s.Fingerprint() != fields[1] {
+		t.Errorf("Fingerprint = %q, ssh-keygen says %q", s.Fingerprint(), string(out))
+	}
+}
