@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -46,14 +47,22 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 	if caller["if"] != "${{ !cancelled() }}" {
 		t.Fatal("failed verifier must not suppress CI")
 	}
-	var script string
+	var pinCheck, script string
+	reported := false
 	for _, raw := range job["steps"].([]any) {
 		step := raw.(map[string]any)
 		if step["name"] == "Check out protected verifier and policy" {
 			with := step["with"].(map[string]any)
-			if with["ref"] != "dfe86bf3ea50e29f1a9259415647f325416378bc" || with["persist-credentials"] != false {
+			if ref, _ := with["ref"].(string); !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(ref) || with["persist-credentials"] != false {
 				t.Fatal("protected source must remain immutable and credential-free")
 			}
+		}
+		if step["name"] == "Check protected pins match the caller contract" {
+			// Drift is a misconfiguration and must stay visible, never tolerated.
+			if step["continue-on-error"] != nil || script != "" {
+				t.Fatal("pin drift must fail visibly, before the tolerated decision step")
+			}
+			pinCheck = step["run"].(string)
 		}
 		if step["id"] == "decision" {
 			if step["continue-on-error"] != true {
@@ -61,10 +70,18 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 			}
 			script = step["run"].(string)
 		}
+		if step["name"] == "Report verifier failure" {
+			reported = step["if"] == "steps.decision.outcome == 'failure'" && strings.Contains(step["run"].(string), "::warning::")
+		}
 	}
-	if script == "" {
+	if pinCheck == "" || script == "" {
 		t.Fatal("missing verifier boundary")
 	}
+	if !reported {
+		t.Fatal("a failed verifier must be reported, not hidden by continue-on-error")
+	}
+	// A failed pin check skips the decision step, so it publishes nothing.
+	script = pinCheck + "\n" + script
 	for _, tc := range []struct {
 		name         string
 		mutate       func(map[string]any)

@@ -114,6 +114,32 @@ jobs:
           mkdir -p "$RUNNER_TEMP/warden-reuse-bin"
           go build -o "$RUNNER_TEMP/warden-reuse-bin/warden" .
           go build -o "$RUNNER_TEMP/warden-reuse-bin/ci-policy" ./scripts/ci-policy
+      # Not continue-on-error: drift between the protected receipts and the
+      # caller contract is a misconfiguration (an image republish that did not
+      # advance the protected ref), not a per-candidate decision. Failing here
+      # makes it visible on every PR; ci still runs (if: !cancelled()) and the
+      # skipped decision step publishes no reuse output.
+      - name: Check protected pins match the caller contract
+        run: |
+          set -euo pipefail
+          # Bind the protected template to the exact contract the caller runs.
+          jq -e --argjson contract "$EXPECTED_CONTRACT" \
+            --slurpfile receipt "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/publication.json" '
+            .version == 1 and (.jobs | keys) == ["test"] and
+            .jobs.test.version == 1 and (.jobs.test.steps | keys) == ["test"] and
+            (.jobs.test.steps.test |
+              .command == $contract.command and .image_id == $contract.config_id and
+              .image_id_kind == "config" and .platform == $contract.platform and
+              .network == "none") and
+            ($receipt | length) == 1 and
+            $receipt[0].registry_reference == $contract.image and
+            $receipt[0].docker_config_id == $contract.config_id and
+            $receipt[0].platform == $contract.platform and
+            $receipt[0].signing_identity == $contract.signing_identity
+          ' "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" >/dev/null || {
+            echo '::error::Protected reuse receipts at the pinned ref do not match EXPECTED_CONTRACT. Advance the protected ref with the image pins.'
+            exit 1
+          }
       - name: Prepare and verify exact test policy
         id: decision
         continue-on-error: true
@@ -133,21 +159,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/warden-test-reuse"
           export PATH="$RUNNER_TEMP/warden-reuse-bin:$PATH"
           export WARDEN_JOB_POLICY="$RUNNER_TEMP/warden-test-reuse/policy.json"
-          # Bind the protected template to the exact contract the caller runs.
-          jq -e --argjson contract "$EXPECTED_CONTRACT" \
-            --slurpfile receipt "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/publication.json" '
-            .version == 1 and (.jobs | keys) == ["test"] and
-            .jobs.test.version == 1 and (.jobs.test.steps | keys) == ["test"] and
-            (.jobs.test.steps.test |
-              .command == $contract.command and .image_id == $contract.config_id and
-              .image_id_kind == "config" and .platform == $contract.platform and
-              .network == "none") and
-            ($receipt | length) == 1 and
-            $receipt[0].registry_reference == $contract.image and
-            $receipt[0].docker_config_id == $contract.config_id and
-            $receipt[0].platform == $contract.platform and
-            $receipt[0].signing_identity == $contract.signing_identity
-          ' "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" >/dev/null
           ci-policy --repo "$PWD" \
             --template "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" \
             --base "$COMPARISON_BASE" --commit "$CANDIDATE_SHA" \
@@ -166,6 +177,11 @@ jobs:
           ' "$RUNNER_TEMP/warden-test-reuse/plan.json" >/dev/null; then
             printf 'reuse-sha=%s\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           fi
+      # A "run" plan is a normal outcome; an erroring verifier is not, and
+      # continue-on-error would otherwise hide it behind a green job.
+      - name: Report verifier failure
+        if: steps.decision.outcome == 'failure'
+        run: echo '::warning::Protected test reuse verifier failed; CI runs the full tests. See the step log and the warden-test-reuse artifact.'
       - name: Retain protected reuse observations
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
