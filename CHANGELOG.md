@@ -6,6 +6,27 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.47.1] - 2026-11-09
+
+Rebuild with refreshed `golang.org/x` dependencies. No change to warden's
+behaviour or configuration.
+
+### Security
+
+- **The release binaries embed `golang.org/x/net` v0.62.0** (was v0.60.0),
+  clearing GO-2026-6866 and GO-2026-6860 from scanners that read module
+  versions out of a binary. `govulncheck` finds neither reachable from warden's
+  code, at this version or at 0.47.0. `x/crypto` (v0.58.0), `x/sys` (v0.49.0),
+  `x/text` (v0.43.0) and `x/term` (v0.47.0) moved with it. GO-2026-5932 in
+  `x/crypto` is still reported at module level: no tagged `x/crypto` release
+  carries its fix yet, and warden does not call the affected code.
+
+### Changed
+
+- **The GitLab CI component defaults to warden 0.47.1.** A test now fails when
+  the component default falls behind the newest released version in this
+  changelog.
+
 ## [0.47.0] - 2026-11-04
 
 Sign and notarize the macOS binaries, and build releases with goreleaser
