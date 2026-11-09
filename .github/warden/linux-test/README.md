@@ -193,7 +193,7 @@ production job or measured CI savings. Cross-architecture compiler failures on
 an Apple silicon host cannot substitute for this native execution.
 
 The read-only `Verify protected test reuse` job builds the verifier and preparer
-from reviewed commit `369231d82fe3563979dbf0b4cd036de5a347bab8`, outside the
+from reviewed commit `dfe86bf3ea50e29f1a9259415647f325416378bc`, outside the
 candidate checkout. It executes no candidate code. Its protected amd64 Docker
 policy and publication receipt must match the exact contract supplied to shared
 CI: image, config identity, platform, command, network and publisher.

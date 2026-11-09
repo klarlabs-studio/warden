@@ -51,7 +51,7 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 		step := raw.(map[string]any)
 		if step["name"] == "Check out protected verifier and policy" {
 			with := step["with"].(map[string]any)
-			if with["ref"] != "369231d82fe3563979dbf0b4cd036de5a347bab8" || with["persist-credentials"] != false {
+			if with["ref"] != "dfe86bf3ea50e29f1a9259415647f325416378bc" || with["persist-credentials"] != false {
 				t.Fatal("protected source must remain immutable and credential-free")
 			}
 		}
