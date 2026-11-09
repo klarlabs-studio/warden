@@ -56,15 +56,22 @@ func TestProtectedReusePinsMatchContract(t *testing.T) {
 		out, err := cmd.Output()
 		return string(out), err
 	}
+	// Only a full-history repository can answer "is the pinned ref's receipt
+	// current?". Two environments legitimately cannot, and the workflow's own
+	// "Check protected pins match the caller contract" step covers both in CI:
+	//   - a container gate step mounts only the worktree at /workspace, so the
+	//     worktree's .git file points at a gitdir that is not visible;
+	//   - CI's test job (and clones derived from it) check out one commit.
+	// A full repository that lacks the commit is a real failure.
+	if _, err := git("rev-parse", "--git-dir"); err != nil {
+		t.Skipf("no git repository visible here (container step): %v", err)
+	}
 	if _, err := git("cat-file", "-e", ref+"^{commit}"); err != nil {
-		// CI's test job checks out one commit; the pinned ref is an ancestor it
-		// cannot see. The workflow's own "Check protected pins" step covers CI,
-		// and the pre-push gate runs this test with full history. A full clone
-		// missing the commit is a real failure.
-		if out, _ := git("rev-parse", "--is-shallow-repository"); strings.TrimSpace(out) == "true" {
+		out, shallowErr := git("rev-parse", "--is-shallow-repository")
+		if shallowErr == nil && strings.TrimSpace(out) == "true" {
 			t.Skipf("shallow clone lacks protected ref %s", ref)
 		}
-		t.Fatalf("protected ref %s is not in this repository: %v", ref, err)
+		t.Fatalf("protected ref %s is not in this full repository: %v", ref, err)
 	}
 	show := func(path string) map[string]any {
 		out, err := git("show", ref+":"+path)
