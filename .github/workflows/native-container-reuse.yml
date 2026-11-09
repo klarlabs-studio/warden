@@ -19,7 +19,7 @@ jobs:
       - name: Check out protected tools and profile
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 369231d82fe3563979dbf0b4cd036de5a347bab8
+          ref: dfe86bf3ea50e29f1a9259415647f325416378bc
           path: protected
           persist-credentials: false
       - name: Check out integration test source
