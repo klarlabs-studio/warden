@@ -198,6 +198,16 @@ candidate checkout. It executes no candidate code. Its protected amd64 Docker
 policy and publication receipt must match the exact contract supplied to shared
 CI: image, config identity, platform, command, network and publisher.
 
+Adopting a republished image is therefore two changes, not one. First merge the
+new receipts, profiles and `ci.yml` contract. Then advance this protected ref,
+and the matching ref in `native-container-reuse.yml`, to that reviewed merge.
+#377 did only the first: the verifier compared the new contract with the old
+receipts and errored inside its tolerated step, while CI stayed green. The
+`Check protected pins match the caller contract` step now fails visibly on that
+drift. `TestProtectedReusePinsMatchContract` reads the receipts at the pinned
+ref, not the working tree, so the pre-push gate catches it before a PR exists.
+In CI's shallow test checkout that test skips, and the workflow step covers it.
+
 Only same-repository pull requests are eligible. The candidate SHA, comparison
 base SHA and branch come from GitHub event metadata. Candidate Git objects supply
 dependency inputs; notes never supply expectations. The signed, trusted,
