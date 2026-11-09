@@ -36,9 +36,11 @@ unchanged, including the per-file SSH interoperability floors.
 
 Images from publication run `39990134467` predate this fix. They passed the
 root CI run but fail the SSH coverage floors under Warden's unmapped host UID.
-Do not adopt those images for local-to-CI reuse. The profiles below pin the
-replacement images from run `40009451684`, which passed non-root validation on
-both architectures. Old signatures establish the publisher, not suitability for
+Do not adopt those images for local-to-CI reuse. Run `40009451684` published
+non-root-validated replacements; the profiles below now pin the images from run
+`42615292578` (source `28366a5`), which rebuilt them for the golang.org/x
+dependency refresh and passed the same non-root validation on both
+architectures. Old signatures establish the publisher, not suitability for
 Warden's non-root execution.
 
 The `Linux test pilot` workflow runs manually or on pull requests changing the
@@ -113,7 +115,11 @@ validation as UID 10001. Their manifests, config identities, platforms and exact
 publisher signatures were independently verified before pinning. Earlier images
 from run `39997734827` contain Go 1.26.7, for which the shared govulncheck job
 reported reachable standard-library advisories. Updating source cannot update an
-immutable image; use the refreshed references below.
+immutable image; use the refreshed references below. Run `42615292578`
+republished both architectures from `28366a5` so the baked module cache
+contains the refreshed golang.org/x dependencies; a dependency bump fails
+`ci / Test` with "module lookup disabled by GOPROXY=off" until its image is
+republished and pinned.
 
 ## Independently prepare per-commit expectations
 
@@ -135,7 +141,7 @@ Pull the pinned image before running Warden; hook validation never needs to
 download a runtime or image. For Apple silicon:
 
 ```sh
-container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:e97a6c1dc0a1e3ad504528394bf675ed3aa58f66a75eedb73d561a3491090f24
+container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:dd7d0374c1147b9d5e5c741f0b522a3fec20db5ac31565bc3f671e7a3425fd66
 # In a disposable checkout, copy profiles/arm64/.warden.yaml to .warden.yaml,
 # commit it, then run the test-only pre-push gate.
 warden run pre-push --attest-only
