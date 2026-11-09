@@ -6,6 +6,11 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-04
+
+Sign and notarize the macOS binaries, and build releases with goreleaser
+2.19.0. No change to warden's behaviour or configuration.
+
 ### Added
 
 - **The macOS binaries are signed with a Developer ID certificate and
