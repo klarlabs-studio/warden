@@ -100,7 +100,7 @@ jobs:
           GOTOOLCHAIN: auto
         run: |
           # keep in sync with klarlabs-studio/.github .../go-ci.yml
-          go install github.com/nox-hq/nox/cli@v1.26.0
+          go install github.com/nox-hq/nox/cli@v1.63.0
           mv "$(go env GOPATH)/bin/cli" "$(go env GOPATH)/bin/nox"
 
       - name: Report toolchain
