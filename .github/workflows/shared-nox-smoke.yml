@@ -1,0 +1,15 @@
+name: Shared nox smoke (temporary)
+on:
+  push:
+    branches: [test/shared-nox-smoke]
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+jobs:
+  nox:
+    uses: klarlabs-studio/.github/.github/workflows/nox.yml@chore/nox-1.63.0-ci-gate
+  go-ci-security:
+    uses: klarlabs-studio/.github/.github/workflows/go-ci.yml@chore/nox-1.63.0-ci-gate
+    with:
+      coverage: false
