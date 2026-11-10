@@ -233,6 +233,32 @@ GitHub must protect changes to the caller workflow itself through repository
 review rules. A pinned verifier cannot secure a caller that has been changed to
 ignore its result.
 
+### Measured economics (2026-11)
+
+Reuse moves the Linux amd64 test from CI to the pushing machine. Measured with
+the profile and image pinned at `dfe86bf`, except where noted:
+
+| Observation | n | Median | Range |
+|---|---|---|---|
+| CI container test step | 33 | 103 s | 86–118 s |
+| CI test job, total | 33 | 110 s | 91–135 s |
+| CI test job when reused (#360) | 1 | 5 s | – |
+| Reuse verifier job, every same-repository PR | 17 | 19 s | 16–31 s |
+| Container gate, native amd64 runner (fixture) | 7 | 90 s | 67–93 s |
+| Host gate, Apple M5 (default profile) | 3 | 81 s | 76–109 s |
+| Container gate, amd64 emulated on Apple silicon (#360, earlier image) | 1 | 518 s | – |
+
+A reused PR saves about 105 s of CI. On a native amd64 machine the gate costs
+about 9 s more than the host gate, so reuse pays. On Apple silicon the emulated
+gate costs about 437 s more, a net loss of roughly five minutes per push. An
+arm64 run cannot qualify, because the CI contract covers only linux/amd64. The
+default host gate never produces a reusable note, so the verifier's 19 s is
+currently spent with no reuse.
+
+Limits: the native figures come from GitHub runners, not workstations; the
+emulated figure is one sample on the previous image. Making reuse pay on Apple
+silicon would need a separate arm64 CI contract, which is not planned.
+
 Build the preparer from a reviewed checkout, outside the candidate:
 
 ```sh
