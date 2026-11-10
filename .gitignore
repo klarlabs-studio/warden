@@ -6,6 +6,7 @@
 # nox scan output (baseline is committed; raw findings are not)
 /findings.json
 /results.sarif
+/ai.inventory.json
 
 # release build artifacts (generated, never committed)
 /dist/
