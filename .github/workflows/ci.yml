@@ -86,7 +86,7 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
       COMPARISON_BASE: ${{ github.event.pull_request.base.sha }}
       EXPECTED_CONTRACT: >-
-        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:6e218d0997e9022bd073a4c06ac1327c2060090f6e5efa93608c282fc61c88a4","config_id":"sha256:9724173e43589604cbedc5ce88c1b65b783a911551d64e3dce98a49529964bf7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
+        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:9d5dcb0674e0bc4aca3064791dcba6f3a4a77eeb71608c0d39e8e58f671c6b79","config_id":"sha256:e525a3395019e026d90fb65fca717d2b2e2689c752eb719e32048cad02d9b2e3","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
       WARDEN_TRUSTED_KEYS: '139e6eb9e2611c76,b3746e61c4d49512,18df642847f69902'
     steps:
       - name: Check out protected verifier and policy
@@ -276,7 +276,7 @@ jobs:
       # Only the protected verifier may supply an exact candidate reuse SHA.
       # A skipped/failed verifier emits nothing and leaves the container running.
       test-container-contract: >-
-        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:6e218d0997e9022bd073a4c06ac1327c2060090f6e5efa93608c282fc61c88a4","config_id":"sha256:9724173e43589604cbedc5ce88c1b65b783a911551d64e3dce98a49529964bf7","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
+        {"image":"ghcr.io/klarlabs-studio/warden/linux-test@sha256:9d5dcb0674e0bc4aca3064791dcba6f3a4a77eeb71608c0d39e8e58f671c6b79","config_id":"sha256:e525a3395019e026d90fb65fca717d2b2e2689c752eb719e32048cad02d9b2e3","platform":"linux/amd64","command":"/usr/local/bin/warden-linux-test","signing_identity":"https://github.com/klarlabs-studio/warden/.github/workflows/linux-test-image.yml@refs/heads/main"}
       test-reuse-sha: ${{ needs.test-reuse-plan.outputs.reuse-sha || '' }}
 
   windows-build:

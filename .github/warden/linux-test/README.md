@@ -119,7 +119,10 @@ immutable image; use the refreshed references below. Run `42615292578`
 republished both architectures from `28366a5` so the baked module cache
 contains the refreshed golang.org/x dependencies; a dependency bump fails
 `ci / Test` with "module lookup disabled by GOPROXY=off" until its image is
-republished and pinned.
+republished and pinned. Run `42892705142` republished both architectures from
+`6b209b8` (#385), whose refreshed `golang:1.26.10-bookworm` base carries patched
+brotli, openssl, cyrus-sasl2 and expat packages; nox reported the previous
+images' versions as critical/high.
 
 ## Independently prepare per-commit expectations
 
@@ -141,7 +144,7 @@ Pull the pinned image before running Warden; hook validation never needs to
 download a runtime or image. For Apple silicon:
 
 ```sh
-container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:dd7d0374c1147b9d5e5c741f0b522a3fec20db5ac31565bc3f671e7a3425fd66
+container image pull ghcr.io/klarlabs-studio/warden/linux-test@sha256:c73c5e0bdbd7ac1b22d30638425d768dd6d2a88a6b5ef073cf91f73d792c691d
 # In a disposable checkout, copy profiles/arm64/.warden.yaml to .warden.yaml,
 # commit it, then run the test-only pre-push gate.
 warden run pre-push --attest-only

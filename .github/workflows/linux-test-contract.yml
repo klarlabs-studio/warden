@@ -23,12 +23,12 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
-            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:6e218d0997e9022bd073a4c06ac1327c2060090f6e5efa93608c282fc61c88a4
-            config: sha256:9724173e43589604cbedc5ce88c1b65b783a911551d64e3dce98a49529964bf7
+            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:9d5dcb0674e0bc4aca3064791dcba6f3a4a77eeb71608c0d39e8e58f671c6b79
+            config: sha256:e525a3395019e026d90fb65fca717d2b2e2689c752eb719e32048cad02d9b2e3
           - arch: arm64
             runner: ubuntu-24.04-arm
-            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:dd7d0374c1147b9d5e5c741f0b522a3fec20db5ac31565bc3f671e7a3425fd66
-            config: sha256:54c860498e9207d981239289f1664d2a6b355c3d43868b2a8207e78a6346a217
+            image: ghcr.io/klarlabs-studio/warden/linux-test@sha256:c73c5e0bdbd7ac1b22d30638425d768dd6d2a88a6b5ef073cf91f73d792c691d
+            config: sha256:0dad3588e6748519fc4cbca8618af90bd5903058888c05aae5d0ae31b63d5552
     env:
       IMAGE: ${{ matrix.image }}
       IMAGE_CONFIG: ${{ matrix.config }}
