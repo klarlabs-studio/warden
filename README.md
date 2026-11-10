@@ -164,6 +164,13 @@ point**, so wiring it into a `make install-hooks` target cannot narrow
 your audit range. Moving the point needs `--re-adopt`, which prints the
 old and new commits and how many just left `warden doctor`'s range.
 
+It also works in a repository with no commit yet — straight after `git init`.
+There is no commit that predates the gate to record, so the adoption point is
+the start of history and the first commit is inside the audit, gated at
+`git commit` like every later one. `warden init` either does all of its work or
+none of it: when it has to refuse — a hook it did not install is in the way —
+it refuses before writing the config, the hooks or the adoption point.
+
 From then on `git commit` / `git push` are gated. Warden's own push runs with
 `--no-verify` so it never re-triggers the hook and recurses.
 
@@ -541,7 +548,8 @@ The report also works on a **fresh clone**: the adoption point `warden init`
 records lives in `.git/warden/adoption`, which is per-clone, so when that file is
 absent warden derives it from `refs/notes/warden` instead — the parent of the
 earliest noted commit, i.e. the point at which the gate demonstrably began
-operating. Same population, same digest, on any checkout, because an artifact
+operating. When the earliest noted commit is the first commit of the branch,
+that is the start of history, and the first commit is in the population. Same population, same digest, on any checkout, because an artifact
 only one laptop can produce is not evidence. See
 [using warden as audit evidence](docs/grc-evidence.md) for the control mapping,
 the JSON document and the worked caveats.

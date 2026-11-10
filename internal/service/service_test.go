@@ -449,3 +449,187 @@ func TestService_InitReAdoptAtHeadIsNotAMove(t *testing.T) {
 		t.Errorf("LeftAudit = %d, want 0 — nothing left the range", again.LeftAudit)
 	}
 }
+
+// emptyRepo creates a repository with no commit — what `git init` leaves, and
+// where a new project starts.
+func emptyRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	gitIn(t, dir, "config", "user.email", "warden-test")
+	gitIn(t, dir, "config", "user.name", "t")
+	gitIn(t, dir, "config", "commit.gpgsign", "false")
+	return dir
+}
+
+// wardenState lists what an init leaves behind: the config, the hooks, the
+// adoption record. "Nothing was changed" is a claim about all three.
+func wardenState(t *testing.T, dir string) []string {
+	t.Helper()
+	var found []string
+	for _, rel := range []string{
+		".warden.yaml",
+		filepath.Join(".git", "hooks", "pre-commit"),
+		filepath.Join(".git", "hooks", "pre-push"),
+		filepath.Join(".git", "warden", "adoption"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
+			found = append(found, rel)
+		}
+	}
+	return found
+}
+
+// `git init && warden init` is the first thing a new project does. It used to
+// exit 1 ("read HEAD for adoption point") AFTER installing the hooks and
+// writing the config — and the installed pre-commit hook then rejected every
+// commit, including the first one the error told the user to go and make.
+func TestService_InitInAnEmptyRepositoryAdoptsFromTheFirstCommit(t *testing.T) {
+	dir := emptyRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.Init(domain.AllHooks, false)
+	if err != nil {
+		t.Fatalf("init in an empty repository: %v", err)
+	}
+	if res.Adoption != domain.AdoptionRoot {
+		t.Errorf("Adoption = %q, want %q", res.Adoption, domain.AdoptionRoot)
+	}
+	if res.Adopted() {
+		t.Error("an empty repository reported a previous adoption point")
+	}
+	onDisk, err := svc.Repo().ReadAdoption()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk != domain.AdoptionRoot {
+		t.Errorf("adoption file holds %q, want %q", onDisk, domain.AdoptionRoot)
+	}
+	if got := wardenState(t, dir); len(got) != 4 {
+		t.Errorf("init left %v, want the config, both hooks and the adoption record", got)
+	}
+
+	// The whole point: the first commit is inside the audit. An exclusive
+	// adoption point would have had to name a commit before it.
+	commitEmpty(t, dir, "first")
+	root := gitIn(t, dir, "rev-parse", "HEAD")
+	commitEmpty(t, dir, "second")
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	report, err := svc.Doctor("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Adoption != domain.AdoptionRoot {
+		t.Errorf("report.Adoption = %q, want %q", report.Adoption, domain.AdoptionRoot)
+	}
+	if len(report.Commits) != 2 {
+		t.Fatalf("doctor audited %d commits, want 2 — the root commit included", len(report.Commits))
+	}
+	if oldest := report.Commits[len(report.Commits)-1].SHA; oldest != root {
+		t.Errorf("oldest audited commit = %s, want the root %s", oldest, root)
+	}
+	// Both were pushed with --no-verify: neither may read as anything else.
+	if unverified := report.Counts().Unverified; unverified != 2 {
+		t.Errorf("Unverified = %d, want 2", unverified)
+	}
+
+	// A second init keeps the point, like any other adoption.
+	again, err := svc.Init(domain.AllHooks, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Moved || again.Adoption != domain.AdoptionRoot {
+		t.Errorf("second init: Moved=%v Adoption=%q, want the root point kept", again.Moved, again.Adoption)
+	}
+
+	// Moving off it costs every commit so far, and says so.
+	moved, err := svc.Init(domain.AllHooks, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moved.Moved || moved.LeftAudit != 2 {
+		t.Errorf("re-adopt from the root: Moved=%v LeftAudit=%d, want a move that drops 2 commits", moved.Moved, moved.LeftAudit)
+	}
+}
+
+// Init either happens or it does not. Each of these refusals used to leave
+// part of a gate behind.
+func TestService_ARefusedInitChangesNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, dir string)
+		wantErr string
+	}{
+		{
+			name: "a pre-push hook that is not warden's",
+			prepare: func(t *testing.T, dir string) {
+				hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+				if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(hook, []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "not warden-managed",
+		},
+		{
+			// Unborn HEAD, but not an empty repository: adopting at the root
+			// would pull every other branch's history into the audit.
+			name: "an orphan branch in a repository with history",
+			prepare: func(t *testing.T, dir string) {
+				gitIn(t, dir, "switch", "-q", "--orphan", "fresh")
+			},
+			wantErr: "nothing was changed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := initRepo(t)
+			tt.prepare(t, dir)
+			before := wardenState(t, dir)
+
+			svc, err := New(dir, "test", autoApprover{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.Init(domain.AllHooks, false)
+			if err == nil {
+				t.Fatal("init succeeded, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.wantErr)
+			}
+			after := wardenState(t, dir)
+			if strings.Join(after, ",") != strings.Join(before, ",") {
+				t.Errorf("a refused init changed the repository: before %v, after %v", before, after)
+			}
+		})
+	}
+}
+
+// Before the first commit there is nothing to audit, and that is the answer —
+// not git's "unknown revision or path not in the working tree".
+func TestService_DoctorOnABranchWithNoCommits(t *testing.T) {
+	dir := emptyRepo(t)
+	svc, err := New(dir, "test", autoApprover{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Init(domain.AllHooks, false); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Doctor("")
+	if err == nil {
+		t.Fatal("doctor on a branch with no commits returned a report")
+	}
+	if !strings.Contains(err.Error(), "no commits yet") {
+		t.Errorf("error = %q, want it to say the branch has no commits yet", err)
+	}
+}

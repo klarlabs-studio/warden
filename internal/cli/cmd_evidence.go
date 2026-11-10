@@ -293,7 +293,7 @@ func printEvidenceMarkdown(w io.Writer, e domain.Evidence) {
 	p("| Repository | `%s` |\n", e.Repository)
 	p("| Branch | `%s` |\n", e.Branch)
 	p("| Period | %s |\n", periodLabel(e))
-	p("| Control in operation since | `%s` |\n", shortOrNone(e.Adoption))
+	p("| Control in operation since | `%s` |\n", adoptionLabel(e.Adoption))
 	p("| Produced by | %s at %s |\n", e.Tool, e.GeneratedAt.Format(time.RFC3339))
 	p("| Evidence digest | `%s` |\n", e.Digest())
 	p("\n")
@@ -408,15 +408,6 @@ func periodLabel(e domain.Evidence) string {
 		return "from " + e.From.Format("2006-01-02")
 	}
 	return e.From.Format("2006-01-02") + " to " + e.To.Format("2006-01-02")
-}
-
-// shortOrNone abbreviates a SHA, saying so when there is none — an empty cell
-// in an evidence table reads as an omission.
-func shortOrNone(s string) string {
-	if s == "" {
-		return "(none)"
-	}
-	return short(s)
 }
 
 func orDash(s string) string {

@@ -85,8 +85,11 @@ func TestEarliestNotedAncestor_EmptyWhenNothingIsNoted(t *testing.T) {
 	}
 }
 
-// A note on the root commit has no parent to fall back to; the root itself is
-// the answer rather than an error.
+// A note on the root commit has no parent to fall back to. The answer is the
+// root sentinel, not the root's SHA: a SHA is an exclusive base, and returning
+// it left the first gated commit out of the audit it started — while the clone
+// that ran `warden init` in the empty repository counted it. Two machines, two
+// ranges, one repository.
 func TestEarliestNotedAncestor_HandlesANotedRootCommit(t *testing.T) {
 	dir := newTestRepo(t)
 	repo, err := Open(dir)
@@ -106,7 +109,15 @@ func TestEarliestNotedAncestor_HandlesANotedRootCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EarliestNotedAncestor: %v", err)
 	}
-	if got != root {
-		t.Errorf("adoption = %s, want the root commit %s", got, root)
+	if got != domain.AdoptionRoot {
+		t.Fatalf("adoption = %s, want %q for a noted root commit", got, domain.AdoptionRoot)
+	}
+	// The property that matters is what the range then holds.
+	commits, err := repo.CommitsSince("main", got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commits) != 2 || commits[len(commits)-1] != root {
+		t.Errorf("derived range = %v, want both commits with the noted root %s inside it", commits, root)
 	}
 }

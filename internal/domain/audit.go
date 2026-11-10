@@ -165,8 +165,26 @@ func NewCommitStatus(sha, author, date, subject string, note *RunRecord) CommitS
 	return cs
 }
 
+// AdoptionRoot is the adoption point of a branch whose first commit is already
+// under the gate: `warden init` ran before the repository had a commit, or — on
+// a clone with no recorded point — the root commit carries a note. There is no
+// earlier commit to name, and none is excluded: the audit covers the branch
+// from its first commit on.
+//
+// Recording the first commit instead would be off by one in the direction that
+// matters. An adoption point is exclusive — it is the last commit that predates
+// the gate — so it would put the one commit made under the gate outside the
+// audit, where a bypass of it could never be reported.
+//
+// Every other adoption point is a full commit SHA, which this cannot be, so the
+// two are never confused. It is not a revision: a caller must branch on it
+// rather than hand it to git, where a ref that happened to be called "root"
+// would resolve.
+const AdoptionRoot = "root"
+
 // AuditReport summarizes provenance for a branch since adoption (§9).
 type AuditReport struct {
+	// Adoption is the commit the audit starts after, or AdoptionRoot.
 	Adoption string
 	Branch   string
 	// NeverPushed is true when the branch has no remote-tracking ref, so nothing

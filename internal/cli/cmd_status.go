@@ -63,7 +63,7 @@ func cmdStatus(stdout, stderr io.Writer) int {
 	}
 
 	if adoption, err := svc.Repo().ReadAdoption(); err == nil && adoption != "" {
-		_, _ = fmt.Fprintf(stdout, "\nadoption point: %s\n", short(adoption))
+		_, _ = fmt.Fprintf(stdout, "\nadoption point: %s\n", adoptionLabel(adoption))
 	} else {
 		_, _ = fmt.Fprintln(stdout, "\nnot initialized — run `warden init`")
 	}

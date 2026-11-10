@@ -915,3 +915,97 @@ notify: false
 		t.Fatalf("tampered artifact reuse: %d %s", code, out)
 	}
 }
+
+// newGoldenEmptyRepo is a repository with a remote and no commit at all — the
+// state `git init` leaves, and the one a brand-new project adopts warden in.
+func newGoldenEmptyRepo(t *testing.T) *goldenRepo {
+	t.Helper()
+	remote := t.TempDir()
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v %s", err, out)
+	}
+	g := &goldenRepo{t: t, dir: t.TempDir(), remote: remote}
+	g.git("init", "-b", "main")
+	g.git("config", "user.email", "warden-golden-fleet")
+	g.git("config", "user.name", "warden-golden-fleet")
+	g.git("remote", "add", "origin", remote)
+	return g
+}
+
+// A repository adopted before its first commit has no commit that predates the
+// gate, so the first commit is inside the audit. Gated, it is verified.
+//
+// `warden init` used to fail here — after installing the hooks, which then
+// refused every commit — so the shape could not exist. The way it could have
+// been made to "work" is the one this pins against: recording the first commit
+// as the adoption point, which is exclusive, and so auditing nothing.
+func TestGoldenFleet_AdoptedWhileEmptyAuditsTheFirstCommit(t *testing.T) {
+	g := newGoldenEmptyRepo(t)
+	g.adopt()
+	g.commit("the first commit")
+	g.gate()
+
+	got := g.classify()
+	if !got.Adopted {
+		t.Fatal("a repo that ran `warden init` before its first commit reads as not adopted")
+	}
+	if got.Commits != 1 || got.Verified != 1 {
+		t.Errorf("commits = %d, verified = %d; want 1 and 1: the first commit was made under the gate and gated", got.Commits, got.Verified)
+	}
+	if got.Bypassed != 0 {
+		t.Errorf("bypassed = %d, want 0", got.Bypassed)
+	}
+	if out, code := g.warden("doctor", "--ci"); code != 0 {
+		t.Errorf("doctor --ci exited %d on a fully gated history:\n%s", code, out)
+	}
+}
+
+// The other half, and the one that matters: a first commit pushed past the gate
+// is a bypass, and must be reported as one. An audit that starts AFTER the
+// first commit would report this repository as clean.
+func TestGoldenFleet_AdoptedWhileEmptyStillCatchesABypassedFirstCommit(t *testing.T) {
+	g := newGoldenEmptyRepo(t)
+	g.adopt()
+	g.commit("the first commit, never gated")
+	g.git("push", "--no-verify", "-u", "origin", "main")
+
+	got := g.classify()
+	if got.Commits != 1 {
+		t.Fatalf("commits = %d, want 1: the first commit is not in the audit range", got.Commits)
+	}
+	if got.Bypassed != 1 {
+		t.Errorf("bypassed = %d, want 1: the only commit here went past the gate", got.Bypassed)
+	}
+	if got.Verified != 0 {
+		t.Errorf("verified = %d, want 0", got.Verified)
+	}
+	if out, code := g.warden("doctor", "--ci"); code != 3 {
+		t.Errorf("doctor --ci exited %d, want 3 (drift):\n%s", code, out)
+	}
+}
+
+// A clone has no recorded adoption point; it derives one from the notes. For a
+// repository whose root commit carries a note the derived range has to include
+// that commit too, or two clones of one history give two different audits.
+func TestGoldenFleet_AFreshCloneAuditsTheSameRangeAsTheAdopter(t *testing.T) {
+	g := newGoldenEmptyRepo(t)
+	g.adopt()
+	g.commit("the first commit")
+	g.gate()
+	g.commit("the second commit")
+	g.gate()
+	g.git("push", "--no-verify", "origin", "refs/notes/warden:refs/notes/warden")
+
+	clone := &goldenRepo{t: t, dir: t.TempDir(), remote: g.remote}
+	clone.git("clone", g.remote, ".")
+	clone.git("fetch", "origin", "refs/notes/warden:refs/notes/warden")
+
+	want, got := g.classify(), clone.classify()
+	if got.Commits != want.Commits || got.Verified != want.Verified {
+		t.Errorf("clone audits %d commit(s), %d verified; the adopting clone audits %d, %d verified",
+			got.Commits, got.Verified, want.Commits, want.Verified)
+	}
+	if want.Commits != 2 || want.Verified != 2 {
+		t.Errorf("adopter: commits = %d, verified = %d; want 2 and 2", want.Commits, want.Verified)
+	}
+}

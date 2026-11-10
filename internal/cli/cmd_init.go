@@ -63,6 +63,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 // audit is the one thing it must never do quietly.
 func writeAdoptionOutcome(stdout io.Writer, res service.InitResult) {
 	switch {
+	case !res.Adopted() && res.Adoption == domain.AdoptionRoot:
+		_, _ = fmt.Fprintln(stdout, "no commits yet — adopted from the first commit: every commit here is in `warden doctor`'s audit range.\n"+
+			"  edit .warden.yaml to configure policy; commit it with your first change.")
 	case !res.Adopted():
 		_, _ = fmt.Fprintf(stdout, "adoption point recorded at %s; edit .warden.yaml to configure policy.\n",
 			shortSHA(res.Adoption))
@@ -70,10 +73,10 @@ func writeAdoptionOutcome(stdout io.Writer, res service.InitResult) {
 		_, _ = fmt.Fprintf(stdout,
 			"adoption point kept at %s — this repository had already adopted warden.\n"+
 				"  pass --re-adopt to move it to HEAD; doing so drops the commits in between out of `warden doctor`.\n",
-			shortSHA(res.Adoption))
+			adoptionLabel(res.Adoption))
 	default:
 		_, _ = fmt.Fprintf(stdout, "adoption point MOVED %s -> %s.\n",
-			shortSHA(res.Previous), shortSHA(res.Adoption))
+			adoptionLabel(res.Previous), adoptionLabel(res.Adoption))
 		if res.LeftAudit > 0 {
 			_, _ = fmt.Fprintf(stdout,
 				"  %d commit(s) are no longer in `warden doctor`'s audit range.\n", res.LeftAudit)

@@ -398,3 +398,24 @@ func TestEvidence_ControlTextStaysWholeWhenNothingIsUndetermined(t *testing.T) {
 		}
 	}
 }
+
+// A repository adopted before its first commit has no commit to use as the
+// base of a range. The command must still look at the first commit — a bare
+// range from the root would exclude it, and an auditor would re-check an
+// evidence pack of N commits by verifying N-1.
+func TestEvidence_VerificationCommandFromTheRootChecksTheRootCommit(t *testing.T) {
+	rep := report(gated("a", 10))
+	rep.Adoption = AdoptionRoot
+	cmd := NewEvidence(rep, opts(time.Time{}, time.Time{})).VerifyCommand()
+
+	const root = "$(git rev-list --max-parents=0 main)"
+	if !strings.Contains(cmd, "warden verify --commit "+root) {
+		t.Errorf("VerifyCommand = %q, want the root commit verified on its own", cmd)
+	}
+	if !strings.Contains(cmd, "warden verify --range "+root+"..main") {
+		t.Errorf("VerifyCommand = %q, want the rest verified as a range from the root", cmd)
+	}
+	if strings.Contains(cmd, AdoptionRoot+"..") {
+		t.Errorf("VerifyCommand = %q uses the sentinel as a revision; git cannot resolve it", cmd)
+	}
+}
