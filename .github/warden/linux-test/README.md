@@ -177,8 +177,10 @@ govulncheck updates since the previous pinned revision.
 
 ### Native integration fixture
 
-`Native container reuse integration` runs on a native Linux amd64 runner when
-its script/workflow changes, or by manual dispatch. It builds the reviewed
+`Native container reuse integration` runs on a native Linux amd64 runner for
+pull requests touching anything that runs inside or decides about the container
+gate (`scripts/`, the linux-test profiles, `ci.yml`, the container executor,
+`go.mod`/`go.sum`), weekly, and by manual dispatch. It builds the reviewed
 verifier, verifies the published image, and runs the full offline test profile
 through Warden in a disposable repository. The repository publishes its signed
 note to a local bare remote. A fresh consumer fetches that note and checks the
@@ -198,15 +200,29 @@ candidate checkout. It executes no candidate code. Its protected amd64 Docker
 policy and publication receipt must match the exact contract supplied to shared
 CI: image, config identity, platform, command, network and publisher.
 
-Adopting a republished image is therefore two changes, not one. First merge the
-new receipts, profiles and `ci.yml` contract. Then advance this protected ref,
-and the matching ref in `native-container-reuse.yml`, to that reviewed merge.
+Adopting a republished image is therefore two pull requests, not one:
+
+1. Merge the new receipts, profiles and `ci.yml` contract. While this pull
+   request is open, its pin check warns instead of failing and no test is
+   reused, because the protected ref can only point at a reviewed merge.
+2. Run `scripts/advance-protected-ref.sh <merge-sha>` with that merge commit.
+   It moves this ref and the matching ref in `native-container-reuse.yml`,
+   refuses a commit that is not on `origin/main`, and checks the receipts at
+   the new ref. Commit the result and open the second pull request.
+
 #377 did only the first: the verifier compared the new contract with the old
-receipts and errored inside its tolerated step, while CI stayed green. The
-`Check protected pins match the caller contract` step now fails visibly on that
-drift. `TestProtectedReusePinsMatchContract` reads the receipts at the pinned
-ref, not the working tree, so the pre-push gate catches it before a PR exists.
-In CI's shallow test checkout that test skips, and the workflow step covers it.
+receipts and errored inside its tolerated step, while CI stayed green. Once
+`main` carries a contract that the protected ref's receipts do not, the
+`Protected reuse pins current` job fails on every push to `main`, pull requests
+fail their `Check protected pins match the caller contract` step, and
+`TestProtectedReusePinsMatchContract` fails the pre-push gate. That test reads
+the receipts at the pinned ref, not the working tree, and skips only on a
+branch whose contract differs from `origin/main`'s. In CI's shallow test
+checkout it skips; the workflow jobs cover it.
+
+Candidate notes without a container test environment for this contract, which
+includes every host-gated push, end the verifier before it builds anything.
+That check reads untrusted note content and can only withhold reuse.
 
 Only same-repository pull requests are eligible. The candidate SHA, comparison
 base SHA and branch come from GitHub event metadata. Candidate Git objects supply

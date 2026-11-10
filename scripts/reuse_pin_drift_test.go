@@ -2,6 +2,7 @@ package scripts_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -85,20 +86,33 @@ func TestProtectedReusePinsMatchContract(t *testing.T) {
 		return v
 	}
 	jobs := reuseWorkflow(t)
-	var contract map[string]string
 	env := jobs["test-reuse-plan"].(map[string]any)["env"].(map[string]any)
-	if err := json.Unmarshal([]byte(strings.TrimSpace(env["EXPECTED_CONTRACT"].(string))), &contract); err != nil {
+	rawContract := strings.TrimSpace(env["EXPECTED_CONTRACT"].(string))
+	var contract map[string]string
+	if err := json.Unmarshal([]byte(rawContract), &contract); err != nil {
 		t.Fatal(err)
 	}
 	const profile = ".github/warden/linux-test/profiles/amd64/"
 	receipt := show(profile + "publication.json")
+	var drift []string
 	for field, key := range map[string]string{"image": "registry_reference", "config_id": "docker_config_id", "platform": "platform", "signing_identity": "signing_identity"} {
 		if receipt[key] != contract[field] {
-			t.Errorf("protected ref %s publication %s = %v, ci.yml contract %s = %s: advance the protected ref with the image pins", ref, key, receipt[key], field, contract[field])
+			drift = append(drift, fmt.Sprintf("publication %s = %v, contract %s = %s", key, receipt[key], field, contract[field]))
 		}
 	}
 	step := show(profile + "docker-policy-template.json")["jobs"].(map[string]any)["test"].(map[string]any)["steps"].(map[string]any)["test"].(map[string]any)
 	if step["image_id"] != contract["config_id"] || step["command"] != contract["command"] || step["platform"] != contract["platform"] {
-		t.Errorf("protected ref %s docker policy template does not match the ci.yml contract", ref)
+		drift = append(drift, "docker policy template differs from the contract")
 	}
+	if len(drift) == 0 {
+		return
+	}
+	// The ref can only advance to a reviewed merge, so the branch that adopts a
+	// new image necessarily runs ahead of it. Once main carries the contract,
+	// the same drift is a stale ref and fails everywhere.
+	mainCI, err := git("show", "origin/main:.github/workflows/ci.yml")
+	if err == nil && !strings.Contains(mainCI, rawContract) {
+		t.Skipf("this branch changes the container contract; after it merges, run scripts/advance-protected-ref.sh <merge-sha> (%s)", strings.Join(drift, "; "))
+	}
+	t.Fatalf("protected ref %s is stale: %s. Run scripts/advance-protected-ref.sh <merge-sha>", ref, strings.Join(drift, "; "))
 }
