@@ -219,9 +219,14 @@ receipts and errored inside its tolerated step, while CI stayed green. Once
 `Protected reuse pins current` job fails on every push to `main`, pull requests
 fail their `Check protected pins match the caller contract` step, and
 `TestProtectedReusePinsMatchContract` fails the pre-push gate. That test reads
-the receipts at the pinned ref, not the working tree, and skips only on a
-branch whose contract differs from `origin/main`'s. In CI's shallow test
-checkout it skips; the workflow jobs cover it.
+the receipts at the pinned ref, not the working tree. It skips on a branch
+whose contract differs from `origin/main`'s, and on the one commit that lands
+the contract on `main`: no ref that commit could have pinned existed yet, and
+failing there left the merge of step 1 without an attestation. Every later
+commit fails until step 2 merges. The `Protected reuse pins current` job sets
+`WARDEN_REQUIRE_CURRENT_PINS=1`, which withdraws that allowance, so `main` is
+red from the merge of step 1 on. In CI's shallow test checkout the test skips;
+the workflow jobs cover it.
 
 Candidate notes without a container test environment for this contract, which
 includes every host-gated push, end the verifier before it builds anything.

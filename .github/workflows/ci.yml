@@ -250,6 +250,11 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Check the protected ref carries the current contract
+        # Elsewhere the commit that lands a new contract is allowed to run ahead
+        # of the ref, so the gate can still attest it. Not here: this job is
+        # what keeps main red until the ref advances.
+        env:
+          WARDEN_REQUIRE_CURRENT_PINS: "1"
         run: go test -count=1 -run '^TestProtectedReusePinsMatchContract$' -v ./scripts/
 
   # The shared klarlabs-studio Go CI: gofmt, golangci-lint (gocritic), race
