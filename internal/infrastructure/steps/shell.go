@@ -126,6 +126,33 @@ func exitDescription(err error) string {
 	return "without a status"
 }
 
+// silentFailureWhy explains a failure that printed nothing, from the one fact
+// left: how the command exited.
+//
+// The two cases read alike and mean opposite things. An ordinary status is a
+// command that ran to the end and said no — a check that reports only through
+// its exit code, like `test -z "$(gofmt -l .)"`, which captures the very list
+// that would explain it. No status, or one in the shell's reserved range, is a
+// command that did not get to finish. Telling the author of the first that
+// their command "was probably killed" sends them looking for a timeout or a
+// memory limit when the answer is in their own tree.
+func silentFailureWhy(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if code := ee.ExitCode(); code > 0 && code < 126 {
+			return "The command ran to completion and exited " + strconv.Itoa(code) + " without writing " +
+				"to stdout or stderr, so it rejected the change and did not say why. Checks that " +
+				"report only through their exit status do this — a `test -z \"$(…)\"` or `grep -q` " +
+				"that captures the output which would have explained it. Run the command by hand " +
+				"in the repository to see what it found, and consider changing it to print that."
+		}
+	}
+	return "The command failed without writing to stdout or stderr, and did not exit with an " +
+		"ordinary status, so it was most likely killed rather than finished — a timeout, an " +
+		"out-of-memory kill, a lost race for a tool's lock — or it could not be started. " +
+		"Running it by hand is the fastest way to see what it would have said."
+}
+
 // resultFor turns a finished command into the step's normalized result. It is
 // separate from Run so a step that wraps a shell command with extra
 // interpretation (see SecurityScanStep) can still fall back to exactly this
@@ -198,11 +225,7 @@ func (s ShellStep) resultFor(ctx context.Context, sc application.StepContext, ou
 			msg = string(s.name) + " exited " + exitDescription(err) + " and printed nothing"
 			summary = string(s.name) + " failed silently"
 			rule = "step/no-output"
-			why = "The command failed without writing to stdout or stderr, so its own output " +
-				"explains nothing. That usually means it was killed rather than finished — a " +
-				"timeout, an out-of-memory kill, a lost race for a tool's lock — or that it " +
-				"refused to start. Running it by hand is the fastest way to see what it would " +
-				"have said."
+			why = silentFailureWhy(err)
 		// The command never ran either, for the other environmental reason: the
 		// executable it needs is not installed. Same rule — fail, but say what is
 		// actually wrong, and name the command that fixes it.

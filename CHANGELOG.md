@@ -40,6 +40,20 @@ All notable changes to warden are documented here. The format follows
   the first write. On a branch with no commits in a repository that has
   history elsewhere (`git switch --orphan`), `init` refuses and says to run it
   from a branch with history.
+- **The Go starter lint says which files it rejected.** The pre-filled command
+  was `test -z "$(gofmt -l .)" && go vet ./...`, which discards the list of
+  unformatted files and exits 1 in silence; the gate then reported a failed
+  step with nothing to act on. The starter now prints
+  `gofmt needs to format <file>` for each one. Only newly written configs get
+  it — an existing `.warden.yaml` is not rewritten; replace the `lint` command
+  by hand to pick it up. It uses `awk`.
+- **A step that fails without output is no longer described as "usually
+  killed" when it exited normally.** For an ordinary exit status (1–125) the
+  `step/no-output` finding now says the command ran to completion and
+  rejected the change without saying why — the usual cause being a check that
+  reports only through its exit status. Signals, timeouts and commands that
+  could not start keep the old explanation.
+
 ## [0.47.1] - 2026-11-09
 
 Rebuild with refreshed `golang.org/x` dependencies. No change to warden's

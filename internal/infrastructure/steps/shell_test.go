@@ -2,6 +2,9 @@ package steps
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,8 +123,52 @@ func TestASilentFailureSaysSo(t *testing.T) {
 	if f.Rule != "step/no-output" {
 		t.Errorf("rule = %q, want step/no-output so this is classifiable", f.Rule)
 	}
-	if !strings.Contains(f.Why, "killed") {
-		t.Errorf("why = %q, want the likely causes named", f.Why)
+	// An ordinary status is a command that finished and said no. Calling it
+	// "probably killed" sent the author of a `test -z "$(gofmt -l .)"` lint
+	// looking for a timeout when the answer was an unformatted file.
+	if !strings.Contains(f.Why, "ran to completion") {
+		t.Errorf("why = %q, want it to say the command finished and rejected the change", f.Why)
+	}
+	if strings.Contains(f.Why, "killed") {
+		t.Errorf("why = %q blames a kill for an ordinary exit status", f.Why)
+	}
+}
+
+// The other silence: a command that did not get to finish. The exit status is
+// what tells the two apart, so the explanation has to follow it.
+func TestASilentKillIsNotCalledAVerdict(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"killed by a signal", "kill -KILL $$"},
+		{"shell-reserved status", "exit 137"},
+		{"command not runnable", "exit 126"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			step := NewShellStep(domain.StepLint, "lint")
+			res, err := step.Run(context.Background(), application.StepContext{
+				WorktreeDir: t.TempDir(),
+				Commands:    map[string]string{"lint": tt.command},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != domain.StepFail || len(res.Findings) == 0 {
+				t.Fatalf("status = %s with %d findings, want a failing finding", res.Status, len(res.Findings))
+			}
+			f := res.Findings[0]
+			if f.Rule != "step/no-output" {
+				t.Fatalf("rule = %q, want step/no-output", f.Rule)
+			}
+			if !strings.Contains(f.Why, "killed") {
+				t.Errorf("why = %q, want the kill named as the likely cause", f.Why)
+			}
+			if strings.Contains(f.Why, "ran to completion") {
+				t.Errorf("why = %q claims a verdict the command never reached", f.Why)
+			}
+		})
 	}
 }
 
@@ -147,5 +194,79 @@ func TestAFailureWithOutputKeepsIt(t *testing.T) {
 	}
 	if res.Findings[0].Rule == "step/no-output" {
 		t.Error("a command that printed something was reported as silent")
+	}
+}
+
+// The starter lint `warden init` writes for a Go project. gofmt -l exits 0
+// whatever it finds, so the check has to fail on its output — and the usual
+// way of doing that, `test -z "$(gofmt -l .)"`, swallows the file list. The
+// step then failed having printed nothing, and the author of an unformatted
+// file was told their command had probably been killed.
+func TestGoStarterLintNamesTheFilesItRejects(t *testing.T) {
+	for _, tool := range []string{"gofmt", "go", "awk"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not on PATH", tool)
+		}
+	}
+	lint := domain.LanguageCommands(domain.LangGo)["lint"]
+	const formatted = "package main\n\nfunc main() {}\n"
+
+	tests := []struct {
+		name       string
+		files      map[string]string
+		wantStatus domain.StepStatus
+		wantNamed  []string
+	}{
+		{"formatted", map[string]string{"main.go": formatted}, domain.StepPass, nil},
+		{
+			"two unformatted files, one with a space in its name",
+			map[string]string{
+				"main.go":         formatted,
+				"bad.go":          "package main\nfunc  a( ) {}\n",
+				"sub/also bad.go": "package sub\nfunc  b( ) {}\n",
+			},
+			domain.StepFail,
+			[]string{"bad.go", "sub/also bad.go"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.files["go.mod"] = "module example.test/starter\n\ngo 1.21\n"
+			for name, content := range tt.files {
+				full := filepath.Join(dir, name)
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, err := NewShellStep(domain.StepLint, "lint").Run(context.Background(), application.StepContext{
+				WorktreeDir: dir,
+				Commands:    map[string]string{"lint": lint},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != tt.wantStatus {
+				t.Fatalf("status = %s, want %s (findings: %+v)", res.Status, tt.wantStatus, res.Findings)
+			}
+			if tt.wantStatus == domain.StepPass {
+				return
+			}
+			if len(res.Findings) == 0 {
+				t.Fatal("a failed lint reported no finding")
+			}
+			f := res.Findings[0]
+			if f.Rule == "step/no-output" {
+				t.Errorf("the starter lint failed silently: %q", f.Message)
+			}
+			for _, name := range tt.wantNamed {
+				if !strings.Contains(f.Message, name) {
+					t.Errorf("message %q does not name %s", f.Message, name)
+				}
+			}
+		})
 	}
 }
