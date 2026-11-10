@@ -92,7 +92,7 @@ jobs:
       - name: Check out protected verifier and policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: dfe86bf3ea50e29f1a9259415647f325416378bc
+          ref: 04d297f977edc2667d79674f032e5e868b7a7d37
           path: trusted-reuse
           persist-credentials: false
       - name: Check out candidate objects
