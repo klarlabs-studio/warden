@@ -997,7 +997,9 @@ func TestGoldenFleet_AFreshCloneAuditsTheSameRangeAsTheAdopter(t *testing.T) {
 	g.git("push", "--no-verify", "origin", "refs/notes/warden:refs/notes/warden")
 
 	clone := &goldenRepo{t: t, dir: t.TempDir(), remote: g.remote}
-	clone.git("clone", g.remote, ".")
+	// By name: a bare repository's HEAD follows init.defaultBranch, so where
+	// that is not "main" a plain clone checks out nothing at all.
+	clone.git("clone", "--branch", "main", g.remote, ".")
 	clone.git("fetch", "origin", "refs/notes/warden:refs/notes/warden")
 
 	want, got := g.classify(), clone.classify()
