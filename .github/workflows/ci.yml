@@ -102,28 +102,18 @@ jobs:
           path: reuse-candidate
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: trusted-reuse/go.mod
-          cache-dependency-path: trusted-reuse/go.sum
-      # No candidate build, hook, configuration or executable runs in this job.
-      - name: Build protected verifier
-        working-directory: trusted-reuse
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/warden-reuse-bin"
-          go build -o "$RUNNER_TEMP/warden-reuse-bin/warden" .
-          go build -o "$RUNNER_TEMP/warden-reuse-bin/ci-policy" ./scripts/ci-policy
       # Not continue-on-error: drift between the protected receipts and the
-      # caller contract is a misconfiguration (an image republish that did not
-      # advance the protected ref), not a per-candidate decision. Failing here
-      # makes it visible on every PR; ci still runs (if: !cancelled()) and the
-      # skipped decision step publishes no reuse output.
+      # caller contract on an unchanged contract is a misconfiguration (an
+      # image republish that did not advance the protected ref), not a
+      # per-candidate decision. A pull request that itself changes the contract
+      # is the first half of an adoption: the ref can only advance to its merge,
+      # so it gets a warning, and no reuse, instead of a red check.
       - name: Check protected pins match the caller contract
+        id: pins
         run: |
           set -euo pipefail
           # Bind the protected template to the exact contract the caller runs.
-          jq -e --argjson contract "$EXPECTED_CONTRACT" \
+          if jq -e --argjson contract "$EXPECTED_CONTRACT" \
             --slurpfile receipt "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/publication.json" '
             .version == 1 and (.jobs | keys) == ["test"] and
             .jobs.test.version == 1 and (.jobs.test.steps | keys) == ["test"] and
@@ -136,12 +126,62 @@ jobs:
             $receipt[0].docker_config_id == $contract.config_id and
             $receipt[0].platform == $contract.platform and
             $receipt[0].signing_identity == $contract.signing_identity
-          ' "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" >/dev/null || {
-            echo '::error::Protected reuse receipts at the pinned ref do not match EXPECTED_CONTRACT. Advance the protected ref with the image pins.'
+          ' "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" >/dev/null; then
+            echo 'consistent=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$COMPARISON_BASE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          if git -C "$GITHUB_WORKSPACE/reuse-candidate" show "$COMPARISON_BASE:.github/workflows/ci.yml" 2>/dev/null |
+            grep -qF -- "$EXPECTED_CONTRACT"; then
+            echo '::error::Protected reuse receipts at the pinned ref do not match EXPECTED_CONTRACT. Advance the protected ref with scripts/advance-protected-ref.sh.'
             exit 1
-          }
+          fi
+          echo '::warning::This pull request changes the test container contract. After it merges, run scripts/advance-protected-ref.sh with the merge commit. Tests run in full here.'
+      # Candidate notes are untrusted and only ever narrow the decision: without
+      # a container test environment matching the contract, the planner below
+      # could never approve reuse, so skip building it. Pushes gated on the host
+      # (the default) end here.
+      - name: Look for container test evidence
+        id: evidence
+        if: steps.pins.outputs.consistent == 'true'
+        working-directory: reuse-candidate
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_NO_REPLACE_OBJECTS: '1'
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          if ! git fetch origin refs/notes/warden:refs/notes/warden; then
+            echo '::notice::No warden notes could be fetched; tests run in full.'
+            exit 0
+          fi
+          if git notes --ref=warden show "$CANDIDATE_SHA" 2>/dev/null |
+            jq -e -s --argjson contract "$EXPECTED_CONTRACT" '
+              any(.[]; type == "object" and (.environments.test? |
+                type == "object" and .image_id == $contract.config_id and
+                .platform == $contract.platform))' >/dev/null 2>&1; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo '::notice::The candidate has no container test evidence for this contract; tests run in full.'
+          fi
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.evidence.outputs.present == 'true'
+        with:
+          go-version-file: trusted-reuse/go.mod
+          cache-dependency-path: trusted-reuse/go.sum
+      # No candidate build, hook, configuration or executable runs in this job.
+      - name: Build protected verifier
+        if: steps.evidence.outputs.present == 'true'
+        working-directory: trusted-reuse
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/warden-reuse-bin"
+          go build -o "$RUNNER_TEMP/warden-reuse-bin/warden" .
+          go build -o "$RUNNER_TEMP/warden-reuse-bin/ci-policy" ./scripts/ci-policy
       - name: Prepare and verify exact test policy
         id: decision
+        if: steps.evidence.outputs.present == 'true'
         continue-on-error: true
         working-directory: reuse-candidate
         env:
@@ -163,7 +203,6 @@ jobs:
             --template "$GITHUB_WORKSPACE/trusted-reuse/.github/warden/linux-test/profiles/amd64/docker-policy-template.json" \
             --base "$COMPARISON_BASE" --commit "$CANDIDATE_SHA" \
             --branch "$EXPECTED_BRANCH" > "$WARDEN_JOB_POLICY"
-          git fetch origin refs/notes/warden:refs/notes/warden
           bash "$GITHUB_WORKSPACE/trusted-reuse/.github/actions/ci-plan.sh" \
             > "$RUNNER_TEMP/warden-test-reuse/plan.json"
           # ci-plan validates the complete policy partition. Only the single
@@ -188,8 +227,30 @@ jobs:
         with:
           name: warden-test-reuse-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/warden-test-reuse/
-          if-no-files-found: warn
+          # Host-gated candidates end before the planner and leave nothing.
+          if-no-files-found: ignore
           retention-days: 30
+
+  # The second half of adopting a republished image: once main carries a new
+  # contract, the protected ref must advance to that merge. Pull requests only
+  # warn while a contract change is in flight; main fails here until then.
+  protected-reuse-pins:
+    name: Protected reuse pins current
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Check the protected ref carries the current contract
+        run: go test -count=1 -run '^TestProtectedReusePinsMatchContract$' -v ./scripts/
 
   # The shared klarlabs-studio Go CI: gofmt, golangci-lint (gocritic), race
   # tests, the coverctl coverage gate, and a nox security scan (SARIF -> code

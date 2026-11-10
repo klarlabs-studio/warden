@@ -2,10 +2,22 @@ name: Native container reuse integration
 
 on:
   workflow_dispatch:
+  # The gate runs the full test suite inside the image, so outside drift
+  # (runner, registry, Docker) also breaks it. Check weekly.
+  schedule:
+    - cron: '23 4 * * 1'
   pull_request:
+    # Everything that runs inside, or decides about, the container gate.
+    # #380 broke it with a scripts/ test the old filter did not cover.
     paths:
       - '.github/workflows/native-container-reuse.yml'
-      - 'scripts/native-container-reuse.sh'
+      - '.github/workflows/ci.yml'
+      - '.github/warden/linux-test/**'
+      - 'scripts/**'
+      - 'internal/infrastructure/steps/**'
+      - 'internal/domain/execution*.go'
+      - 'go.mod'
+      - 'go.sum'
 
 permissions:
   contents: read

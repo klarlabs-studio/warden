@@ -2,6 +2,7 @@ package scripts_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,8 +48,9 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 	if caller["if"] != "${{ !cancelled() }}" {
 		t.Fatal("failed verifier must not suppress CI")
 	}
-	var pinCheck, script string
+	var pinCheck, evidence, script string
 	reported := false
+	gated := map[string]bool{}
 	for _, raw := range job["steps"].([]any) {
 		step := raw.(map[string]any)
 		if step["name"] == "Check out protected verifier and policy" {
@@ -57,12 +59,22 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 				t.Fatal("protected source must remain immutable and credential-free")
 			}
 		}
-		if step["name"] == "Check protected pins match the caller contract" {
+		if step["id"] == "pins" {
 			// Drift is a misconfiguration and must stay visible, never tolerated.
-			if step["continue-on-error"] != nil || script != "" {
-				t.Fatal("pin drift must fail visibly, before the tolerated decision step")
+			if step["continue-on-error"] != nil || evidence != "" || script != "" {
+				t.Fatal("pin drift must fail visibly, before evidence and the tolerated decision step")
 			}
 			pinCheck = step["run"].(string)
+		}
+		if step["id"] == "evidence" {
+			if step["if"] != "steps.pins.outputs.consistent == 'true'" || step["continue-on-error"] != nil || script != "" {
+				t.Fatal("evidence must follow consistent pins and precede the decision")
+			}
+			evidence = step["run"].(string)
+		}
+		uses, _ := step["uses"].(string)
+		if step["name"] == "Build protected verifier" || strings.HasPrefix(uses, "actions/setup-go@") || step["id"] == "decision" {
+			gated[fmt.Sprint(step["name"], uses)] = step["if"] == "steps.evidence.outputs.present == 'true'"
 		}
 		if step["id"] == "decision" {
 			if step["continue-on-error"] != true {
@@ -74,20 +86,27 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 			reported = step["if"] == "steps.decision.outcome == 'failure'" && strings.Contains(step["run"].(string), "::warning::")
 		}
 	}
-	if pinCheck == "" || script == "" {
+	if pinCheck == "" || evidence == "" || script == "" || len(gated) != 3 {
 		t.Fatal("missing verifier boundary")
+	}
+	for step, ok := range gated {
+		if !ok {
+			t.Fatalf("%s must run only with container evidence", step)
+		}
 	}
 	if !reported {
 		t.Fatal("a failed verifier must be reported, not hidden by continue-on-error")
 	}
-	// A failed pin check skips the decision step, so it publishes nothing.
-	script = pinCheck + "\n" + script
 	for _, tc := range []struct {
 		name         string
 		mutate       func(map[string]any)
 		fail         string
 		base, branch string
-		want         bool
+		// note replaces the candidate's container test environment; "-" omits it.
+		note     string
+		baseCI   bool // the comparison base already carries the (drifted) contract
+		pinsFail bool
+		want     bool
 	}{
 		{name: "matching", want: true},
 		{name: "ordinary run", mutate: func(p map[string]any) {
@@ -102,6 +121,11 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 		{name: "contradictory list", mutate: func(p map[string]any) { p["run_jobs"] = []string{"test"} }},
 		{name: "unknown version", mutate: func(p map[string]any) { p["version"] = 2 }},
 		{name: "missing notes", fail: "fetch"},
+		{name: "host-gated note", note: "-"},
+		{name: "other image", note: `{"image_id":"sha256:` + strings.Repeat("0", 64) + `","platform":"linux/amd64"}`},
+		{name: "other platform", note: `{"image_id":"CONFIG","platform":"linux/arm64"}`},
+		{name: "unparseable note", note: `not json`},
+		{name: "stale protected ref", fail: "contract:config_id", baseCI: true, pinsFail: true},
 		{name: "contract drift", fail: "contract:config_id"},
 		{name: "image drift", fail: "contract:image"},
 		{name: "command drift", fail: "contract:command"},
@@ -200,12 +224,77 @@ func TestProtectedReuseWorkflowBoundary(t *testing.T) {
 			if err := os.WriteFile(event, eventData, 0600); err != nil {
 				t.Fatal(err)
 			}
-			output := filepath.Join(runtime, "github-output")
-			cmd := exec.Command("bash", "-c", script)
-			cmd.Dir = f.checkout
-			cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1", "CANDIDATE_SHA="+f.sha, "COMPARISON_BASE="+base, "EXPECTED_CONTRACT="+expected, "GITHUB_EVENT_PATH="+event, "GITHUB_WORKSPACE="+workspace, "RUNNER_TEMP="+runtime, "GITHUB_OUTPUT="+output, "WARDEN_COMMIT="+f.sha, "WARDEN_TRUSTED_KEYS="+actionTestPin, "WARDEN_PLAN_MODE=enforce", "FAIL="+tc.fail, "REAL_GIT="+realGit, "REPORT="+report)
-			log, runErr := cmd.CombinedOutput()
-			result, _ := os.ReadFile(output)
+			var c map[string]string
+			if err := json.Unmarshal([]byte(contract), &c); err != nil {
+				t.Fatal(err)
+			}
+			env := `{"image_id":"CONFIG","platform":"linux/amd64"}`
+			if tc.note != "" {
+				env = tc.note
+			}
+			note := `{"environments":{"test":` + strings.ReplaceAll(env, "CONFIG", c["config_id"]) + `}}`
+			switch tc.note {
+			case "-":
+				note = `{"commit_sha":"` + f.sha + `"}`
+			case "not json":
+				note = env
+			}
+			gitRun(t, f.checkout, "notes", "--ref=warden", "add", "-f", "-m", note, f.sha)
+			if tc.baseCI {
+				// A main commit that already carries the drifted contract.
+				mk := exec.Command("bash", "-c", `set -e
+blob=$(printf '%s\n' "$CONTRACT" | git hash-object -w --stdin)
+export GIT_INDEX_FILE="$RUNNER_TEMP/base-index"
+git update-index --add --cacheinfo "100644,$blob,.github/workflows/ci.yml"
+git commit-tree "$(git write-tree)" -p HEAD -m base`)
+				mk.Dir = f.checkout
+				mk.Env = append(os.Environ(), "CONTRACT="+expected, "RUNNER_TEMP="+runtime, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t")
+				out, err := mk.Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				base = strings.TrimSpace(string(out))
+			}
+			if err := os.Symlink(f.checkout, filepath.Join(workspace, "reuse-candidate")); err != nil {
+				t.Fatal(err)
+			}
+			// Run the steps in order, honoring their if: gates.
+			var log []byte
+			run := func(name, body, dir string) (map[string]string, error) {
+				output := filepath.Join(runtime, name+"-output")
+				cmd := exec.Command("bash", "-c", body)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1", "CANDIDATE_SHA="+f.sha, "COMPARISON_BASE="+base, "EXPECTED_CONTRACT="+expected, "GITHUB_EVENT_PATH="+event, "GITHUB_WORKSPACE="+workspace, "RUNNER_TEMP="+runtime, "GITHUB_OUTPUT="+output, "WARDEN_COMMIT="+f.sha, "WARDEN_TRUSTED_KEYS="+actionTestPin, "WARDEN_PLAN_MODE=enforce", "FAIL="+tc.fail, "REAL_GIT="+realGit, "REPORT="+report)
+				out, err := cmd.CombinedOutput()
+				log = append(log, out...)
+				raw, _ := os.ReadFile(output)
+				values := map[string]string{}
+				for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+					if k, v, ok := strings.Cut(line, "="); ok {
+						values[k] = v
+					}
+				}
+				return values, err
+			}
+			pins, pinsErr := run("pins", pinCheck, workspace)
+			if (pinsErr != nil) != tc.pinsFail {
+				t.Fatalf("pin check error = %v, want failure %v: %s", pinsErr, tc.pinsFail, log)
+			}
+			var result []byte
+			var runErr error
+			if pins["consistent"] == "true" {
+				found, err := run("evidence", evidence, f.checkout)
+				if err != nil {
+					t.Fatalf("evidence must never fail the job: %v %s", err, log)
+				}
+				if found["present"] == "true" {
+					var decided map[string]string
+					decided, runErr = run("decision", script, f.checkout)
+					if sha, ok := decided["reuse-sha"]; ok {
+						result = []byte("reuse-sha=" + sha + "\n")
+					}
+				}
+			}
 			if tc.want {
 				if runErr != nil || string(result) != "reuse-sha="+f.sha+"\n" {
 					t.Fatalf("matching result: %v %s output=%s", runErr, log, result)
