@@ -1,6 +1,6 @@
 # Build outside the hook. The resulting image identity, not this recipe alone,
 # must be reviewed and pinned in execution requirements.
-FROM docker.io/library/golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af
+FROM docker.io/library/golang:1.26.10-bookworm@sha256:5de7c99eb78ca5e515a4c340235d0955ec5964a5071c492c15503d7c267da473
 
 # The Go suite exercises Python reporting, shell/JQ actions and the npm wrapper.
 # Record resolved distro versions; consumers pin the finished image identity.
