@@ -254,10 +254,19 @@ func readConfigFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// Save serializes cfg to .warden.yaml.
+// Save serializes cfg to .warden.yaml, writing only the settings cfg actually
+// makes.
+//
+// Encoding the struct as it stands writes every field it has — some sixty
+// lines of `extends: ""`, `limits: null` and `trusted_keys: []` around the
+// dozen that say something. That is what `warden init` used to hand a new
+// user as their policy file: the settings they had to read were the ones
+// hardest to find, and each empty key looked like a decision somebody had
+// made. Config layers already treat a zero value as "not set" (see
+// domain.Config merging), so the empty keys carried no information either.
 func (r *Repository) Save(cfg domain.Config) error {
 	path := filepath.Join(r.root, FileName)
-	data, err := yaml.Marshal(cfg)
+	data, err := marshalSet(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -265,6 +274,65 @@ func (r *Repository) Save(cfg domain.Config) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
+}
+
+// marshalSet encodes cfg without the keys whose value is the one an empty
+// Config already has. The comparison is against the encoding of
+// domain.Config{} itself rather than a list of "empty-looking" values, so
+// there is no second definition of zero to keep in step with the struct.
+func marshalSet(cfg domain.Config) ([]byte, error) {
+	var doc, zero yaml.Node
+	if err := doc.Encode(cfg); err != nil {
+		return nil, err
+	}
+	if err := zero.Encode(domain.Config{}); err != nil {
+		return nil, err
+	}
+	// hooks is written whole. `warden hooks enable|disable` rewrites the two
+	// values in place, byte for byte, and can only do that for a key that is
+	// there; a missing one forces a re-encode of the whole file (see SetHooks).
+	pruneUnset(&doc, &zero, "hooks")
+	return yaml.Marshal(&doc)
+}
+
+// pruneUnset removes from the mapping n every key whose value equals the same
+// key's value in zero. A key zero does not have is one the caller named — a
+// step under commands:, a hook under steps: — and is kept whatever it holds,
+// so an intentionally empty placeholder survives. Keys named in whole are kept
+// as encoded, at this level only.
+func pruneUnset(n, zero *yaml.Node, whole ...string) {
+	if n.Kind != yaml.MappingNode || zero.Kind != yaml.MappingNode {
+		return
+	}
+	kept := n.Content[:0]
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, val := n.Content[i], n.Content[i+1]
+		if slices.Contains(whole, key.Value) {
+			kept = append(kept, key, val)
+			continue
+		}
+		if zv := mapValue(zero, key.Value); zv != nil {
+			if sameNode(val, zv) {
+				continue
+			}
+			pruneUnset(val, zv)
+		}
+		kept = append(kept, key, val)
+	}
+	n.Content = kept
+}
+
+// sameNode reports whether two nodes encode the same value.
+func sameNode(a, b *yaml.Node) bool {
+	if a.Kind != b.Kind || a.Tag != b.Tag || a.Value != b.Value || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i := range a.Content {
+		if !sameNode(a.Content[i], b.Content[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetHooks updates only the hooks selection in an existing .warden.yaml,

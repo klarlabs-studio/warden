@@ -54,6 +54,16 @@ All notable changes to warden are documented here. The format follows
   reports only through its exit status. Signals, timeouts and commands that
   could not start keep the old explanation.
 
+### Changed
+
+- **`warden init` and `warden import --write` write only the settings they
+  set.** The starter `.warden.yaml` was about sixty lines, most of them keys
+  holding their default — `timeouts: {}`, `predictive_cache: []`, a
+  `signing:` block of `false`s — which read as decisions somebody had made.
+  A default-valued key is now left out; the hooks block is always written in
+  full. The file loads to the same configuration, and no existing file is
+  rewritten.
+
 ## [0.47.1] - 2026-11-09
 
 Rebuild with refreshed `golang.org/x` dependencies. No change to warden's
