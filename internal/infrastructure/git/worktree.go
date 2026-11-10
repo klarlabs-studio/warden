@@ -37,7 +37,17 @@ func (r *Repo) CreateWorktreeFromHead(materializeDeps bool) (*Worktree, error) {
 		return nil, err
 	}
 
-	wt, err := r.addDetachedWorktree("HEAD", materializeDeps)
+	// The first commit on a branch has no HEAD to check out. Its staged diff
+	// is already one against the empty tree, so an empty base reproduces it.
+	base := "HEAD"
+	if unborn, uerr := r.Unborn(); uerr != nil {
+		return nil, uerr
+	} else if unborn {
+		if base, err = r.emptyBaseCommit(); err != nil {
+			return nil, err
+		}
+	}
+	wt, err := r.addDetachedWorktree(base, materializeDeps)
 	if err != nil {
 		return nil, err
 	}

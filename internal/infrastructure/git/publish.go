@@ -382,8 +382,16 @@ func (r *Repo) FetchNotes(remote string) error {
 // CommitsSince returns the SHAs reachable from ref back to (but excluding)
 // adoptionSHA, newest first. This scopes doctor's audit to commits made after
 // Warden was adopted, so pre-adoption history isn't flagged as unverified (§9).
+//
+// domain.AdoptionRoot is the adoption point of a repository that adopted before
+// its first commit: nothing predates it, so every commit reachable from ref is
+// returned, the root included.
 func (r *Repo) CommitsSince(ref, adoptionSHA string) ([]string, error) {
-	out, err := r.run("rev-list", adoptionSHA+".."+ref)
+	spec := adoptionSHA + ".." + ref
+	if adoptionSHA == domain.AdoptionRoot {
+		spec = ref
+	}
+	out, err := r.run("rev-list", spec, "--")
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +450,10 @@ func (r *Repo) NotedCommits() ([]string, error) {
 //
 // The parent is returned as the adoption point because CommitsSince is
 // exclusive of its base: adopting AT the first noted commit would leave that
-// commit out of its own evidence.
+// commit out of its own evidence. A noted root commit has no parent, so the
+// answer there is domain.AdoptionRoot — the same point `warden init` records
+// in a repository that has no commit yet, so the clone that adopted and a
+// clone that derives agree on the range.
 func (r *Repo) EarliestNotedAncestor(ref string) (string, error) {
 	noted, err := r.NotedCommits()
 	if err != nil {
@@ -468,11 +479,12 @@ func (r *Repo) EarliestNotedAncestor(ref string) (string, error) {
 			continue
 		}
 		// Its parent, so the first gated commit is inside the window. A root
-		// commit has none, in which case the empty tree stands in — rev-list
-		// A..B with an empty A is just B, which is what we want.
+		// commit has none. Returning the root itself — as this did — put the
+		// one commit the gate demonstrably ran on OUTSIDE the window, because
+		// the base of a range is excluded from it.
 		parent, perr := r.run("rev-parse", "--verify", "--quiet", sha+"^")
 		if perr != nil || parent == "" {
-			return sha, nil
+			return domain.AdoptionRoot, nil
 		}
 		return parent, nil
 	}

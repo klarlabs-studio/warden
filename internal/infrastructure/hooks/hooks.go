@@ -195,7 +195,15 @@ exec "$bin" run "$hook"
 // executable. version is baked into each shim so the gate is pinned. It refuses
 // to overwrite an existing hook Warden does not manage, surfacing the conflict
 // rather than silently replacing the user's script.
+//
+// Every hook is checked before any is written. Checking as it went used to
+// leave the earlier ones behind: a foreign pre-push failed the call after
+// warden's pre-commit was already installed, and that shim then reported on
+// every commit that the rest "run at pre-push" — where warden was not.
 func Install(gitDir string, hooks []domain.Hook, version string) error {
+	if err := Check(gitDir, hooks); err != nil {
+		return err
+	}
 	dir := filepath.Join(gitDir, "hooks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create hooks dir: %w", err)
@@ -208,13 +216,28 @@ func Install(gitDir string, hooks []domain.Hook, version string) error {
 	return nil
 }
 
-func writeHook(dir string, h domain.Hook, version string) error {
-	path := filepath.Join(dir, string(h))
-	if existing, err := os.ReadFile(path); err == nil {
+// Check reports whether Install could write every given hook without replacing
+// a script warden does not manage. It writes nothing, so a caller with other
+// state to change can ask first and change nothing on a refusal.
+func Check(gitDir string, hooks []domain.Hook) error {
+	for _, h := range hooks {
+		path := filepath.Join(gitDir, "hooks", string(h))
+		existing, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read existing %s hook: %w", h, err)
+		}
 		if !strings.Contains(string(existing), managedMarker) {
 			return fmt.Errorf("%s already exists and is not warden-managed; refusing to overwrite", path)
 		}
 	}
+	return nil
+}
+
+func writeHook(dir string, h domain.Hook, version string) error {
+	path := filepath.Join(dir, string(h))
 	if err := os.WriteFile(path, []byte(shim(h, version)), 0o755); err != nil {
 		return fmt.Errorf("write %s hook: %w", h, err)
 	}

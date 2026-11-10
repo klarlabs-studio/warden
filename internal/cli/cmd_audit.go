@@ -146,7 +146,7 @@ func printAuditJSON(stdout, stderr io.Writer, r domain.AuditReport) int {
 func printAuditText(w io.Writer, r domain.AuditReport) {
 	_, _ = fmt.Fprintln(w, "warden audit — commit provenance report")
 	_, _ = fmt.Fprintf(w, "  branch:    %s\n", r.Branch)
-	_, _ = fmt.Fprintf(w, "  adoption:  %s\n", short(r.Adoption))
+	_, _ = fmt.Fprintf(w, "  adoption:  %s\n", adoptionLabel(r.Adoption))
 	_, _ = fmt.Fprintf(w, "  generated: %s\n", time.Now().UTC().Format(time.RFC3339))
 	_, _ = fmt.Fprintln(w, "commits:")
 	for i := range r.Commits {
@@ -177,7 +177,7 @@ func printAuditText(w io.Writer, r domain.AuditReport) {
 // printAuditMarkdown renders a table plus a summary line, suitable for pasting
 // into a compliance doc or PR body.
 func printAuditMarkdown(w io.Writer, r domain.AuditReport) {
-	_, _ = fmt.Fprintf(w, "# Warden audit — `%s` since adoption `%s`\n\n", r.Branch, short(r.Adoption))
+	_, _ = fmt.Fprintf(w, "# Warden audit — `%s` since adoption `%s`\n\n", r.Branch, adoptionLabel(r.Adoption))
 	_, _ = fmt.Fprintln(w, "| SHA | Date | Subject | Status | Run |")
 	_, _ = fmt.Fprintln(w, "| --- | --- | --- | --- | --- |")
 	for i := range r.Commits {

@@ -61,7 +61,7 @@ func cmdDoctor(args []string, stdout, stderr io.Writer) int {
 const exitDoctorDrift = 3
 
 func printDoctor(w io.Writer, r domain.AuditReport) {
-	_, _ = fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, short(r.Adoption))
+	_, _ = fmt.Fprintf(w, "branch %s since adoption %s:\n", r.Branch, adoptionLabel(r.Adoption))
 	for i := range r.Commits {
 		c := &r.Commits[i]
 		switch {
@@ -179,6 +179,24 @@ func noteDefectLabel(defect string) string {
 		// An unrecognized defect must still read as "do not trust this", never as
 		// a blank that looks like a pass.
 		return "UNVERIFIED"
+	}
+}
+
+// adoptionLabel renders an adoption point for people. An audit that starts at
+// the first commit has no earlier commit to show, and printing the marker bare
+// reads as a ref called "root"; saying what it covers does not.
+//
+// It says only what the range is. The marker is also what a fresh clone
+// derives from a noted root commit, where "adopted while empty" would be a
+// guess about another machine's history.
+func adoptionLabel(adoption string) string {
+	switch adoption {
+	case "":
+		return "(none)"
+	case domain.AdoptionRoot:
+		return "the first commit (inclusive)"
+	default:
+		return short(adoption)
 	}
 }
 

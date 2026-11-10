@@ -3,9 +3,12 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"go.klarlabs.de/warden/internal/domain"
 )
@@ -679,5 +682,131 @@ func TestRepository_SetHooksOverridesAnInheritedHook(t *testing.T) {
 	}
 	if cfg.Hooks.PrePush {
 		t.Error("pre_push stayed enabled: the local override was skipped as a no-op against the base")
+	}
+}
+
+// What `warden init` hands a new user is the first thing they read about
+// warden's policy. It used to be the whole Config struct — sixty-odd lines,
+// most of them `extends: ""`, `limits: null`, `trusted_keys: []` — with the
+// dozen that mattered scattered through it.
+func TestSave_WritesOnlyWhatIsSet(t *testing.T) {
+	cfg := domain.Config{
+		Agent: "auto",
+		Hooks: domain.HookConfig{PreCommit: true, PrePush: true},
+		// An empty command is a placeholder the author is meant to fill in:
+		// named by the caller, so it must survive.
+		Commands: map[string]string{"lint": "go vet ./...", "test": ""},
+		Steps: map[string][]domain.StepName{
+			"pre_commit": {"lint"},
+			"pre_push":   {"test", "lint"},
+		},
+		Risk: domain.RiskConfig{DiffLinesHigh: 400, FilesTouchedHigh: 15},
+		// One field of a nested struct: its unset siblings must go too.
+		Signing: domain.SigningConfig{Required: true},
+	}
+	dir := t.TempDir()
+	if err := NewRepository(dir).Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `agent: auto
+hooks:
+    pre_commit: true
+    pre_push: true
+commands:
+    lint: go vet ./...
+    test: ""
+steps:
+    pre_commit:
+        - lint
+    pre_push:
+        - test
+        - lint
+risk:
+    diff_lines_high: 400
+    files_touched_high: 15
+signing:
+    required: true
+`
+	if string(data) != want {
+		t.Errorf("saved config:\n%s\nwant:\n%s", data, want)
+	}
+}
+
+// Dropping a key is only safe if it changes nothing. The sparse file and the
+// full dump of the same Config must load to the same thing — through the real
+// loader, strict field matching included.
+func TestSave_SparseFileLoadsLikeTheFullOne(t *testing.T) {
+	disabled := false
+	tests := map[string]domain.Config{
+		"hooks only": {Hooks: domain.HookConfig{PrePush: true}},
+		"starter": {
+			Agent:    "auto",
+			Hooks:    domain.HookConfig{PreCommit: true, PrePush: true},
+			Commands: map[string]string{"lint": "", "test": ""},
+			Steps:    map[string][]domain.StepName{"pre_commit": {"lint"}, "pre_push": {"test", "lint"}},
+			Risk:     domain.RiskConfig{DiffLinesHigh: 400, FilesTouchedHigh: 15},
+		},
+		"nested and pointer settings": {
+			Hooks:       domain.HookConfig{PreCommit: true},
+			Execution:   domain.ExecutionConfig{Mode: "host"},
+			Timeouts:    map[string]string{"test": "5m"},
+			SymlinkDeps: &disabled,
+			Signing:     domain.SigningConfig{Signer: "ssh", Required: true},
+		},
+	}
+	for name, cfg := range tests {
+		t.Run(name, func(t *testing.T) {
+			full, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fullDir, sparseDir := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(fullDir, FileName), full, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := NewRepository(sparseDir).Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			want, err := NewRepository(fullDir).Load()
+			if err != nil {
+				t.Fatalf("load the full dump: %v", err)
+			}
+			got, err := NewRepository(sparseDir).Load()
+			if err != nil {
+				t.Fatalf("load the sparse file: %v", err)
+			}
+			// Compared as settings, not as Go values: `timeouts: {}` decodes
+			// to an empty map and an absent key to a nil one. Policy
+			// resolution reads both as "no timeouts".
+			gotYAML, err := yaml.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantYAML, err := yaml.Marshal(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(gotYAML) != string(wantYAML) {
+				t.Errorf("sparse file loads differently:\n got:\n%s\nwant:\n%s", gotYAML, wantYAML)
+			}
+			if reflect.DeepEqual(got, domain.Config{}) {
+				t.Error("the sparse file loaded as an empty config")
+			}
+			sparse, _ := os.ReadFile(filepath.Join(sparseDir, FileName))
+			if len(sparse) >= len(full) {
+				t.Errorf("sparse file (%d bytes) is not smaller than the full dump (%d bytes)", len(sparse), len(full))
+			}
+			// Both hook keys stay, so a later `warden hooks enable|disable`
+			// can rewrite the value in place instead of re-encoding the file.
+			for _, key := range []string{"pre_commit:", "pre_push:"} {
+				if !strings.Contains(string(sparse), key) {
+					t.Errorf("sparse file dropped %s\n%s", key, sparse)
+				}
+			}
+		})
 	}
 }

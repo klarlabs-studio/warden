@@ -6,6 +6,64 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`warden init` works in a repository that has no commit yet.** It used to
+  exit 1 with `rev-parse HEAD: … unknown revision` — after writing
+  `.warden.yaml` and installing both hooks. The hooks then refused every
+  commit, the first one included, because the gate could not name a branch
+  that had no commit on it; the only ways out were `--no-verify` or deleting
+  the hooks. Now `init` records that the repository was adopted before its
+  first commit, and `git commit` gates that commit against exactly the staged
+  tree. `warden doctor` on a branch with no commits says so instead of failing
+  on a git error.
+- **The first commit of such a repository is inside the audit.** An adoption
+  point is exclusive — it names the last commit that predates the gate — so
+  recording the first commit would have left the one commit made under the
+  gate outside `warden doctor`, `warden audit` and `warden evidence`, where a
+  bypass of it could never be reported. The point is recorded as the start of
+  history instead, and shown as `the first commit (inclusive)`. JSON surfaces
+  carry the value `root` in the adoption field. **A warden older than this
+  release cannot read that adoption file** and fails `doctor` on it; the file
+  is per-clone (`.git/warden/adoption`), so this only bites a machine that
+  downgrades.
+- **A fresh clone audits the same range as the clone that adopted.** With no
+  recorded adoption point, warden derives one from the notes: the parent of
+  the earliest noted commit. When that commit was the root it has no parent,
+  and warden returned the root itself — which, being exclusive, dropped the
+  root from the audit. A noted root commit is now in the audit on every clone.
+  This can add one commit to the count `doctor` reports on such a clone.
+- **`warden init` changes nothing when it refuses.** A `pre-push` hook that
+  warden did not install made `init` stop — with `.warden.yaml` already
+  written and warden's `pre-commit` hook already installed, so the repository
+  was half-gated with no adoption point. Every refusal is now decided before
+  the first write. On a branch with no commits in a repository that has
+  history elsewhere (`git switch --orphan`), `init` refuses and says to run it
+  from a branch with history.
+- **The Go starter lint says which files it rejected.** The pre-filled command
+  was `test -z "$(gofmt -l .)" && go vet ./...`, which discards the list of
+  unformatted files and exits 1 in silence; the gate then reported a failed
+  step with nothing to act on. The starter now prints
+  `gofmt needs to format <file>` for each one. Only newly written configs get
+  it — an existing `.warden.yaml` is not rewritten; replace the `lint` command
+  by hand to pick it up. It uses `awk`.
+- **A step that fails without output is no longer described as "usually
+  killed" when it exited normally.** For an ordinary exit status (1–125) the
+  `step/no-output` finding now says the command ran to completion and
+  rejected the change without saying why — the usual cause being a check that
+  reports only through its exit status. Signals, timeouts and commands that
+  could not start keep the old explanation.
+
+### Changed
+
+- **`warden init` and `warden import --write` write only the settings they
+  set.** The starter `.warden.yaml` was about sixty lines, most of them keys
+  holding their default — `timeouts: {}`, `predictive_cache: []`, a
+  `signing:` block of `false`s — which read as decisions somebody had made.
+  A default-valued key is now left out; the hooks block is always written in
+  full. The file loads to the same configuration, and no existing file is
+  rewritten.
+
 ## [0.47.1] - 2026-11-09
 
 Rebuild with refreshed `golang.org/x` dependencies. No change to warden's

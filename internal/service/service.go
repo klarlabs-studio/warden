@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -379,36 +380,45 @@ func (r InitResult) Adopted() bool { return r.Previous != "" }
 // green. Moving the point is now a deliberate act, and the caller is
 // handed the numbers to say what it cost.
 func (s *Service) Init(selected []domain.Hook, reAdopt bool) (InitResult, error) {
+	// Everything that can refuse is asked before anything is written. The
+	// old order installed the hooks and wrote the config first, so a refusal
+	// further down — no commit to adopt at, a hook that is not warden's —
+	// exited non-zero having armed a gate, and the armed gate then rejected
+	// the commit the error message told the user to go and make.
 	gitDir, err := s.hooksGitDir(len(selected) > 0)
+	if err != nil {
+		return InitResult{}, err
+	}
+	if err := hooks.Check(gitDir, selected); err != nil {
+		return InitResult{}, err
+	}
+	// A read failure is not "never adopted". Treating it as one is how the
+	// point would get overwritten by the very error path meant to protect
+	// it.
+	previous, err := s.repo.ReadAdoption()
+	if err != nil {
+		return InitResult{}, fmt.Errorf("read existing adoption point: %w", err)
+	}
+	keep := previous != "" && !reAdopt
+	var head string
+	if !keep {
+		if head, err = s.adoptionTarget(); err != nil {
+			return InitResult{}, err
+		}
+	}
+
+	lang, err := s.writeStarterConfig(selected)
 	if err != nil {
 		return InitResult{}, err
 	}
 	if err := hooks.Install(gitDir, selected, s.version); err != nil {
 		return InitResult{}, err
 	}
-	lang, err := s.writeStarterConfig(selected)
-	if err != nil {
-		return InitResult{}, err
-	}
-	res := InitResult{Lang: lang}
+	res := InitResult{Lang: lang, Previous: previous}
 
-	// A read failure is not "never adopted". Treating it as one is how the
-	// point would get overwritten by the very error path meant to protect
-	// it.
-	previous, err := s.repo.ReadAdoption()
-	if err != nil {
-		return res, fmt.Errorf("read existing adoption point: %w", err)
-	}
-	res.Previous = previous
-
-	if previous != "" && !reAdopt {
+	if keep {
 		res.Adoption = previous
 		return res, nil
-	}
-
-	head, err := s.repo.HeadSHA()
-	if err != nil {
-		return res, fmt.Errorf("read HEAD for adoption point: %w", err)
 	}
 	if previous != "" && previous != head {
 		// Count before writing: this is the only moment both points are
@@ -425,6 +435,36 @@ func (s *Service) Init(selected []domain.Hook, reAdopt bool) (InitResult, error)
 	res.Adoption = head
 	res.Moved = previous != head
 	return res, nil
+}
+
+// adoptionTarget is the point a fresh adoption is recorded at: HEAD, or
+// domain.AdoptionRoot in a repository that has no commit yet.
+//
+// An unborn HEAD in a repository that does have commits — `git switch
+// --orphan` — is refused. Neither answer is right there: there is no HEAD to
+// adopt at, and adopting at the root would pull the whole existing history of
+// every other branch into the audit as unverified.
+func (s *Service) adoptionTarget() (string, error) {
+	unborn, err := s.repo.Unborn()
+	if err != nil {
+		return "", fmt.Errorf("read HEAD for adoption point: %w", err)
+	}
+	if !unborn {
+		head, err := s.repo.HeadSHA()
+		if err != nil {
+			return "", fmt.Errorf("read HEAD for adoption point: %w", err)
+		}
+		return head, nil
+	}
+	has, err := s.repo.HasCommits()
+	if err != nil {
+		return "", fmt.Errorf("read history for adoption point: %w", err)
+	}
+	if has {
+		return "", errors.New("the checked-out branch has no commits yet, but this repository does — " +
+			"run `warden init` from a branch that has history, or after the first commit here; nothing was changed")
+	}
+	return domain.AdoptionRoot, nil
 }
 
 // SetHook enables or disables a single hook after init, updating both the

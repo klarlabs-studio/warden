@@ -150,8 +150,80 @@ func (r *Repo) ResolveSHA(ref string) (string, error) {
 }
 
 // CurrentBranch returns the checked-out branch name (or "HEAD" when detached).
+//
+// A branch with no commits yet — a fresh `git init`, or `git switch --orphan` —
+// has a name and no commit, so `rev-parse --abbrev-ref HEAD` fails on it with
+// "ambiguous argument 'HEAD'". The name is still what HEAD points at, and the
+// first commit on a branch is gated under that name like any other.
 func (r *Repo) CurrentBranch() (string, error) {
-	return r.run("rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := r.run("rev-parse", "--abbrev-ref", "HEAD")
+	if err == nil {
+		return branch, nil
+	}
+	if unborn, uerr := r.unbornBranch(); uerr == nil && unborn != "" {
+		return unborn, nil
+	}
+	return "", err
+}
+
+// Unborn reports whether HEAD names a branch that has no commit yet.
+func (r *Repo) Unborn() (bool, error) {
+	branch, err := r.unbornBranch()
+	return branch != "", err
+}
+
+// unbornBranch returns the branch HEAD names when that branch has no commit,
+// and "" when HEAD resolves (or is detached). Both probes are needed: HEAD
+// failing to resolve alone also describes a corrupt repository, which must not
+// be mistaken for an empty one.
+func (r *Repo) unbornBranch() (string, error) {
+	if _, err := r.run("rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err == nil {
+		return "", nil
+	}
+	branch, err := r.run("symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git: HEAD names neither a commit nor a branch: %w", err)
+	}
+	return branch, nil
+}
+
+// HasCommits reports whether the repository holds any commit on any ref. It
+// separates an empty repository from an orphan branch in one with history:
+// HEAD is unborn in both, and only the first has nothing to predate.
+func (r *Repo) HasCommits() (bool, error) {
+	out, err := r.run("rev-list", "--all", "--max-count=1")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
+// emptyBaseCommit returns a parentless commit of the empty tree, the stand-in
+// for HEAD on a branch that has no commit yet. `git worktree add` needs a
+// commit to check out, and `git diff --cached` on such a branch is already a
+// diff against the empty tree, so the staged change applies on top of it
+// exactly as it would on a real parent.
+//
+// Identity and dates are fixed so the object is the same every run: one
+// unreferenced commit in the object store, not one per attempt. It is never
+// pointed at by a ref, so `git gc` collects it once nothing uses it.
+func (r *Repo) emptyBaseCommit() (string, error) {
+	tree, err := r.EmptyTree()
+	if err != nil {
+		return "", err
+	}
+	const epoch = "1970-01-01T00:00:00+0000"
+	cmd := gitCmd(r.Dir, "commit-tree", tree, "-m", "warden: empty base for a first commit")
+	cmd.Env = append(cmd.Env,
+		"GIT_AUTHOR_NAME=warden", "GIT_AUTHOR_EMAIL=warden", "GIT_AUTHOR_DATE="+epoch,
+		"GIT_COMMITTER_NAME=warden", "GIT_COMMITTER_EMAIL=warden", "GIT_COMMITTER_DATE="+epoch,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git commit-tree (empty base): %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 // HeadSHA returns the full SHA of HEAD.

@@ -36,7 +36,8 @@ type Evidence struct {
 	Repository string
 	Branch     string
 	// Adoption is the commit warden started gating at. Commits before it are
-	// outside any claim: the control did not exist yet.
+	// outside any claim: the control did not exist yet. AdoptionRoot means the
+	// control predates the first commit, so nothing is outside.
 	Adoption string
 
 	From, To    time.Time
@@ -283,6 +284,14 @@ func (e Evidence) Digest() string {
 func (e Evidence) VerifyCommand() string {
 	if e.Adoption == "" {
 		return "warden verify --range <base>.." + e.Branch
+	}
+	if e.Adoption == AdoptionRoot {
+		// A range needs a base commit and there is none before the first
+		// one, so the first commit is checked on its own and the range
+		// covers the rest. Printing only the range would be a command that
+		// passes without ever looking at one commit of the population.
+		root := "$(git rev-list --max-parents=0 " + e.Branch + ")"
+		return "warden verify --commit " + root + " && warden verify --range " + root + ".." + e.Branch
 	}
 	return "warden verify --range " + shortSHA(e.Adoption) + ".." + e.Branch
 }

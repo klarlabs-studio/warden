@@ -23,7 +23,15 @@ func LanguageCommands(l Language) map[string]string {
 	switch l {
 	case LangGo:
 		return map[string]string{
-			"lint": `test -z "$(gofmt -l .)" && go vet ./...`,
+			// gofmt -l names the files and exits 0 either way, so the check
+			// has to fail on its output. The usual `test -z "$(gofmt -l .)"`
+			// does that by swallowing the list — the one thing the author
+			// needs — and the step then fails having printed nothing. This
+			// keeps the names. One `&&`-joined expression, because
+			// scopeCommand prefixes it with `cd <path> &&`; and no ": " in
+			// it, so YAML writes it into .warden.yaml as a plain line rather
+			// than a quoted one with every quote doubled.
+			"lint": `gofmt -l . | awk '{print "gofmt needs to format " $0; bad=1} END {exit bad}' && go vet ./...`,
 			"test": "go test ./...",
 		}
 	case LangRust:

@@ -21,6 +21,12 @@ func (s *Service) Doctor(branch string) (domain.AuditReport, error) {
 		if branch, err = s.repo.CurrentBranch(); err != nil {
 			return domain.AuditReport{}, err
 		}
+		// The checked-out branch can exist by name before it has a commit.
+		// That is an answer, not a failure to walk history: say it instead
+		// of handing back git's complaint about an unknown revision.
+		if unborn, uerr := s.repo.Unborn(); uerr == nil && unborn {
+			return domain.AuditReport{}, fmt.Errorf("branch %s has no commits yet — there is nothing to audit", branch)
+		}
 	}
 
 	// Best-effort sync; provenance is a side-channel that must not hard-fail.

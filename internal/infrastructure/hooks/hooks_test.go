@@ -98,3 +98,102 @@ func TestRemove_LeavesForeignHook(t *testing.T) {
 		t.Error("foreign hook must survive Remove")
 	}
 }
+
+// Install is all-or-nothing. It used to write hooks one at a time and refuse
+// on reaching the foreign one, so a repository with its own pre-push hook was
+// left with warden's pre-commit installed by a command that had failed — a
+// gate armed by an init that reported it had not happened.
+func TestInstall_AForeignHookLeavesNothingInstalled(t *testing.T) {
+	gitDir := t.TempDir()
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The foreign hook is the LAST one Install would reach.
+	foreign := filepath.Join(hooksDir, "pre-push")
+	if err := os.WriteFile(foreign, []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Install(gitDir, []domain.Hook{domain.PreCommit, domain.PrePush}, "0.6.0"); err == nil {
+		t.Fatal("expected Install to refuse when one of the hooks is not warden's")
+	}
+	if _, err := os.Stat(filepath.Join(hooksDir, "pre-commit")); !os.IsNotExist(err) {
+		t.Errorf("pre-commit was installed by an Install that refused (stat err = %v)", err)
+	}
+	if installed := Installed(gitDir); installed[domain.PreCommit] || installed[domain.PrePush] {
+		t.Errorf("Installed = %v after a refused Install, want none", installed)
+	}
+	data, _ := os.ReadFile(foreign)
+	if string(data) != "#!/bin/sh\necho mine\n" {
+		t.Errorf("foreign hook was modified: %q", data)
+	}
+}
+
+func TestCheck(t *testing.T) {
+	both := []domain.Hook{domain.PreCommit, domain.PrePush}
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, gitDir string)
+		wantErr bool
+	}{
+		{"no hooks directory", func(*testing.T, string) {}, false},
+		{"warden's own hooks", func(t *testing.T, gitDir string) {
+			if err := Install(gitDir, both, "0.6.0"); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"a foreign hook warden was not asked to install", func(t *testing.T, gitDir string) {
+			writeForeign(t, gitDir, "commit-msg")
+		}, false},
+		{"a foreign pre-commit", func(t *testing.T, gitDir string) {
+			writeForeign(t, gitDir, "pre-commit")
+		}, true},
+		{"a foreign pre-push", func(t *testing.T, gitDir string) {
+			writeForeign(t, gitDir, "pre-push")
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := t.TempDir()
+			tt.prepare(t, gitDir)
+			before := snapshotDir(t, filepath.Join(gitDir, "hooks"))
+			err := Check(gitDir, both)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Check error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if after := snapshotDir(t, filepath.Join(gitDir, "hooks")); after != before {
+				t.Errorf("Check wrote to the hooks directory:\nbefore %s\nafter  %s", before, after)
+			}
+		})
+	}
+}
+
+func writeForeign(t *testing.T, gitDir, name string) {
+	t.Helper()
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, name), []byte("#!/bin/sh\necho mine\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// snapshotDir renders a directory's file names and contents, "" when absent.
+func snapshotDir(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		b.WriteString(e.Name() + "=" + string(data) + ";")
+	}
+	return b.String()
+}

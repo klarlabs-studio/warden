@@ -107,12 +107,107 @@ func TestProtectedReusePinsMatchContract(t *testing.T) {
 	if len(drift) == 0 {
 		return
 	}
-	// The ref can only advance to a reviewed merge, so the branch that adopts a
-	// new image necessarily runs ahead of it. Once main carries the contract,
-	// the same drift is a stale ref and fails everywhere.
-	mainCI, err := git("show", "origin/main:.github/workflows/ci.yml")
-	if err == nil && !strings.Contains(mainCI, rawContract) {
-		t.Skipf("this branch changes the container contract; after it merges, run scripts/advance-protected-ref.sh <merge-sha> (%s)", strings.Join(drift, "; "))
+	// An unreadable side is read as "carries the contract": that is the answer
+	// under which drift fails, so a history this cannot inspect never excuses it.
+	carries := func(rev string) bool {
+		ci, err := git("show", rev+":.github/workflows/ci.yml")
+		return err != nil || strings.Contains(ci, rawContract)
 	}
-	t.Fatalf("protected ref %s is stale: %s. Run scripts/advance-protected-ref.sh <merge-sha>", ref, strings.Join(drift, "; "))
+	detail := strings.Join(drift, "; ")
+	switch classifyPinDrift(carries("origin/main"), carries("HEAD^"), os.Getenv(requireCurrentPinsEnv) == "1") {
+	case pinDriftInFlight:
+		t.Skipf("this branch changes the container contract; after it merges, run scripts/advance-protected-ref.sh <merge-sha> (%s)", detail)
+	case pinDriftAdoption:
+		t.Skipf("this commit adopts the container contract, and the protected ref cannot name it before it is on main; "+
+			"run scripts/advance-protected-ref.sh with this commit next (%s)", detail)
+	default:
+		t.Fatalf("protected ref %s is stale: %s. Run scripts/advance-protected-ref.sh <merge-sha>", ref, detail)
+	}
+}
+
+// requireCurrentPinsEnv, set to "1", withdraws the one allowance drift has on
+// main. Only the `Protected reuse pins current` job sets it.
+const requireCurrentPinsEnv = "WARDEN_REQUIRE_CURRENT_PINS"
+
+type pinDrift int
+
+const (
+	// pinDriftStale: main carries a contract the protected ref's receipts do
+	// not, and this commit is not the one that introduced it.
+	pinDriftStale pinDrift = iota
+	// pinDriftInFlight: a branch is changing the contract and has not merged.
+	pinDriftInFlight
+	// pinDriftAdoption: this very commit introduced the contract.
+	pinDriftAdoption
+)
+
+// classifyPinDrift says what a mismatch between the contract and the protected
+// ref's receipts means for the commit under test.
+//
+// The ref can only advance to a reviewed merge, so two states run ahead of it
+// by construction: the branch that changes the contract, and the commit that
+// lands it on main. The second matters because this test is a step of the gate
+// that attests each commit on main. Failing there left the adoption merge
+// permanently unattested — for following the documented procedure, at the one
+// commit where no ref it could have pinned existed yet (04d297f).
+//
+// The allowance covers that commit only. A later commit made while the ref is
+// still behind fails, here and at the gate, and with requireCurrent — the job
+// that watches main — the adoption commit fails too, so main stays red from the
+// moment the contract lands until the ref advances.
+func classifyPinDrift(mainCarries, parentCarries, requireCurrent bool) pinDrift {
+	switch {
+	case !mainCarries:
+		return pinDriftInFlight
+	case !parentCarries && !requireCurrent:
+		return pinDriftAdoption
+	default:
+		return pinDriftStale
+	}
+}
+
+func TestClassifyPinDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name                                       string
+		mainCarries, parentCarries, requireCurrent bool
+		want                                       pinDrift
+	}{
+		{"a branch changing the contract", false, false, false, pinDriftInFlight},
+		{"the commit that lands the contract on main", true, false, false, pinDriftAdoption},
+		{"the job watching main, on that same commit", true, false, true, pinDriftStale},
+		{"a later commit while the ref is still behind", true, true, false, pinDriftStale},
+		{"a later commit, watched", true, true, true, pinDriftStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyPinDrift(tc.mainCarries, tc.parentCarries, tc.requireCurrent); got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// The allowance for the adoption commit is only safe while something still
+// fails on it. That something is one job, and it is armed by one variable.
+func TestTheJobWatchingMainRequiresCurrentPins(t *testing.T) {
+	job, ok := reuseWorkflow(t)["protected-reuse-pins"].(map[string]any)
+	if !ok {
+		t.Fatal("ci.yml has no protected-reuse-pins job")
+	}
+	if job["if"] != "${{ github.event_name == 'push' }}" {
+		t.Errorf("protected-reuse-pins runs on %v, want every push", job["if"])
+	}
+	for _, s := range job["steps"].([]any) {
+		step := s.(map[string]any)
+		run, _ := step["run"].(string)
+		if !strings.Contains(run, "TestProtectedReusePinsMatchContract") {
+			continue
+		}
+		env, _ := step["env"].(map[string]any)
+		if env[requireCurrentPinsEnv] != "1" {
+			t.Errorf("the step that runs the pin check sets %s=%v, want \"1\": without it the adoption commit skips and main is green while stale",
+				requireCurrentPinsEnv, env[requireCurrentPinsEnv])
+		}
+		return
+	}
+	t.Error("no step of protected-reuse-pins runs TestProtectedReusePinsMatchContract")
 }
