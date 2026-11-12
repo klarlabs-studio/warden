@@ -6,6 +6,14 @@ All notable changes to warden are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The Homebrew cask no longer strips the macOS quarantine attribute.** The
+  binary has been Developer ID signed and notarized since 0.47.0, so
+  Gatekeeper accepts it as Homebrew delivers it: on v0.47.1, `spctl -a -t
+  install` on a quarantined download reports "source=Notarized Developer ID".
+  The install step existed only to get an unsigned binary past Gatekeeper.
+
 ## [0.47.1] - 2026-11-09
 
 Rebuild with refreshed `golang.org/x` dependencies. No change to warden's
