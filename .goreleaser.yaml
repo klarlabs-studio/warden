@@ -118,17 +118,8 @@ homebrew_casks:
     homepage: https://go.klarlabs.de/warden
     description: Configurable git commit/push gate — native hooks, worktree isolation, cryptographic provenance
     license: MIT
-    # The binary isn't notarized, so Gatekeeper quarantines it and the first
-    # `warden` invocation hangs/blocks on an unsigned-binary check. Strip the
-    # quarantine attribute on install so the CLI runs immediately.
-    #
-    # Homebrew's declarative install steps, not a raw Ruby postflight: brew
-    # deprecated `postflight` and warns every user installing a cask that uses
-    # it. Steps take no conditionals, so the old `xattr -h` probe is gone;
-    # `xattr -dr` exits 0 whether or not the attribute is present.
-    hooks:
-      post:
-        install_steps: |
-          on_macos do
-            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/warden"]
-          end
+    # No install hook. The darwin binary is Developer ID signed and notarized
+    # (see `notarize` above), so Gatekeeper accepts it with the quarantine
+    # attribute Homebrew sets; the cask used to strip that attribute while the
+    # binary was unsigned. Checked on v0.47.1: `spctl -a -t install` on a
+    # quarantined download reports "source=Notarized Developer ID".
