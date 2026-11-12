@@ -109,7 +109,11 @@ lint and security steps. Do not enable it globally for those steps.
 
 ## Toolchain security refresh
 
-The source recipe, repository toolchain and pinned images use Go 1.26.10.
+The source recipe and repository toolchain use Go 1.26.11, for GO-2026-6859
+(`net/http`, fixed in 1.26.11), which the shared govulncheck job reported as
+reachable. The pinned images below still contain Go 1.26.10 until they are
+republished from this recipe and their profiles updated.
+Before that, the recipe and pinned images used Go 1.26.10.
 Run `40009451684` published the replacements after native amd64 and arm64 offline
 validation as UID 10001. Their manifests, config identities, platforms and exact
 publisher signatures were independently verified before pinning. Earlier images
