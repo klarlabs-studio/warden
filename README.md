@@ -10,6 +10,7 @@
   <a href="https://www.npmjs.com/package/@klarlabs-studio/warden"><img src="https://img.shields.io/npm/v/@klarlabs-studio/warden?logo=npm" alt="npm"></a>
   <a href="https://pkg.go.dev/go.klarlabs.de/warden"><img src="https://pkg.go.dev/badge/go.klarlabs.de/warden.svg" alt="Go Reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/klarlabs-studio/warden" alt="License: MIT"></a>
+  <a href=".github/workflows/ci.yml"><img src=".github/nox-badge.svg" alt="nox security grade"></a>
 </p>
 
 **Prove what happened to a commit before it leaves your machine.**
