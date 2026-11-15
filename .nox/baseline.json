@@ -265,6 +265,293 @@
       "reason": "Required capability, not an oversight: the provenance-main job pushes refs/notes/warden, which needs contents:write. No variant avoids it — a deploy key or PAT only relocates the credential and adds a second standing secret. Scoped as tightly as GHA allows: workflow-level permissions are {} and the write is granted on the single attest job, which never touches a branch (--attest-only).",
       "owner": "klarlabs-studio",
       "created_at": "2026-08-02T07:19:19.548248Z"
+    },
+    {
+      "fingerprint": "7dda679990b4aa124c5365a91ceace9045002ec50d39969da07539c9ccf02efa",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/ci-shadow.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "357ed24bc3692929cb8acf56253f4ade1a59731756a635e4019a9c530ef62ef9",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/linux-test-contract.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "6e0037cb99e46f8e5ef8823c74e1297e7bb5028950ccf342ef0d78bf2461c6e0",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/linux-test-image.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "d97f58aefc27d0cf431dfc000137f4edd7c08db49e3eda3d50f1af841525c4d4",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/linux-test-pilot.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "fcf3a2fa0112cb4a2a4b9ba4b111cebb2bd81229b85e409a4128fe0e07bbf493",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/native-container-reuse.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "efffd45e45bdf218052ebd23a0a2fc2295219290f6341d868fed455c871b6993",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/nox-remediate.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "09d79998b5c7424a284b643b53815f6c9ba525b7adfd07bbadfde073aac67c21",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "6bd62ca713b41d22fe2d43c87c42069abd79471c9c0cf4aa59f41f0aba5b5264",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/tap-credential-check.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "bb533b09efcf7e24d30f1e761506004705335d435a128924f022445f61c702fa",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/ci-shadow.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "4de016df7f3190333f289d7d193fa8426b0bd9a0fc75348d10dda8c0e27ddbc4",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/linux-test-contract.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "452f009610d6f236085ff1955be930c2b51a9d25a5d8acde963c0fde5f0dc201",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/linux-test-image.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "6bddf3db9a2586abdd4721a3e0d4eede8a5bef037662604ad346ca36081c7964",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/linux-test-pilot.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "a5144cec1cb0ebe81b4f11a99c028c410025dfaf7d1814d8602bb979de4cc174",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/native-container-reuse.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "bcb5981e491059aab4e7c82e8078a0406ecbb317e207e8665a314b7d646aa55b",
+      "rule_id": "IAC-308",
+      "file_path": ".github/workflows/tap-credential-check.yml",
+      "severity": "low",
+      "reason": "Reviewed: workflow_dispatch is a deliberate operator trigger (backfill, release retry, image publish, credential probe); privileged paths are gated to main/repository in the job condition and no environment approval is wanted for read-only or main-only runs",
+      "created_at": "2026-11-15T11:10:28.828323Z"
+    },
+    {
+      "fingerprint": "fb2b4f12605ca2d11fbd57fe56a3b70b0aa1b2e15b7611354e8d1ad44f7f2bc0",
+      "rule_id": "IAC-306",
+      "file_path": ".github/workflows/linux-test-image.yml",
+      "severity": "medium",
+      "reason": "Reviewed: linux-test-image publishes and cosign-signs the test image; id-token and packages write are required and the job only runs on main of klarlabs-studio/warden",
+      "created_at": "2026-11-15T11:11:31.701871Z"
+    },
+    {
+      "fingerprint": "16eaa73b7c95802645b91277f1cdba1b6fbea1b07ac5155081e20d2ee4eda77c",
+      "rule_id": "IAC-315",
+      "file_path": ".github/workflows/linux-test-image.yml",
+      "severity": "medium",
+      "reason": "Reviewed: linux-test-image publishes and cosign-signs the test image; id-token and packages write are required and the job only runs on main of klarlabs-studio/warden",
+      "created_at": "2026-11-15T11:11:31.701871Z"
+    },
+    {
+      "fingerprint": "bc549bd83bda47b0f1e5c6cb3fc9d67db65f4fbd72cdd30697bdbc6657d167bb",
+      "rule_id": "IAC-018",
+      "file_path": ".github/workflows/ci.yml",
+      "severity": "low",
+      "reason": "Reviewed: ci.yml continue-on-error is an explicit advisory step and the retained-plan artifact is an internal evidence record, not a release artifact needing attestation",
+      "created_at": "2026-11-15T11:15:01.501429Z"
+    },
+    {
+      "fingerprint": "0b616c22f622f9f7c0305ba95cc4a06f162c81308c96e1543e312da993a54363",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/ci.yml",
+      "severity": "medium",
+      "reason": "Reviewed: ci.yml continue-on-error is an explicit advisory step and the retained-plan artifact is an internal evidence record, not a release artifact needing attestation",
+      "created_at": "2026-11-15T11:15:01.501429Z"
+    },
+    {
+      "fingerprint": "a8074a706b3203f1e0269cbe5e9e921b00ff90932c1cb72a9d36b3ccaab13538",
+      "rule_id": "IAC-121",
+      "file_path": ".github/warden/linux-test/Dockerfile",
+      "severity": "medium",
+      "reason": "Reviewed: linux-test Dockerfile is a one-shot offline test image recipe; it runs as UID 10001 via docker --user, has no long-running process for HEALTHCHECK, and its pinned image identity must not change without republishing",
+      "created_at": "2026-11-15T11:16:31.976818Z"
+    },
+    {
+      "fingerprint": "a5a696dc87194b5accb79bf1eba278d9beb031e100b71a5322bb616d44f18010",
+      "rule_id": "IAC-122",
+      "file_path": ".github/warden/linux-test/Dockerfile",
+      "severity": "medium",
+      "reason": "Reviewed: linux-test Dockerfile is a one-shot offline test image recipe; it runs as UID 10001 via docker --user, has no long-running process for HEALTHCHECK, and its pinned image identity must not change without republishing",
+      "created_at": "2026-11-15T11:16:31.976818Z"
+    },
+    {
+      "fingerprint": "5f9b23b115f735752179df3168ab3f184b69aa3e8aa4a908fc71bf82b970bed3",
+      "rule_id": "IAC-123",
+      "file_path": ".github/warden/linux-test/Dockerfile",
+      "severity": "low",
+      "reason": "Reviewed: linux-test Dockerfile is a one-shot offline test image recipe; it runs as UID 10001 via docker --user, has no long-running process for HEALTHCHECK, and its pinned image identity must not change without republishing",
+      "created_at": "2026-11-15T11:16:31.976818Z"
+    },
+    {
+      "fingerprint": "cd2e77e00a928c5570b81ce323c8a6445e649463c81f65b0e27793a896412b42",
+      "rule_id": "IAC-123",
+      "file_path": ".github/warden/linux-test/Dockerfile",
+      "severity": "low",
+      "reason": "Reviewed: linux-test Dockerfile is a one-shot offline test image recipe; it runs as UID 10001 via docker --user, has no long-running process for HEALTHCHECK, and its pinned image identity must not change without republishing",
+      "created_at": "2026-11-15T11:16:31.976818Z"
+    },
+    {
+      "fingerprint": "bfe4f4d7ce5526278340553eb82d5e9d7f4e8d01a13fa9205da1d4e25627cd7a",
+      "rule_id": "IAC-124",
+      "file_path": ".github/warden/linux-test/Dockerfile",
+      "severity": "low",
+      "reason": "Reviewed: linux-test Dockerfile is a one-shot offline test image recipe; it runs as UID 10001 via docker --user, has no long-running process for HEALTHCHECK, and its pinned image identity must not change without republishing",
+      "created_at": "2026-11-15T11:16:31.976818Z"
+    },
+    {
+      "fingerprint": "1e2bbd3073de88bfa8b6263ed44266676301a8becf4a71e9f12e126806f2ef4b",
+      "rule_id": "IAC-354",
+      "file_path": "templates/verify.yml",
+      "severity": "low",
+      "reason": "Reviewed false positive: matches the explanatory GIT_STRATEGY none error text in templates/verify.yml, not a checkout setting",
+      "created_at": "2026-11-15T11:18:08.094907Z"
+    },
+    {
+      "fingerprint": "a8bb4d6d08aa80fc5842b6067b9f9423eb2e2b7da352a4a6a77c247c5671144d",
+      "rule_id": "SEC-080",
+      "file_path": ".github/warden/linux-test/run.sh",
+      "severity": "medium",
+      "reason": "Reviewed false positive: NSS_WRAPPER_PASSWD names a passwd file path, not a password",
+      "created_at": "2026-11-15T11:19:54.524115Z"
+    },
+    {
+      "fingerprint": "475735a6ba63337ebc9f4baadedfbdb6aa6d679e9e5835716893727a6b865fc6",
+      "rule_id": "SEC-161",
+      "file_path": "internal/cli/cmd_mcp_test.go",
+      "severity": "medium",
+      "reason": "Reviewed false positive: test fixtures (regex and a public key literal), no secret",
+      "created_at": "2026-11-15T11:24:26.42134Z"
+    },
+    {
+      "fingerprint": "2040acd685f3c978fd640f5960a192c66e2e8c7ff8235ba2af9c97fe8cc5ce9f",
+      "rule_id": "SEC-161",
+      "file_path": "scripts/gitlab_template_test.go",
+      "severity": "medium",
+      "reason": "Reviewed false positive: test fixtures (regex and a public key literal), no secret",
+      "created_at": "2026-11-15T11:24:26.42134Z"
+    },
+    {
+      "fingerprint": "949f59a34f6821ad9b49c82b96a2bf3be8ef7c0e7e343a9447b108ccd6c3fb83",
+      "rule_id": "SEC-162",
+      "file_path": "scripts/gitlab_template_test.go",
+      "severity": "medium",
+      "reason": "Reviewed false positive: test fixtures (regex and a public key literal), no secret",
+      "created_at": "2026-11-15T11:24:26.42134Z"
+    },
+    {
+      "fingerprint": "78b64c07825507cb1a89290f20296470c9189a0ce171f0dc5cc1681a75bb1c57",
+      "rule_id": "SLOP-001",
+      "file_path": "scripts/ci_report_test.py",
+      "severity": "low",
+      "reason": "Reviewed false positive: ci_report is the local scripts/ci_report.py module under test",
+      "created_at": "2026-11-15T11:26:56.681491Z"
+    },
+    {
+      "fingerprint": "e37e2faa5f7d812400d1323a31d22e93b710b881ea06f3b656d724454d47a8f4",
+      "rule_id": "IAC-314",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "low",
+      "created_at": "2026-07-02T07:38:12.199936Z"
+    },
+    {
+      "fingerprint": "4c75f16e0ed9ffa3d881e25acf808cc3369499a7d6903bec474c46e8708d405f",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/ci-shadow.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
+    },
+    {
+      "fingerprint": "4137c35d4ee8f0467dbcaf60b46eb22e93085d7bc68c43af94435928d3efc507",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/linux-test-contract.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
+    },
+    {
+      "fingerprint": "bd8e7ff52c9347a62d65ba0adabc321852601720aa77832909e6ee5ea948410f",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/linux-test-image.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
+    },
+    {
+      "fingerprint": "7d26a56621b2a32bf9959a8c814082f6886bfc2688997f7f9b1453aaf7ae7c31",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/linux-test-pilot.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
+    },
+    {
+      "fingerprint": "6f2bb29d0ccb0f164494e41e8e5e867d98ec14e748264180b19ba346937c6f35",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/native-container-reuse.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
+    },
+    {
+      "fingerprint": "5244801e8e6bdada3d005109af803c5818e33c630d08511b44e9e85677f0d7d0",
+      "rule_id": "IAC-314",
+      "file_path": ".github/actions/warden-reattest/action.yml",
+      "severity": "medium",
+      "reason": "Reviewed (nox 1.34 pin): IAC-314 composite action warden-reattest pushes refs/notes/warden and needs contents write by design; IAC-153 upload-artifact steps retain internal CI evidence, not release artifacts needing attestation",
+      "created_at": "2026-11-15T12:01:17.267705Z"
     }
   ]
 }
