@@ -203,7 +203,7 @@ jobs:
                  "goreleaser failed before publishing; fix that, then re-drive this workflow."
             exit 0
           fi
-          go install github.com/nox-hq/nox/cli@v0.8.1
+          go install github.com/nox-hq/nox/cli@v1.63.0
           mv "$(go env GOPATH)/bin/cli" "$(go env GOPATH)/bin/nox"
           mkdir -p release-artifacts
           # nox exits non-zero on findings, even baselined ones. SBOM generation
